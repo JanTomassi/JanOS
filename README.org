@@ -1,0 +1,28 @@
+* Jan OS
+This simple kernel is an exploration project that I am developing in
+my free time, the kernel is for x86 arch I do not know if I will ever move it
+to x86_64, the booting process is made with grub and the multiboot1
+specs.
+
+** Current Feature
+The kernel support logging on serial and VGA text mode there is a
+common interface *display* to select witch output stream to use, for
+input device only ps2 is supported, all standard x86 interrupt are
+mapped and as a default behavior they log there call. There is support
+for physical and virtual page allocation but is only 4KiB no 4MiB page
+and the implementation of kmalloc(memory allocator) can only handle
+allocation of [1, 4096] byte
+
+** Future Feature
+- [ ] Basic user space
+  - [ ] Context switching
+- [ ] Better GPA
+- [ ] Disk access
+  - [ ] ext2/4?
+  - [ ] FAT32
+- [ ] Multiprocessing
+  - [ ] Message passing
+  - [ ] Synchronization primitive
+- [ ] Video output
+  - [ ] Display custom shape
+  - [ ] Printing text as in VGA text mode
