@@ -81,11 +81,6 @@ bool map_page(void *physaddr, void *virtualaddr, uint16_t flags)
 
 	pd[pd_idx] |= flags & READ_WRITE_BIT;
 
-	if ((flags & PRESENT_BIT) && !(pt[pt_idx] & PRESENT_BIT))
-		pt[pt_idx] = (size_t)phy_mem_alloc(PAGE_SIZE);
-	else if (!(flags & PRESENT_BIT) && (pt[pt_idx] & PRESENT_BIT))
-		phy_mem_free((void *)(pt[pt_idx] & ~0xFFF));
-
 	pt[pt_idx] = ((size_t)physaddr) | (flags & 0xFFF);
 
 	invalidate(virtualaddr);
