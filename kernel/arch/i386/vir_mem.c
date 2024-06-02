@@ -378,13 +378,6 @@ static struct malloc_tag_entry *find_tag_to_free(void *ptr)
 			list_entry(it, struct malloc_tag_entry, list);
 
 		if (cur->ptr == ptr) {
-			kprintf("Found free page\n"
-				"   - ptr: %x | "
-				"page: %x | "
-				"size: %x | "
-				"used: %x\n",
-				cur->ptr, cur->page, cur->size, cur->used);
-
 			tag_to_free = cur;
 		}
 	}
