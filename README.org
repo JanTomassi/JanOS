@@ -51,7 +51,7 @@ and make a UNIX like root structure in sysroot
 
 ** Run
 *** ISO
-To get an ISO run the iso.sh and it will output a myos.iso on the
+To get an ISO run the iso.sh and it will output a JanOS.iso on the
 current directory.
 
 *** QEMU

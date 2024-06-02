@@ -6,12 +6,12 @@ mkdir -p isodir
 mkdir -p isodir/boot
 mkdir -p isodir/boot/grub
  
-cp sysroot/boot/myos.kernel isodir/boot/myos.kernel
+cp sysroot/boot/JanOS.kernel isodir/boot/JanOS.kernel
 cat > isodir/boot/grub/grub.cfg << EOF
 set timeout=1
 
-menuentry "myos" {
-	multiboot /boot/myos.kernel
+menuentry "JanOS" {
+	multiboot /boot/JanOS.kernel
 }
 EOF
-grub-mkrescue -o myos.iso isodir
+grub-mkrescue -o JanOS.iso isodir

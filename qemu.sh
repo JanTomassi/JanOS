@@ -18,7 +18,7 @@ while getopts "hd" args; do
 done
 
 if test "$is_debug" = true ; then
-	qemu-system-$(./target-triplet-to-arch.sh $HOST) -s -S -cdrom myos.iso
+	qemu-system-$(./target-triplet-to-arch.sh $HOST) -s -S -cdrom JanOS.iso
 else
-	qemu-system-$(./target-triplet-to-arch.sh $HOST)  -cdrom myos.iso
+	qemu-system-$(./target-triplet-to-arch.sh $HOST)  -cdrom JanOS.iso
 fi
