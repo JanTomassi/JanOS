@@ -463,6 +463,89 @@ void kfree(void *ptr)
 #endif
 }
 
+static struct malloc_tag_entry
+init_kmalloc_find_free_chunk(struct list_head *vmm_init_list)
+{
+	struct vmm_entry *free_block = nullptr;
+	list_for_each(vmm_init_list) {
+		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
+		if (cur->size >= PAGE_SIZE) {
+			free_block = cur;
+			break;
+		}
+	}
+
+	struct malloc_tag_entry *new_tags_ptr = free_block->ptr;
+	size_t new_tags_count = PAGE_SIZE / sizeof(struct malloc_tag_entry);
+
+	void *new_tags_phy_page = phy_mem_alloc(PAGE_SIZE);
+	map_page(new_tags_phy_page, new_tags_ptr, READ_WRITE_BIT | PRESENT_BIT);
+
+	free_block->ptr += PAGE_SIZE;
+	free_block->size -= PAGE_SIZE;
+
+	return (struct malloc_tag_entry){
+		.ptr = new_tags_ptr,
+		.page = new_tags_phy_page,
+		.size = PAGE_SIZE,
+		.used = 0,
+	};
+}
+
+void init_kmalloc(struct list_head *vmm_init_list)
+{
+	struct malloc_tag_entry tags_chunk =
+		init_kmalloc_find_free_chunk(vmm_init_list);
+
+	// Adding all the allocated tags to the chain
+	for (size_t i = 0;
+	     i < tags_chunk.size / sizeof(struct malloc_tag_entry); i++) {
+		struct malloc_tag_entry new_tag = { nullptr };
+		((struct malloc_tag_entry *)tags_chunk.ptr)[i] = new_tag;
+
+		list_add(&((struct malloc_tag_entry *)tags_chunk.ptr)[i].list,
+			 free_malloc_tags_list.prev);
+	}
+
+	// Get one unused tag
+	struct malloc_tag_entry *tag =
+		list_entry(list_pop(&free_malloc_tags_list),
+			   struct malloc_tag_entry, list);
+
+	// Copy the info about the tag chunk
+	*tag = tags_chunk;
+
+	// Add all the virtual memory mapping to the kmalloc known block
+	list_for_each(vmm_init_list) {
+		struct vmm_entry *vmm_cur =
+			list_entry(it, struct vmm_entry, list);
+
+		struct malloc_tag_entry *vmm_tag =
+			list_entry(list_pop(&free_malloc_tags_list),
+				   struct malloc_tag_entry, list);
+
+		vmm_tag->ptr = vmm_cur->ptr;
+		vmm_tag->page = nullptr;
+		vmm_tag->size = vmm_cur->size;
+		vmm_tag->used = 0;
+
+		list_add(&vmm_tag->list, malloc_tags_list.prev);
+		if (vmm_tag->ptr - PAGE_SIZE == tag->ptr)
+			list_add(&tag->list, vmm_tag->list.prev);
+	}
+
+#ifdef DEBUG_KMALLOC
+	kprintf("kmalloc state after init:\n");
+	size_t i = 0;
+	list_for_each(&malloc_tags_list) {
+		struct malloc_tag_entry *tag =
+			list_entry(it, struct malloc_tag_entry, list);
+		kprintf("%u) ptr: %x | size: %x | used: %x\n", i++, tag->ptr,
+			tag->size, tag->used);
+	}
+#endif
+}
+
 void init_vir_mem(multiboot_info_t *mbd)
 {
 	struct vmm_entry init_vmm_entry[PAGE_SIZE / sizeof(struct vmm_entry)];
@@ -555,69 +638,5 @@ void init_vir_mem(multiboot_info_t *mbd)
 
 	recreate_vir_mem(mbd->u.elf_sec);
 
-	/* alloc_malloc_tag */
-	struct vmm_entry *free_block = nullptr;
-	list_for_each(&vmm_free_list) {
-		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
-		if (cur->size >= PAGE_SIZE) {
-			free_block = cur;
-			break;
-		}
-	}
-
-	struct malloc_tag_entry *new_tag_ptr =
-		(struct malloc_tag_entry *)free_block->ptr;
-
-	void *new_tag_phy_page = phy_mem_alloc(PAGE_SIZE);
-	map_page(new_tag_phy_page, new_tag_ptr, READ_WRITE_BIT | PRESENT_BIT);
-
-	size_t new_tag_count = PAGE_SIZE / sizeof(struct malloc_tag_entry);
-
-	free_block->ptr += PAGE_SIZE;
-	free_block->size -= PAGE_SIZE;
-
-	for (size_t i = 0; i < new_tag_count; i++) {
-		struct malloc_tag_entry new_tag = { nullptr };
-		new_tag_ptr[i] = new_tag;
-
-		list_add(&new_tag_ptr[i].list, free_malloc_tags_list.prev);
-	}
-
-	struct malloc_tag_entry *tag =
-		list_entry(list_pop(&free_malloc_tags_list),
-			   struct malloc_tag_entry, list);
-
-	tag->ptr = new_tag_ptr;
-	tag->size = PAGE_SIZE;
-	tag->used = (PAGE_SIZE / sizeof(struct malloc_tag_entry)) *
-		    sizeof(struct malloc_tag_entry);
-	tag->page = new_tag_phy_page;
-
-	list_for_each(&vmm_free_list) {
-		struct vmm_entry *vmm_cur =
-			list_entry(it, struct vmm_entry, list);
-
-		struct malloc_tag_entry *vmm_tag =
-			list_entry(list_pop(&free_malloc_tags_list),
-				   struct malloc_tag_entry, list);
-
-		vmm_tag->ptr = vmm_cur->ptr;
-		vmm_tag->size = vmm_cur->size;
-		vmm_tag->used = 0;
-
-		list_add(&vmm_tag->list, malloc_tags_list.prev);
-		if (vmm_tag->ptr - PAGE_SIZE == tag->ptr)
-			list_add(&tag->list, vmm_tag->list.prev);
-	}
-
-#ifdef DEBUG_KMALLOC
-	kprintf("kmalloc state after init:\n");
-	size_t i = 0;
-	list_for_each(&malloc_tags_list) {
-		struct malloc_tag_entry *tag =
-			list_entry(it, struct malloc_tag_entry, list);
-		kprintf("%u) ptr: %x | size: %x | used: %x\n", i++, tag->ptr,
-			tag->size, tag->used);
-	}
-#endif
+	init_kmalloc(&vmm_free_list);
 }
