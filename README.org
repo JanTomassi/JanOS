@@ -26,3 +26,34 @@ allocation of [1, 4096] byte
 - [ ] Video output
   - [ ] Display custom shape
   - [ ] Printing text as in VGA text mode
+
+** Build
+*** Tools
+This tools are need to compile the building environment
+
+- bash
+- make
+- gcc
+- nasm
+- tar
+- xz
+
+Enter in the directory tools and execute the bash script get-tools.sh
+#+begin_src bash
+  cd tools && ./get-tools.sh
+#+end_src
+this will download and compile or the tools needed for development
+except for nams
+
+*** Project
+Running the build.sh script should be enough to build the kernel elf
+and make a UNIX like root structure in sysroot
+
+** Run
+*** ISO
+To get an ISO run the iso.sh and it will output a myos.iso on the
+current directory.
+
+*** QEMU
+If you want to use QEMU *(recommended)* run the qemu.sh script it will
+build create the iso and then run a temporary QEMU instance
