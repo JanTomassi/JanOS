@@ -356,15 +356,16 @@ void *kmalloc(size_t req_size)
 	free_chunk->size = free_chunk->used;
 	free_useless_tag(free_chunk);
 
-	// kprintf("Used malloc tags list\n");
-	// size_t i = 0;
-	// list_for_each(&malloc_tags_list) {
-	// 	struct malloc_tag_entry *tag =
-	// 		list_entry(it, struct malloc_tag_entry, list);
-	// 	kprintf("\033[1;32m%u) ptr: %x | page: %x | size: %x | used: %x\033[0m\n", i++,
-	// 		tag->ptr, tag->page, tag->size, tag->used);
-	// }
-
+#ifdef DEBUG_KMALLOC
+	size_t i = 0;
+	kprintf("kmalloc state after call:\n") list_for_each(&malloc_tags_list)
+	{
+		struct malloc_tag_entry *tag =
+			list_entry(it, struct malloc_tag_entry, list);
+		kprintf("%u) ptr: %x | page: %x | size: %x | used: %x\033[0m\n",
+			i++, tag->ptr, tag->page, tag->size, tag->used);
+	}
+#endif
 	return free_tag->ptr;
 }
 
@@ -457,14 +458,16 @@ void kfree(void *ptr)
 		}
 	}
 
-	// kprintf("Used malloc tags list\n");
-	// size_t i = 0;
-	// list_for_each(&malloc_tags_list) {
-	// 	struct malloc_tag_entry *tag =
-	// 		list_entry(it, struct malloc_tag_entry, list);
-	// 	kprintf("\033[1;31m%u) ptr: %x | page: %x | size: %x | used: %x\033[0m\n", i++,
-	// 		tag->ptr, tag->page, tag->size, tag->used);
-	// }
+#ifdef DEBUG_KMALLOC
+	size_t i = 0;
+	kprintf("kfree state after call:\n");
+	list_for_each(&malloc_tags_list) {
+		struct malloc_tag_entry *tag =
+			list_entry(it, struct malloc_tag_entry, list);
+		kprintf("%u) ptr: %x | page: %x | size: %x | used: %x\033[0m\n",
+			i++, tag->ptr, tag->page, tag->size, tag->used);
+	}
+#endif
 }
 
 void init_vir_mem(multiboot_info_t *mbd)
@@ -614,7 +617,8 @@ void init_vir_mem(multiboot_info_t *mbd)
 			list_add(&tag->list, vmm_tag->list.prev);
 	}
 
-	kprintf("Used malloc tags list\n");
+#ifdef DEBUG_KMALLOC
+	kprintf("kmalloc state after init:\n");
 	size_t i = 0;
 	list_for_each(&malloc_tags_list) {
 		struct malloc_tag_entry *tag =
@@ -622,4 +626,5 @@ void init_vir_mem(multiboot_info_t *mbd)
 		kprintf("%u) ptr: %x | size: %x | used: %x\n", i++, tag->ptr,
 			tag->size, tag->used);
 	}
+#endif
 }
