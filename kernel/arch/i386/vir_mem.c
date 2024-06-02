@@ -337,8 +337,12 @@ void *kmalloc(size_t req_size)
 
 		// Update the free_chunk with the new allocated chunk
 		free_chunk = free_tag;
-		// Get a new free tag
+		// Temporanialy rm free_chunk so the next function will not use it
+		list_rm(&free_chunk->list);
+
 		free_tag = get_free_malloc_tag();
+
+		list_add(&free_chunk->list, free_chunk->list.prev);
 	}
 
 	free_tag->ptr = free_chunk->ptr + free_chunk->used;
