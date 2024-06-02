@@ -3,3 +3,12 @@ tools/src
 
 locate.db
 TAGS
+
+isodir
+sysroot
+
+*.d
+*.o
+*.a
+
+JanOS.*
