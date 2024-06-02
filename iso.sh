@@ -8,17 +8,9 @@ mkdir -p isodir/boot/grub
  
 cp sysroot/boot/myos.kernel isodir/boot/myos.kernel
 cat > isodir/boot/grub/grub.cfg << EOF
-set gfxmode=640x480
-set gfxpayload=auto
-insmod gfxterm
-insmod vbe
 set timeout=1
 
-terminal_input console
-terminal_output gfxterm
-
 menuentry "myos" {
-    
 	multiboot /boot/myos.kernel
 }
 EOF
