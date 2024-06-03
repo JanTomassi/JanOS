@@ -55,6 +55,8 @@ DEFINE_IRQ(33)
 						     mod_key.caplock]);
 	else if (event.key_code == KEY_CODE_SPACE)
 		kprintf(" ");
+	else if (event.key_code == KEY_CODE_ENTER)
+		kprintf("\n");
 }
 
 static void update_mod_key(struct key_event event)
