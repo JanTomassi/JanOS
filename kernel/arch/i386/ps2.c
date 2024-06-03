@@ -62,7 +62,7 @@ struct key get_unicode(uint8_t scan_code){
 	
 }
 
-struct key_event scan_code1_to_key_code(uint8_t scan_code)
+struct key_event scan_code1_to_key_event(uint8_t scan_code)
 {
 	switch (scan_code) {
 	case 0x01: // escape pressed
