@@ -31,13 +31,8 @@ struct key_event {
 	enum key_code key_code;
 };
 
-static struct key_event prev_key_event;
-struct key_event scan_code1_to_key_code(uint8_t scan_code);
-
-struct key{
-	uint8_t len;
-	uint8_t point[];
-}
+static void update_mod_key(struct key_event event);
+static struct key_event scan_code1_to_key_event(uint8_t scan_code);
 
 DEFINE_IRQ(33)
 {
@@ -50,19 +45,52 @@ DEFINE_IRQ(33)
 		:
 		: "%al");
 
-	struct key_event event = scan_code1_to_key_code(scan_code);
+	struct key_event event = scan_code1_to_key_event(scan_code);
+	update_mod_key(event);
 	if (!event.pressed)
 		return;
-	else if (event.scan_code <
-		 sizeof(KEY_CODE_str) / sizeof(KEY_CODE_str[0]))
-		kprintf("%s", KEY_CODE_str[scan_code - 1]);
+	else if (event.key_code < KEY_CODE_LAST_PRINTABLE)
+		kprintf("%s", keysym[event.key_code][mod_key.left_shift ||
+						     mod_key.right_shift ||
+						     mod_key.caplock]);
+	else if (event.key_code == KEY_CODE_SPACE)
+		kprintf(" ");
 }
 
-struct key get_unicode(uint8_t scan_code){
-	
+static void update_mod_key(struct key_event event)
+{
+	switch (event.key_code) {
+	case KEY_CODE_LALT: // left alt pressed
+		mod_key.left_alt = event.pressed;
+		break;
+	case KEY_CODE_RALT: // right alt (or altGr) pressed
+		mod_key.right_alt = event.pressed;
+		break;
+	case KEY_CODE_LCTRL: // left control presse
+		mod_key.left_ctrl = event.pressed;
+		break;
+	case KEY_CODE_RCTRL: // right control pressed
+		mod_key.right_ctrl = event.pressed;
+		break;
+	case KEY_CODE_LGUI: // left GUI pressed
+	case KEY_CODE_RGUI: // right GUI pressed
+		mod_key.win = event.pressed;
+		break;
+	case KEY_CODE_LSHIFT: // left shift pressed
+		mod_key.left_shift = event.pressed;
+		break;
+	case KEY_CODE_RSHIFT: // right shift pressed
+		mod_key.right_shift = event.pressed;
+		break;
+	case KEY_CODE_CAPSLOCK: // CapsLock pressed
+		mod_key.caplock = event.pressed;
+		break;
+	default:
+		break;
+	}
 }
 
-struct key_event scan_code1_to_key_event(uint8_t scan_code)
+static struct key_event scan_code1_to_key_event(uint8_t scan_code)
 {
 	switch (scan_code) {
 	case 0x01: // escape pressed
