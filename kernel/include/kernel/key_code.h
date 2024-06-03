@@ -145,90 +145,53 @@ enum key_code {
 	KEY_CODE_NONE,
 };
 
-const char *KEY_CODE_str[] = {
-	"", // KEY_CODE_ESC
-	"1", // KEY_CODE_1
-	"2", // KEY_CODE_2
-	"3", // KEY_CODE_3
-	"4", // KEY_CODE_4
-	"5", // KEY_CODE_5
-	"6", // KEY_CODE_6
-	"7", // KEY_CODE_7
-	"8", // KEY_CODE_8
-	"9", // KEY_CODE_9
-	"0", // KEY_CODE_0
-	"-", // KEY_CODE_MINUS
-	"=", // KEY_CODE_EQ
-	"", // KEY_CODE_BACKSPACE
-	"\t", // KEY_CODE_TAB
-	"Q", // KEY_CODE_Q
-	"W", // KEY_CODE_W
-	"E", // KEY_CODE_E
-	"R", // KEY_CODE_R
-	"T", // KEY_CODE_T
-	"Y", // KEY_CODE_Y
-	"U", // KEY_CODE_U
-	"I", // KEY_CODE_I
-	"O", // KEY_CODE_O
-	"P", // KEY_CODE_P
-	"[", // KEY_CODE_LSBRACKET
-	"]", // KEY_CODE_RSBRACKET
-	"\n", // KEY_CODE_ENTER
-	"", // KEY_CODE_LCTRL
-	"A", // KEY_CODE_A
-	"S", // KEY_CODE_S
-	"D", // KEY_CODE_D
-	"F", // KEY_CODE_F
-	"G", // KEY_CODE_G
-	"H", // KEY_CODE_H
-	"J", // KEY_CODE_J
-	"K", // KEY_CODE_K
-	"L", // KEY_CODE_L
-	";", // KEY_CODE_SEMICOLON
-	"'", // KEY_CODE_SQUOTE
-	"`", // KEY_CODE_BACKTICK
-	"", // KEY_CODE_LSHIFT
-	"\\", // KEY_CODE_BACKSLASH
-	"Z", // KEY_CODE_Z
-	"X", // KEY_CODE_X
-	"C", // KEY_CODE_C
-	"V", // KEY_CODE_V
-	"B", // KEY_CODE_B
-	"N", // KEY_CODE_N
-	"M", // KEY_CODE_M
-	",", // KEY_CODE_COMMA
-	".", // KEY_CODE_POINT
-	"/", // KEY_CODE_SLASH
-	"", // KEY_CODE_RSHIFT
-	"*", // KEY_CODE_KEYPAD_STAR
-	"", // KEY_CODE_LALT
-	" ", // KEY_CODE_SPACE
-	"", // KEY_CODE_CAPSLOCK
-	"F1", // KEY_CODE_F1
-	"F2", // KEY_CODE_F2
-	"F3", // KEY_CODE_F3
-	"F4", // KEY_CODE_F4
-	"F5", // KEY_CODE_F5
-	"F6", // KEY_CODE_F6
-	"F7", // KEY_CODE_F7
-	"F8", // KEY_CODE_F8
-	"F9", // KEY_CODE_F9
-	"F10", // KEY_CODE_F10
-	"", // KEY_CODE_NUMBERLOCK
-	"", // KEY_CODE_SCROLLLOCK
-	"KEYPAD_7", // KEY_CODE_KEYPAD_7
-	"KEYPAD_8", // KEY_CODE_KEYPAD_8
-	"KEYPAD_9", // KEY_CODE_KEYPAD_9
-	"KEYPAD_MINUS", // KEY_CODE_KEYPAD_MINUS
-	"KEYPAD_4", // KEY_CODE_KEYPAD_4
-	"KEYPAD_5", // KEY_CODE_KEYPAD_5
-	"KEYPAD_6", // KEY_CODE_KEYPAD_6
-	"KEYPAD_PLUS", // KEY_CODE_KEYPAD_PLUS
-	"KEYPAD_1", // KEY_CODE_KEYPAD_1
-	"KEYPAD_2", // KEY_CODE_KEYPAD_2
-	"KEYPAD_3", // KEY_CODE_KEYPAD_3
-	"KEYPAD_0", // KEY_CODE_KEYPAD_0
-	"KEYPAD_POINT", // KEY_CODE_KEYPAD_POINT
-	"F11", // KEY_CODE_F11
-	"F12" // KEY_CODE_F12
+const char *keysym[KEY_CODE_LAST_PRINTABLE][2] = {
+	{ "0", ")" }, // 0 pressed
+	{ "1", "!" }, // 1 pressed
+	{ "2", "@" }, // 2 pressed
+	{ "3", "#" }, // 3 pressed
+	{ "4", "$" }, // 4 pressed
+	{ "5", "%" }, // 5 pressed
+	{ "6", "^" }, // 6 pressed
+	{ "7", "&" }, // 7 pressed
+	{ "8", "*" }, // 8 pressed
+	{ "9", "(" }, // 9 pressed
+	{ "a", "A" }, // A pressed
+	{ "b", "B" }, // B pressed
+	{ "c", "C" }, // C pressed
+	{ "d", "D" }, // D pressed
+	{ "e", "E" }, // E pressed
+	{ "f", "F" }, // F pressed
+	{ "g", "G" }, // G pressed
+	{ "h", "H" }, // H pressed
+	{ "i", "I" }, // I pressed
+	{ "j", "J" }, // J pressed
+	{ "k", "K" }, // K pressed
+	{ "l", "L" }, // L pressed
+	{ "m", "M" }, // M pressed
+	{ "n", "N" }, // N pressed
+	{ "o", "O" }, // O pressed
+	{ "p", "P" }, // P pressed
+	{ "q", "Q" }, // Q pressed
+	{ "r", "R" }, // R pressed
+	{ "s", "S" }, // S pressed
+	{ "t", "T" }, // T pressed
+	{ "u", "U" }, // U pressed
+	{ "v", "V" }, // V pressed
+	{ "w", "W" }, // W pressed
+	{ "x", "X" }, // X pressed
+	{ "y", "Y" }, // Y pressed
+	{ "z", "Z" }, // Z pressed
+
+	{ "`", "~" }, // ` (back tick) pressed
+	{ "-", "_" }, // - pressed
+	{ "=", "+" }, // = pressed
+	{ "[", "{" }, // [ pressed
+	{ "]", "}" }, // ] pressed
+	{ "\\", "|" }, // \ pressed
+	{ ";", ":" }, // ; pressed
+	{ "\'", "\"" }, // ' (single quote) pressed
+	{ ",", "<" }, // , pressed
+	{ ".", ">" }, // . pressed
+	{ "/", "?" }, // / pressed
 };
