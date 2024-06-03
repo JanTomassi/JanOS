@@ -126,7 +126,7 @@ enum key_code {
 	KEY_CODE_Y, // Y pressed
 	KEY_CODE_Z, // Z pressed
 	KEY_CODE_ESC, // ESC pressed
-	KEY_CODE_NOTDEF = 0, // undefined
+	KEY_CODE_NONE = 0, // undefined
 };
 
 const char *KEY_CODE_str[] = {
