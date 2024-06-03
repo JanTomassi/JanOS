@@ -35,12 +35,6 @@ struct key_event {
 static struct key_event prev_key_event;
 struct key_event scan_code1_to_key_code(uint8_t scan_code);
 
-struct interrupt_frame {
-	uint32_t ip;
-	uint32_t cs;
-	uint32_t flags;
-};
-
 DEFINE_IRQ(33)
 {
 	uint8_t scan_code;
