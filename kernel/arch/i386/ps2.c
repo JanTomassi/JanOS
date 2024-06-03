@@ -33,7 +33,7 @@ struct key_event {
 };
 
 static struct key_event prev_key_event;
-struct key_event scan_code1_to_key_code_US_QWERTY(uint8_t scan_code);
+struct key_event scan_code1_to_key_code(uint8_t scan_code);
 
 struct interrupt_frame {
 	uint32_t ip;
@@ -52,7 +52,7 @@ DEFINE_IRQ(33)
 		:
 		: "%al");
 
-	struct key_event event = scan_code1_to_key_code_US_QWERTY(scan_code);
+	struct key_event event = scan_code1_to_key_code(scan_code);
 	if (!event.pressed)
 		return;
 	else if (event.scan_code <
@@ -60,7 +60,7 @@ DEFINE_IRQ(33)
 		kprintf("%s", KEY_CODE_str[scan_code - 1]);
 }
 
-struct key_event scan_code1_to_key_code_US_QWERTY(uint8_t scan_code)
+struct key_event scan_code1_to_key_code(uint8_t scan_code)
 {
 	switch (scan_code) {
 	case 0x01: // escape pressed
