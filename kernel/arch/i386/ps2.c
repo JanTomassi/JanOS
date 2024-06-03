@@ -29,7 +29,6 @@ struct key_event {
 	bool pressed;
 	uint8_t scan_code;
 	enum key_code key_code;
-	struct active_mod_key mod_key;
 };
 
 static struct key_event prev_key_event;
