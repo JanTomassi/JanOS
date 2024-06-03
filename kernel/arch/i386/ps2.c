@@ -34,6 +34,11 @@ struct key_event {
 static struct key_event prev_key_event;
 struct key_event scan_code1_to_key_code(uint8_t scan_code);
 
+struct key{
+	uint8_t len;
+	uint8_t point[];
+}
+
 DEFINE_IRQ(33)
 {
 	uint8_t scan_code;
@@ -51,6 +56,10 @@ DEFINE_IRQ(33)
 	else if (event.scan_code <
 		 sizeof(KEY_CODE_str) / sizeof(KEY_CODE_str[0]))
 		kprintf("%s", KEY_CODE_str[scan_code - 1]);
+}
+
+struct key get_unicode(uint8_t scan_code){
+	
 }
 
 struct key_event scan_code1_to_key_code(uint8_t scan_code)
