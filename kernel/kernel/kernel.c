@@ -128,7 +128,7 @@ void kernel_main(multiboot_info_t *mbd, unsigned int magic)
 	kprintf("IDT initialized\n");
 
 	display_t tty_dpy = tty_initialize(
-		mbd->framebuffer_addr, mbd->framebuffer_pitch,
+		/* mbd->framebuffer_addr */ 0, mbd->framebuffer_pitch,
 		mbd->framebuffer_width, mbd->framebuffer_height,
 		mbd->framebuffer_bpp, mbd->framebuffer_type == 1);
 
@@ -152,23 +152,23 @@ void kernel_main(multiboot_info_t *mbd, unsigned int magic)
 	init_vir_mem(mbd);
 
 	for (size_t i = 0;
-	     i < ((framebuffer_pitch * framebuffer_height) / 4096); i++)
+	     i <= ((framebuffer_pitch * framebuffer_height) / 4096); i++)
 		map_page((void *)phy_addr_framebuffer + (i * 4096),
 			 (void *)(i * 4096),
 			 VMM_PAGE_FLAG_PRESENT_BIT |
 				 VMM_PAGE_FLAG_READ_WRITE_BIT);
 
-	for (size_t i = 0; i < framebuffer_height; i++)
-		for (size_t j = 0; j < framebuffer_width; j++)
-			((uint32_t *)(0))[j + (i * framebuffer_width)] =
-				(0x00 << 24) |
-				((uint8_t)(i * (255.0 / 800))) << 16 |
-				((uint8_t)(j * (255.0 / 1280))) << 8 | 0x00;
+	/* for (size_t i = 0; i < framebuffer_height; i++) */
+	/* 	for (size_t j = 0; j < framebuffer_width; j++) */
+	/* 		((uint32_t *)(0))[j + (i * framebuffer_width)] = */
+	/* 			(0x00 << 24) | */
+	/* 			((uint8_t)(i * (255.0 / 800))) << 16 | */
+	/* 			((uint8_t)(j * (255.0 / 1280))) << 8 | 0x00; */
 
-	/* tty_reset(); */
+	tty_reset();
 
 	/* Entering graphical mode */
-	/* display_setcurrent(display_register(tty_dpy)); */
+	display_setcurrent(display_register(tty_dpy));
 }
 
 size_t GLOBAL_TICK = 0;

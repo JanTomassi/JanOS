@@ -33,7 +33,7 @@ section .multiboot
 	dd 0		; load_end_addr
 	dd 0		; bss_edn_addr
 	dd 0		; entry_addr
-	dd 0		; mode_type
+	dd 1		; mode_type
 	dd 0		; width
 	dd 0		; height
 	dd 0		; depth
