@@ -10,7 +10,7 @@ struct active_mod_key {
 	bool left_alt : 1;
 	bool left_ctrl : 1;
 	bool left_shift : 1;
-	bool left_win : 1;
+	bool win : 1;
 	bool right_alt : 1;
 	bool right_ctrl : 1;
 	bool right_shift : 1;
@@ -19,7 +19,7 @@ struct active_mod_key {
 	.left_alt = false,
 	.left_ctrl = false,
 	.left_shift = false,
-	.left_win = false,
+	.win = false,
 	.right_alt = false,
 	.right_ctrl = false,
 	.right_shift = false,
