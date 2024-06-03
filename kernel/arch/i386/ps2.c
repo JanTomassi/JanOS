@@ -1089,7 +1089,7 @@ struct key_event scan_code1_to_key_code(uint8_t scan_code)
 		return (struct key_event){
 			.pressed = 0,
 			.scan_code = 0,
-			.key_code = KEY_CODE_NOTDEF,
+			.key_code = KEY_CODE_NONE,
 		};
 	}
 	/**
