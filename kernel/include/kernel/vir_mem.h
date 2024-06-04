@@ -54,7 +54,10 @@ struct vmm_entry {
 void *get_physaddr(void *virtualaddr);
 
 void init_vir_mem(multiboot_info_t *mbd);
-bool map_page(void *physaddr, void *virtualaddr, uint16_t flags);
+bool map_pages(fatptr_t *physaddr, struct vmm_entry *virt_mem);
+
+struct vmm_entry *vir_mem_alloc(size_t req_size, uint8_t flags);
+void vir_mem_free(void *ptr);
 
 void *kmalloc(size_t);
 void *kcalloc(size_t, size_t);
