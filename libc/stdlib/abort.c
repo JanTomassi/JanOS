@@ -1,5 +1,7 @@
 #include <stdlib.h>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wanalyzer-infinite-loop"
 __attribute__((__noreturn__)) void abort(void)
 {
 #if defined(__is_libk)
@@ -14,3 +16,4 @@ __attribute__((__noreturn__)) void abort(void)
 	}
 	__builtin_unreachable();
 }
+#pragma GCC diagnostic pop
