@@ -55,7 +55,6 @@ void *get_physaddr(void *virtualaddr);
 
 void init_vir_mem(multiboot_info_t *mbd);
 bool map_page(void *physaddr, void *virtualaddr, uint16_t flags);
-bool unmap_page(void *physaddr, void *virtualaddr, unsigned int flags);
 
 void *kmalloc(size_t);
 void *kcalloc(size_t, size_t);
