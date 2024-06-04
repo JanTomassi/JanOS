@@ -82,7 +82,8 @@ void phy_mem_add_region(size_t addr, size_t len)
 	phy_mem_set_region(addr, len, false);
 }
 
-__attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc(size_t size)
+__attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t
+phy_mem_alloc(size_t size)
 {
 	const size_t req_size = size + (size % BLOCK_SIZE);
 	const size_t req_block = req_size / BLOCK_SIZE;
@@ -90,7 +91,7 @@ __attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc(size_t size
 	size_t end_point = start_point;
 
 	if (phy_mem_get_free_blocks() < req_block)
-		return (fatptr_t){.ptr=0,.len=0};
+		return (fatptr_t){ .ptr = 0, .len = 0 };
 
 	for (size_t i = 0; i < ALLOC_BITMAP * 32; i++) {
 		const uint32_t block = i / 32;
@@ -137,7 +138,8 @@ __attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc(size_t size
 			break;
 	}
 
-	return (fatptr_t){.ptr=(void*)(start_point*BLOCK_SIZE),.len=req_size};
+	return (fatptr_t){ .ptr = (void *)(start_point * BLOCK_SIZE),
+			   .len = req_size };
 }
 
 __attribute__((hot)) void phy_mem_free(fatptr_t addr_ptr)
