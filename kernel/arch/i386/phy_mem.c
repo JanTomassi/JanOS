@@ -82,7 +82,7 @@ void phy_mem_add_region(size_t addr, size_t len)
 	phy_mem_set_region(addr, len, false);
 }
 
-__attribute__((hot, malloc)) void *phy_mem_alloc(size_t size)
+__attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc(size_t size)
 {
 	const size_t req_size = size + (size % BLOCK_SIZE);
 	const size_t req_block = req_size / BLOCK_SIZE;
@@ -90,7 +90,7 @@ __attribute__((hot, malloc)) void *phy_mem_alloc(size_t size)
 	size_t end_point = start_point;
 
 	if (phy_mem_get_free_blocks() < req_block)
-		return NULL;
+		return (fatptr_t){.ptr=0,.len=0};
 
 	for (size_t i = 0; i < ALLOC_BITMAP * 32; i++) {
 		const uint32_t block = i / 32;
@@ -137,16 +137,16 @@ __attribute__((hot, malloc)) void *phy_mem_alloc(size_t size)
 			break;
 	}
 
-	return (void *)(start_point * BLOCK_SIZE);
+	return (fatptr_t){.ptr=(void*)(start_point*BLOCK_SIZE),.len=req_size};
 }
 
-__attribute__((hot)) void phy_mem_free(void *addr_ptr)
+__attribute__((hot)) void phy_mem_free(fatptr_t addr_ptr)
 {
 	list_for_each(&booking_block_list) {
 		struct booking_block *cur_block =
 			list_entry(it, struct booking_block, list);
 		for (size_t i = 0; i < BOOKING_COUNT; i++) {
-			if (cur_block->allocs[i].ptr == addr_ptr) {
+			if (cur_block->allocs[i].ptr == addr_ptr.ptr) {
 				phy_mem_add_region(
 					(size_t)cur_block->allocs[i].ptr,
 					cur_block->allocs[i].len);
