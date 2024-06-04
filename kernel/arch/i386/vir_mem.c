@@ -4,29 +4,7 @@
 #include <string.h>
 #include <list.h>
 
-#define PRESENT_BIT (1 << 0)
-#define READ_WRITE_BIT (1 << 1)
-#define USER_SUPER_BIT (1 << 2)
-#define WRITE_THROUGH_BIT (1 << 3)
-#define CACHE_DISABLE_BIT (1 << 4)
-#define ACCESSED_DISABLE_BIT (1 << 5)
-#define DIRTY (1 << 6)
-#define PAGE_SIZE_BIT (1 << 7)
-#define GLOBAL_BIT (1 << 8)
-#define PAGE_ATTRIBUTE_BIT (1 << 12)
-#define RESERVED_BIT (1 << 21)
-
-#define AVAILABLE_4K_BIT ((1 << 6) | (0b1111 << 8))
-#define LOCATION_4K_BITS (0xfffff << 12)
-
-#define LOCATION_4M_LOW_BITS (0x3ff << 22)
-#define LOCATION_4M_HIGHT_BITS (0xff << 13)
-
 #define page_directory_addr (0xFFFFF000)
-#define PAGE_SIZE (4096)
-#define round_up_to_page(x) ((x) + (-(x) % PAGE_SIZE))
-#define round_down_to_page(x) \
-	(((x)-PAGE_SIZE - 1) + (-((x)-PAGE_SIZE - 1) % PAGE_SIZE))
 
 extern size_t HIGHER_HALF;
 
