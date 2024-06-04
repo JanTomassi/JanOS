@@ -8,13 +8,6 @@
 
 extern size_t HIGHER_HALF;
 
-struct vmm_entry {
-	void *ptr;
-	size_t size;
-	uint16_t flags;
-	struct list_head list;
-};
-
 static void invalidate(void *addr)
 {
 	__asm__ volatile("invlpg (%0)" : : "r"((size_t)addr) : "memory");

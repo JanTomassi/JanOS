@@ -2,7 +2,9 @@
 #include <kernel/multiboot.h>
 
 #include <stddef.h>
+#include <stdlib.h>
 #include <stdint.h>
+#include <list.h>
 
 #define VMM_ENTRY_PRESENT_BIT (1 << 0)
 #define VMM_ENTRY_READ_WRITE_BIT (1 << 1)
@@ -41,6 +43,15 @@ enum VMM_PAGE_FLAGS {
 	VMM_PAGE_FLAG_GLOBAL_BIT = (1 << 8),
 	VMM_PAGE_FLAG_PAGE_ATTRIBUTE_BIT = (1 << 12)
 };
+
+struct vmm_entry {
+	void *ptr;
+	size_t size;
+	uint16_t flags;
+	struct list_head list;
+};
+
+void *get_physaddr(void *virtualaddr);
 
 void init_vir_mem(multiboot_info_t *mbd);
 bool map_page(void *physaddr, void *virtualaddr, uint16_t flags);
