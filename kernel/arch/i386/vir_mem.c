@@ -39,10 +39,11 @@ void *get_physaddr(void *virtualaddr)
 
 bool map_pages(fatptr_t *phy_mem, struct vmm_entry *virt_mem)
 {
-	if(phy_mem->len != virt_mem->size)
+	if (phy_mem->len != virt_mem->size)
 		panic("Physical and Virtual size not equal:\n"
 		      " - phy_size: %x\n"
-		      " - virt_size %x\n", phy_mem->len, virt_mem->size);
+		      " - virt_size %x\n",
+		      phy_mem->len, virt_mem->size);
 
 	for (void *virt_addr = virt_mem->ptr, *phy_addr = phy_mem->ptr;
 	     virt_addr < virt_mem->ptr + virt_mem->size;
@@ -118,8 +119,8 @@ static void recreate_vir_mem(multiboot_elf_section_header_table_t elf)
 			.ptr = (void *)elf_s,
 			.size = elf_e - elf_s,
 			.flags = (elf_sec[i].sh_flags & 0x1) *
-			VMM_ENTRY_READ_WRITE_BIT |
-			VMM_ENTRY_PRESENT_BIT,
+					 VMM_ENTRY_READ_WRITE_BIT |
+				 VMM_ENTRY_PRESENT_BIT,
 		};
 		RESET_LIST_ITEM(&entry.list);
 
@@ -135,16 +136,16 @@ static void recreate_vir_mem(multiboot_elf_section_header_table_t elf)
 	 */
 	fatptr_t pd = phy_mem_alloc(PAGE_SIZE);
 	struct vmm_entry tmp_virt = (struct vmm_entry){
-		.ptr = (void*)0x1000,
+		.ptr = (void *)0x1000,
 		.size = PAGE_SIZE,
-		.flags = VMM_ENTRY_PRESENT_BIT |
-		VMM_ENTRY_READ_WRITE_BIT,
+		.flags = VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT,
 	};
 
 	map_pages(&pd, &tmp_virt);
 	memset(tmp_virt.ptr, 0, tmp_virt.size);
-	((uint32_t *)tmp_virt.ptr)[1023] = (size_t)pd.ptr | VMM_ENTRY_PRESENT_BIT |
-		VMM_ENTRY_READ_WRITE_BIT;
+	((uint32_t *)tmp_virt.ptr)[1023] = (size_t)pd.ptr |
+					   VMM_ENTRY_PRESENT_BIT |
+					   VMM_ENTRY_READ_WRITE_BIT;
 
 	list_for_each(&vmm_used_list) {
 		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
@@ -163,23 +164,34 @@ static void recreate_vir_mem(multiboot_elf_section_header_table_t elf)
 			size_t *px = (size_t *)pd.ptr;
 
 			if ((px[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0) {
-				px[pd_idx] = (size_t)phy_mem_alloc(PAGE_SIZE).ptr;
+				px[pd_idx] =
+					(size_t)phy_mem_alloc(PAGE_SIZE).ptr;
 
 				px[pd_idx] |= 1;
 				px[pd_idx] |= cur->flags &
-					VMM_ENTRY_READ_WRITE_BIT;
+					      VMM_ENTRY_READ_WRITE_BIT;
 
-				map_pages(&(fatptr_t){.ptr=(void*)(px[pd_idx] & ~0xfff), .len=PAGE_SIZE}, &tmp_virt);
+				map_pages(
+					&(fatptr_t){
+						.ptr = (void *)(px[pd_idx] &
+								~0xfff),
+						.len = PAGE_SIZE },
+					&tmp_virt);
 				memset((void *)0x1000, 0, PAGE_SIZE);
 			} else {
 				px[pd_idx] |= cur->flags &
-					VMM_ENTRY_READ_WRITE_BIT;
+					      VMM_ENTRY_READ_WRITE_BIT;
 
-				map_pages(&(fatptr_t){.ptr=(void*)(px[pd_idx] & ~0xfff), .len=PAGE_SIZE}, &tmp_virt);
+				map_pages(
+					&(fatptr_t){
+						.ptr = (void *)(px[pd_idx] &
+								~0xfff),
+						.len = PAGE_SIZE },
+					&tmp_virt);
 			}
 
 			px[pt_idx] = ((size_t)get_physaddr((void *)virt_addr)) |
-				(cur->flags & 0xFFF);
+				     (cur->flags & 0xFFF);
 		}
 	}
 
@@ -188,17 +200,20 @@ static void recreate_vir_mem(multiboot_elf_section_header_table_t elf)
 
 	__asm__ volatile("mov %0, %%cr3" : : "r"(pd.ptr) : "memory");
 
-	map_pages(&(fatptr_t){.ptr=old_pd_loc, .len=PAGE_SIZE}, &tmp_virt);
+	map_pages(&(fatptr_t){ .ptr = old_pd_loc, .len = PAGE_SIZE },
+		  &tmp_virt);
 
 	memcpy((void *)0x1000, (void *)0xfffff000, PAGE_SIZE);
 
-	((uint32_t *)0x1000)[1023] = (size_t)old_pd_loc | VMM_ENTRY_PRESENT_BIT |
-		VMM_ENTRY_READ_WRITE_BIT;
+	((uint32_t *)0x1000)[1023] = (size_t)old_pd_loc |
+				     VMM_ENTRY_PRESENT_BIT |
+				     VMM_ENTRY_READ_WRITE_BIT;
 
 	__asm__ volatile("mov %0, %%cr3" : : "r"(old_pd_loc) : "memory");
 
 	tmp_virt.flags = 0;
-	map_pages(&(fatptr_t){.ptr=old_pd_loc, .len=PAGE_SIZE}, &tmp_virt);
+	map_pages(&(fatptr_t){ .ptr = old_pd_loc, .len = PAGE_SIZE },
+		  &tmp_virt);
 
 	phy_mem_free(pd);
 }
