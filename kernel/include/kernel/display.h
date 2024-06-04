@@ -22,13 +22,16 @@ typedef struct {
 			__FILE__, __LINE__, __func__);                    \
 		kprintf(__VA_ARGS__);                                     \
 	}
-#define BUG(...)                                                            \
-	{                                                                   \
-		kprintf("\n\n*** KERNEL BUG*** in %s:%d in function %s:\n", \
-			__FILE__, __LINE__, __func__);                      \
-		kprintf(__VA_ARGS__);                                       \
-		while (1)                                                   \
-			;                                                   \
+#define BUG(...)                                                                \
+	{                                                                       \
+		kprintf("\n\n*** KERNEL BUG*** in %s:%d in function %s:\n",     \
+			__FILE__, __LINE__, __func__);                          \
+		kprintf(__VA_ARGS__);                                           \
+		_Pragma("GCC diagnostic push");                                 \
+		_Pragma("GCC diagnostic ignored \"-Wanalyzer-infinite-loop\""); \
+		while (1)                                                       \
+			;                                                       \
+		_Pragma("GCC diagnostic pop");                                  \
 	}
 #define panic(...)                                                       \
 	{                                                                \
