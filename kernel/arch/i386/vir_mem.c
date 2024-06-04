@@ -249,17 +249,17 @@ static void debug_vmm_list(void)
 	}
 }
 
-static struct vmm_entry *
+static struct list_head *
 vir_mem_find_prev_used_chunk(struct vmm_entry *to_alloc)
 {
-	struct vmm_entry *next_chunk = nullptr;
+	struct list_head *next_chunk = &vmm_used_list;
 
 	list_for_each(&vmm_used_list) {
 		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
 
-		if (cur->ptr > to_alloc->ptr &&
-		    (next_chunk == nullptr || next_chunk->ptr < cur->ptr))
-			next_chunk = cur;
+		if (cur->ptr < to_alloc->ptr &&
+		    (next_chunk == &vmm_used_list || cur->ptr > list_entry(next_chunk, struct vmm_entry, list)->ptr))
+			next_chunk = &cur->list;
 	}
 	return next_chunk;
 }
@@ -297,7 +297,7 @@ struct vmm_entry *vir_mem_alloc(size_t req_size, uint8_t flags)
 	free_chunk->ptr += req_size;
 	free_chunk->size -= req_size;
 
-	list_add(&tag->list, free_chunk->list.prev);
+	list_add(&tag->list, vir_mem_find_prev_used_chunk(tag)->prev);
 
 	debug_vmm_list();
 
