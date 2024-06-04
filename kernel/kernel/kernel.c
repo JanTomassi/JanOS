@@ -127,11 +127,6 @@ void kernel_main(multiboot_info_t *mbd, unsigned int magic)
 	idt_init();
 	kprintf("IDT initialized\n");
 
-	display_t tty_dpy = tty_initialize(
-		/* mbd->framebuffer_addr */ 0, mbd->framebuffer_pitch,
-		mbd->framebuffer_width, mbd->framebuffer_height,
-		mbd->framebuffer_bpp, mbd->framebuffer_type == 1);
-
 	section_divisor("Screen stats:\n");
 	kprintf("    - WIDTH: %d\n", mbd->framebuffer_width);
 	kprintf("    - HEIGHT: %d\n", mbd->framebuffer_height);
@@ -141,29 +136,31 @@ void kernel_main(multiboot_info_t *mbd, unsigned int magic)
 	setup_phy_mem(mbd);
 	phy_memory_test();
 
-	size_t phy_addr_framebuffer = mbd->framebuffer_addr;
 	size_t framebuffer_width = mbd->framebuffer_width;
 	size_t framebuffer_height = mbd->framebuffer_height;
 	size_t framebuffer_pitch = mbd->framebuffer_pitch;
+	size_t framebuffer_bpp = mbd->framebuffer_bpp;
+	size_t framebuffer_type = mbd->framebuffer_type;
 	size_t framebuffer_size =
 		mbd->framebuffer_pitch * mbd->framebuffer_height;
+	fatptr_t framebuffer_phy = (fatptr_t){
+		.ptr = (void *)mbd->framebuffer_addr,
+		.len = round_up_to_page(framebuffer_size),
+	};
 
 	section_divisor("Virtual memory init:\n");
 	init_vir_mem(mbd);
 
-	for (size_t i = 0;
-	     i <= ((framebuffer_pitch * framebuffer_height) / 4096); i++)
-		map_page((void *)phy_addr_framebuffer + (i * 4096),
-			 (void *)(i * 4096),
-			 VMM_PAGE_FLAG_PRESENT_BIT |
-				 VMM_PAGE_FLAG_READ_WRITE_BIT);
+	struct vmm_entry *framebuffer_virt = vir_mem_alloc(
+		round_up_to_page(framebuffer_size),
+		VMM_PAGE_FLAG_PRESENT_BIT | VMM_PAGE_FLAG_READ_WRITE_BIT);
 
-	/* for (size_t i = 0; i < framebuffer_height; i++) */
-	/* 	for (size_t j = 0; j < framebuffer_width; j++) */
-	/* 		((uint32_t *)(0))[j + (i * framebuffer_width)] = */
-	/* 			(0x00 << 24) | */
-	/* 			((uint8_t)(i * (255.0 / 800))) << 16 | */
-	/* 			((uint8_t)(j * (255.0 / 1280))) << 8 | 0x00; */
+	map_pages(&framebuffer_phy, framebuffer_virt);
+
+	display_t tty_dpy = tty_initialize((size_t)framebuffer_virt->ptr,
+					   framebuffer_pitch, framebuffer_width,
+					   framebuffer_height, framebuffer_bpp,
+					   framebuffer_type == 1);
 
 	tty_reset();
 
