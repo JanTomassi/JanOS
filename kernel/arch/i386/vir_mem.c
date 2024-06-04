@@ -22,46 +22,56 @@ void *get_physaddr(void *virtualaddr)
 	size_t *pd = (size_t *)page_directory_addr;
 
 	// No mapping in this range
-	if (!(pd[pd_idx] & PRESENT_BIT))
+	if (!(pd[pd_idx] & VMM_ENTRY_PRESENT_BIT))
 		return nullptr;
-	else if ((pd[pd_idx] & PAGE_SIZE_BIT))
-		return (void *)((pd[pd_idx] & LOCATION_4M_LOW_BITS) +
-				((size_t)virtualaddr & ~LOCATION_4M_LOW_BITS));
+	else if ((pd[pd_idx] & VMM_ENTRY_PAGE_SIZE_BIT))
+		return (void *)((pd[pd_idx] & VMM_ENTRY_LOCATION_4M_LOW_BITS) +
+				((size_t)virtualaddr &
+				 ~VMM_ENTRY_LOCATION_4M_LOW_BITS));
 
 	size_t *pt = ((size_t *)0xFFC00000) + (0x400 * pd_idx);
-	if ((pt[pt_idx] & PRESENT_BIT) == 0)
+	if ((pt[pt_idx] & VMM_ENTRY_PRESENT_BIT) == 0)
 		return nullptr;
 
-	return (void *)((pt[pt_idx] & LOCATION_4K_BITS) +
+	return (void *)((pt[pt_idx] & VMM_ENTRY_LOCATION_4K_BITS) +
 			((size_t)virtualaddr & 0xFFF));
 }
 
-bool map_page(void *physaddr, void *virtualaddr, uint16_t flags)
+bool map_pages(fatptr_t *phy_mem, struct vmm_entry *virt_mem)
 {
-	size_t pd_idx = (size_t)virtualaddr >> 22;
-	size_t pt_idx = (size_t)virtualaddr >> 12 & 0x03FF;
+	if(phy_mem->len != virt_mem->size)
+		panic("Physical and Virtual size not equal:\n"
+		      " - phy_size: %x\n"
+		      " - virt_size %x\n", phy_mem->len, virt_mem->size);
 
-	size_t *pd = (size_t *)0xFFFFF000;
-	size_t *pt = ((size_t *)0xFFC00000) + (0x400 * pd_idx);
+	for (void *virt_addr = virt_mem->ptr, *phy_addr = phy_mem->ptr;
+	     virt_addr < virt_mem->ptr + virt_mem->size;
+	     (virt_addr += PAGE_SIZE, phy_addr += PAGE_SIZE)) {
+		size_t pd_idx = (size_t)virt_addr >> 22;
+		size_t pt_idx = (size_t)virt_addr >> 12 & 0x03FF;
 
-	if ((pd[pd_idx] & PRESENT_BIT) == 0) {
-		pd[pd_idx] = (size_t)phy_mem_alloc(PAGE_SIZE);
-		pd[pd_idx] |= 1;
-		memset(pt, 0, PAGE_SIZE);
+		size_t *pd = (size_t *)0xFFFFF000;
+		size_t *pt = ((size_t *)0xFFC00000) + (0x400 * pd_idx);
+
+		if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0) {
+			pd[pd_idx] = (size_t)phy_mem_alloc(PAGE_SIZE).ptr;
+			pd[pd_idx] |= 1;
+			memset(pt, 0, PAGE_SIZE);
+		}
+
+		pd[pd_idx] |= virt_mem->flags & VMM_ENTRY_READ_WRITE_BIT;
+
+		pt[pt_idx] = ((size_t)phy_addr) | (virt_mem->flags & 0xFFF);
+
+		invalidate(virt_addr);
 	}
-
-	pd[pd_idx] |= flags & READ_WRITE_BIT;
-
-	pt[pt_idx] = ((size_t)physaddr) | (flags & 0xFFF);
-
-	invalidate(virtualaddr);
 }
 
 static void invalidate_low_range(void)
 {
 	size_t *pd = (size_t *)page_directory_addr;
 	for (size_t i = 0; i < 768; i++) {
-		if ((pd[i] & PRESENT_BIT) == 1)
+		if ((pd[i] & VMM_ENTRY_PRESENT_BIT) == 1)
 			pd[i] = 0;
 	}
 	__asm__ volatile("push %eax;"
@@ -107,8 +117,9 @@ static void recreate_vir_mem(multiboot_elf_section_header_table_t elf)
 		struct vmm_entry entry = {
 			.ptr = (void *)elf_s,
 			.size = elf_e - elf_s,
-			.flags = (elf_sec[i].sh_flags & 0x1) * READ_WRITE_BIT |
-				 PRESENT_BIT,
+			.flags = (elf_sec[i].sh_flags & 0x1) *
+			VMM_ENTRY_READ_WRITE_BIT |
+			VMM_ENTRY_PRESENT_BIT,
 		};
 		RESET_LIST_ITEM(&entry.list);
 
@@ -120,13 +131,20 @@ static void recreate_vir_mem(multiboot_elf_section_header_table_t elf)
 	invalidate_low_range();
 
 	/**
-	 * Temporanialiy bind the address 0 to the new pd
+	 * Temporanialiy bind the address 1000 to the new pd
 	 */
-	void *pd_loc = phy_mem_alloc(PAGE_SIZE);
+	fatptr_t pd = phy_mem_alloc(PAGE_SIZE);
+	struct vmm_entry tmp_virt = (struct vmm_entry){
+		.ptr = (void*)0x1000,
+		.size = PAGE_SIZE,
+		.flags = VMM_ENTRY_PRESENT_BIT |
+		VMM_ENTRY_READ_WRITE_BIT,
+	};
 
-	map_page(pd_loc, (void *)0, PRESENT_BIT | READ_WRITE_BIT);
-	memset((void *)0, 0, PAGE_SIZE);
-	((uint32_t *)0)[1023] = (size_t)pd_loc | PRESENT_BIT | READ_WRITE_BIT;
+	map_pages(&pd, &tmp_virt);
+	memset(tmp_virt.ptr, 0, tmp_virt.size);
+	((uint32_t *)tmp_virt.ptr)[1023] = (size_t)pd.ptr | VMM_ENTRY_PRESENT_BIT |
+		VMM_ENTRY_READ_WRITE_BIT;
 
 	list_for_each(&vmm_used_list) {
 		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
@@ -137,305 +155,194 @@ static void recreate_vir_mem(multiboot_elf_section_header_table_t elf)
 			if (((size_t)virt_addr & 0xfff) != 0)
 				panic("address is not 4k aligned");
 
-			map_page(pd_loc, (void *)0, PRESENT_BIT);
+			map_pages(&pd, &tmp_virt);
 
 			size_t pd_idx = (size_t)virt_addr >> 22;
 			size_t pt_idx = (size_t)virt_addr >> 12 & 0x03FF;
 
-			size_t *px = (size_t *)0x0;
+			size_t *px = (size_t *)pd.ptr;
 
-			if ((px[pd_idx] & PRESENT_BIT) == 0) {
-				px[pd_idx] = (size_t)phy_mem_alloc(PAGE_SIZE);
+			if ((px[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0) {
+				px[pd_idx] = (size_t)phy_mem_alloc(PAGE_SIZE).ptr;
 
 				px[pd_idx] |= 1;
-				px[pd_idx] |= cur->flags & READ_WRITE_BIT;
+				px[pd_idx] |= cur->flags &
+					VMM_ENTRY_READ_WRITE_BIT;
 
-				map_page((void *)(px[pd_idx] & ~0xfff),
-					 (void *)0, PRESENT_BIT);
-				memset((void *)0, 0, PAGE_SIZE);
+				map_pages(&(fatptr_t){.ptr=(void*)(px[pd_idx] & ~0xfff), .len=PAGE_SIZE}, &tmp_virt);
+				memset((void *)0x1000, 0, PAGE_SIZE);
 			} else {
-				px[pd_idx] |= cur->flags & READ_WRITE_BIT;
-				map_page((void *)(px[pd_idx] & ~0xfff),
-					 (void *)0, PRESENT_BIT);
+				px[pd_idx] |= cur->flags &
+					VMM_ENTRY_READ_WRITE_BIT;
+
+				map_pages(&(fatptr_t){.ptr=(void*)(px[pd_idx] & ~0xfff), .len=PAGE_SIZE}, &tmp_virt);
 			}
 
 			px[pt_idx] = ((size_t)get_physaddr((void *)virt_addr)) |
-				     (cur->flags & 0xFFF);
+				(cur->flags & 0xFFF);
 		}
 	}
 
 	void *old_pd_loc = 0;
 	__asm__ volatile("mov %%cr3, %0" : "=g"(old_pd_loc) : : "memory");
 
-	__asm__ volatile("mov %0, %%cr3" : : "r"(pd_loc) : "memory");
+	__asm__ volatile("mov %0, %%cr3" : : "r"(pd.ptr) : "memory");
 
-	map_page(old_pd_loc, 0, PRESENT_BIT | READ_WRITE_BIT);
+	map_pages(&(fatptr_t){.ptr=old_pd_loc, .len=PAGE_SIZE}, &tmp_virt);
 
-	memcpy((void *)0x0, (void *)0xfffff000, PAGE_SIZE);
+	memcpy((void *)0x1000, (void *)0xfffff000, PAGE_SIZE);
 
-	((uint32_t *)0)[1023] = (size_t)old_pd_loc | PRESENT_BIT |
-				READ_WRITE_BIT;
+	((uint32_t *)0x1000)[1023] = (size_t)old_pd_loc | VMM_ENTRY_PRESENT_BIT |
+		VMM_ENTRY_READ_WRITE_BIT;
 
 	__asm__ volatile("mov %0, %%cr3" : : "r"(old_pd_loc) : "memory");
 
-	map_page(old_pd_loc, 0, 0);
+	tmp_virt.flags = 0;
+	map_pages(&(fatptr_t){.ptr=old_pd_loc, .len=PAGE_SIZE}, &tmp_virt);
+
+	phy_mem_free(pd);
 }
 
-struct malloc_tag_entry {
-	void *ptr; // Virtual address for specific allocaiton
-	void *page; // Physical page address
-	size_t size; // Total block size
-	size_t used; // Sized used by this block
+LIST_HEAD(vmm_free_list);
+LIST_HEAD(vmm_used_list);
+LIST_HEAD(vmm_tags_list);
 
-	struct list_head list;
-};
-LIST_HEAD(malloc_tags_list);
-LIST_HEAD(free_malloc_tags_list);
-
-static void alloc_malloc_tag()
+static void debug_vmm_list(void)
 {
-	struct malloc_tag_entry *free_chunk = nullptr;
-	list_for_each(&malloc_tags_list) {
-		struct malloc_tag_entry *cur =
-			list_entry(it, struct malloc_tag_entry, list);
-		if ((free_chunk == nullptr ||
-		     (free_chunk != nullptr &&
-		      (cur->size - cur->used <
-		       free_chunk->size - free_chunk->used))) &&
-		    cur->size - cur->used >= PAGE_SIZE)
-			free_chunk = cur;
+	size_t i = 0;
+	kprintf("debug_vmm_list | vmm_tags_list:\n");
+	list_for_each(&vmm_tags_list) {
+		struct vmm_entry *tag = list_entry(it, struct vmm_entry, list);
+		kprintf("%u) ptr: %x | size: %x | flags: %x\n", i++, tag->ptr,
+			tag->size, tag->flags);
 	}
 
-	struct malloc_tag_entry *new_tag_ptr = (void *)free_chunk->ptr;
-	free_chunk->ptr += PAGE_SIZE;
-	free_chunk->size -= PAGE_SIZE;
-
-	void *new_phy_mem = phy_mem_alloc(PAGE_SIZE);
-	map_page(new_phy_mem, new_tag_ptr, READ_WRITE_BIT | PRESENT_BIT);
-
-	size_t new_tag_count = PAGE_SIZE / sizeof(struct malloc_tag_entry);
-
-	for (size_t i = 0; i < new_tag_count; i++) {
-		struct malloc_tag_entry new_tag = { nullptr };
-		new_tag_ptr[i] = new_tag;
-
-		list_add(&new_tag_ptr[i].list, &free_malloc_tags_list);
+	i = 0;
+	kprintf("debug_vmm_list | vmm_free_list:\n");
+	list_for_each(&vmm_free_list) {
+		struct vmm_entry *tag = list_entry(it, struct vmm_entry, list);
+		kprintf("%u) ptr: %x | size: %x | flags: %x\n", i++, tag->ptr,
+			tag->size, tag->flags);
 	}
 
-	struct malloc_tag_entry *tag =
-		list_entry(list_pop(&free_malloc_tags_list),
-			   struct malloc_tag_entry, list);
-
-	tag->ptr = new_tag_ptr;
-	tag->page = new_phy_mem;
-	tag->size = PAGE_SIZE;
-	tag->used = (PAGE_SIZE / sizeof(struct malloc_tag_entry)) *
-		    sizeof(struct malloc_tag_entry);
-	list_add(&tag->list, free_chunk->list.prev);
+	i = 0;
+	kprintf("debug_vmm_list | vmm_used_list:\n");
+	list_for_each(&vmm_used_list) {
+		struct vmm_entry *tag = list_entry(it, struct vmm_entry, list);
+		kprintf("%u) ptr: %x | size: %x | flags: %x\n", i++, tag->ptr,
+			tag->size, tag->flags);
+	}
 }
 
-static struct malloc_tag_entry *malloc_find_free_space(size_t req_size)
+static struct vmm_entry *
+vir_mem_find_prev_used_chunk(struct vmm_entry *to_alloc)
 {
-	struct malloc_tag_entry *free_chunk = nullptr;
-	list_for_each(&malloc_tags_list) {
-		struct malloc_tag_entry *cur =
-			list_entry(it, struct malloc_tag_entry, list);
+	struct vmm_entry *next_chunk = nullptr;
 
-		size_t cur_free = cur->size - cur->used;
-		bool update_chunk_sel =
-			cur_free >= req_size &&
-			(free_chunk == nullptr ||
-			 (cur_free < free_chunk->size - free_chunk->used));
+	list_for_each(&vmm_used_list) {
+		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
+
+		if (cur->ptr > to_alloc->ptr &&
+		    (next_chunk == nullptr || next_chunk->ptr < cur->ptr))
+			next_chunk = cur;
+	}
+	return next_chunk;
+}
+
+struct vmm_entry *vir_mem_alloc(size_t req_size, uint8_t flags)
+{
+	if (req_size > 0 && req_size & 0xfff)
+		BUG("Virtual Memory allocation must be page aligned: %d",
+		    req_size & 0xfff);
+
+	struct vmm_entry *free_chunk = nullptr;
+
+	list_for_each(&vmm_free_list) {
+		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
+
+		size_t cur_free = cur->size;
+		bool update_chunk_sel = cur_free >= req_size &&
+					(free_chunk == nullptr ||
+					 (cur_free < free_chunk->size));
 
 		if (update_chunk_sel) {
 			free_chunk = cur;
 		}
 	}
 
-	return free_chunk;
+	struct vmm_entry *tag =
+		list_entry(list_pop(&vmm_tags_list), struct vmm_entry, list);
+
+	*tag = (struct vmm_entry){
+		.ptr = free_chunk->ptr,
+		.size = req_size,
+		.flags = flags,
+	};
+
+	free_chunk->ptr += req_size;
+	free_chunk->size -= req_size;
+
+	list_add(&tag->list, free_chunk->list.prev);
+
+	debug_vmm_list();
+
+	return tag;
 }
 
-static struct malloc_tag_entry *get_free_malloc_tag(void)
+static struct vmm_entry *vir_mem_find_prev_free_chunk(struct vmm_entry *to_free)
 {
-	struct list_head *free_tag_entry = list_pop(&free_malloc_tags_list);
-	if (free_tag_entry == nullptr) {
-		alloc_malloc_tag();
-		free_tag_entry = list_pop(&free_malloc_tags_list);
-	}
+	struct vmm_entry *prev_chunk = nullptr;
 
-	return list_entry(free_tag_entry, struct malloc_tag_entry, list);
+	list_for_each(&vmm_free_list) {
+		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
+
+		if (prev_chunk == nullptr ||
+		    prev_chunk->ptr > cur->ptr &&
+			    prev_chunk->ptr < to_free->ptr)
+			prev_chunk = cur;
+	}
+	return prev_chunk;
 }
 
-static void free_useless_tag(struct malloc_tag_entry *tag)
+static void vir_mem_free_coalesce(struct vmm_entry *mid)
 {
-	if (tag->size == 0) {
-		list_rm(&tag->list);
-		memset(tag, 0, sizeof(struct malloc_tag_entry));
-		list_add(&tag->list, &free_malloc_tags_list);
+	struct vmm_entry *prev =
+		list_entry(mid->list.prev, struct vmm_entry, list);
+	struct vmm_entry *next =
+		list_entry(mid->list.next, struct vmm_entry, list);
+
+	if (mid->ptr + mid->size == next->ptr) {
+		mid->size += next->size;
+		list_rm(&next->list);
+	}
+	if (prev->ptr + prev->size == mid->ptr) {
+		prev->size += mid->size;
+		list_rm(&mid->list);
 	}
 }
 
-void *kmalloc(size_t req_size)
+void vir_mem_free(void *ptr)
 {
-	if (req_size == 0 || req_size > PAGE_SIZE)
-		panic("Request size in kmalloc is not valid: value [%u]",
-		      req_size);
-
-	struct malloc_tag_entry *free_chunk = malloc_find_free_space(req_size);
-	struct malloc_tag_entry *free_tag = get_free_malloc_tag();
-
-	// Chunk if free_chunk is unused virtaul memory
-	if (free_chunk->size >= PAGE_SIZE && free_chunk->page == nullptr) {
-		if (free_chunk->ptr !=
-		    round_up_to_page((size_t)free_chunk->ptr))
-			panic("Unused Virtual memory should alaways be 4KiB aligned");
-
-		free_tag->ptr = free_chunk->ptr;
-		free_tag->size = PAGE_SIZE;
-		free_tag->used = 0;
-		free_tag->page = phy_mem_alloc(PAGE_SIZE);
-
-		// Put it before the free_chunk to mantain sorting
-		list_add(&free_tag->list, free_chunk->list.prev);
-
-		map_page(free_tag->page, free_tag->ptr,
-			 READ_WRITE_BIT | PRESENT_BIT);
-
-		free_chunk->ptr += PAGE_SIZE;
-		free_chunk->size -= PAGE_SIZE;
-
-		free_useless_tag(free_chunk);
-
-		// Update the free_chunk with the new allocated chunk
-		free_chunk = free_tag;
-		// Temporanialy rm free_chunk so the next function will not use it
-		list_rm(&free_chunk->list);
-
-		free_tag = get_free_malloc_tag();
-
-		list_add(&free_chunk->list, free_chunk->list.prev);
-	}
-
-	free_tag->ptr = free_chunk->ptr + free_chunk->used;
-	free_tag->size = free_chunk->size - free_chunk->used;
-	free_tag->used = req_size;
-	free_tag->page = free_chunk->page;
-	list_add(&free_tag->list, &free_chunk->list);
-
-	// There is no more usable space after free_chunk because
-	// free_tag is imidiatly after
-	free_chunk->size = free_chunk->used;
-	free_useless_tag(free_chunk);
-
-#ifdef DEBUG_KMALLOC
-	size_t i = 0;
-	kprintf("kmalloc state after call:\n") list_for_each(&malloc_tags_list)
-	{
-		struct malloc_tag_entry *tag =
-			list_entry(it, struct malloc_tag_entry, list);
-		kprintf("%u) ptr: %x | page: %x | size: %x | used: %x\033[0m\n",
-			i++, tag->ptr, tag->page, tag->size, tag->used);
-	}
-#endif
-	return free_tag->ptr;
-}
-
-static struct malloc_tag_entry *find_tag_to_free(void *ptr)
-{
-	struct malloc_tag_entry *tag_to_free = nullptr;
-
-	list_for_each(&malloc_tags_list) {
-		struct malloc_tag_entry *cur =
-			list_entry(it, struct malloc_tag_entry, list);
+	list_for_each(&vmm_used_list) {
+		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
 
 		if (cur->ptr == ptr) {
-			tag_to_free = cur;
+			struct vmm_entry *prev_chunk =
+				vir_mem_find_prev_free_chunk(cur);
+
+			list_rm(&cur->list);
+			list_add(&cur->list, &prev_chunk->list);
+
+			vir_mem_free_coalesce(cur);
+
+			break;
 		}
 	}
 
-	if (tag_to_free == nullptr) {
-		panic("Requested free of an unknown ptr");
-	}
-
-	return tag_to_free;
+	debug_vmm_list();
 }
 
-void kfree(void *ptr)
-{
-	struct malloc_tag_entry *chunk = find_tag_to_free(ptr);
-	struct malloc_tag_entry *prev_chunk =
-		list_prev_entry_circular(chunk, &malloc_tags_list, list);
-	struct malloc_tag_entry *next_chunk =
-		list_next_entry_circular(chunk, &malloc_tags_list, list);
-
-	if (prev_chunk->page != chunk->page && (size_t)chunk->ptr & 0xfff) {
-		panic("Chunk not aligned on page without a prev chunk");
-	} else if (prev_chunk->page == chunk->page &&
-		   prev_chunk->ptr + prev_chunk->size != chunk->ptr) {
-		panic("Prev chunk and chunk should be contigus if on the same page");
-	} else if (next_chunk->page == chunk->page &&
-		   chunk->ptr + chunk->size != next_chunk->ptr) {
-		panic("Chunk and next chunk should be contigus if on the same page");
-	}
-
-	if (next_chunk->page == chunk->page &&
-	    prev_chunk->page == chunk->page) {
-		if (next_chunk->used == 0) {
-			chunk->size += next_chunk->size;
-			next_chunk->size = 0;
-			free_useless_tag(next_chunk);
-		}
-
-		prev_chunk->size += chunk->size;
-		chunk->size = 0;
-		free_useless_tag(chunk);
-
-		if (prev_chunk->size == PAGE_SIZE && prev_chunk->used == 0) {
-			map_page(prev_chunk->page, prev_chunk->ptr, 0);
-			phy_mem_free(prev_chunk->page);
-			prev_chunk->page = nullptr;
-		}
-	} else if (next_chunk->page != chunk->page &&
-		   prev_chunk->page != chunk->page) {
-		map_page(chunk->page, chunk->ptr, 0);
-		phy_mem_free(chunk->page);
-		chunk->page = nullptr;
-		chunk->used = 0;
-	} else if (next_chunk->page == chunk->page &&
-		   prev_chunk->page != chunk->page) {
-		if (next_chunk->used == 0) {
-			chunk->size += next_chunk->size;
-			next_chunk->size = 0;
-			free_useless_tag(next_chunk);
-		}
-		chunk->used = 0;
-	} else if (next_chunk->page != chunk->page &&
-		   prev_chunk->page == chunk->page) {
-		prev_chunk->size += chunk->size;
-		chunk->size = 0;
-		free_useless_tag(chunk);
-
-		if (prev_chunk->size == PAGE_SIZE && prev_chunk->used == 0) {
-			map_page(prev_chunk->page, prev_chunk->ptr, 0);
-			phy_mem_free(prev_chunk->page);
-			prev_chunk->page = nullptr;
-		}
-	}
-
-#ifdef DEBUG_KMALLOC
-	size_t i = 0;
-	kprintf("kfree state after call:\n");
-	list_for_each(&malloc_tags_list) {
-		struct malloc_tag_entry *tag =
-			list_entry(it, struct malloc_tag_entry, list);
-		kprintf("%u) ptr: %x | page: %x | size: %x | used: %x\033[0m\n",
-			i++, tag->ptr, tag->page, tag->size, tag->used);
-	}
-#endif
-}
-
-static struct malloc_tag_entry
-init_kmalloc_find_free_chunk(struct list_head *vmm_init_list)
+static struct vmm_entry init_find_free_chunk(struct list_head *vmm_init_list)
 {
 	struct vmm_entry *free_block = nullptr;
 	list_for_each(vmm_init_list) {
@@ -446,75 +353,57 @@ init_kmalloc_find_free_chunk(struct list_head *vmm_init_list)
 		}
 	}
 
-	struct malloc_tag_entry *new_tags_ptr = free_block->ptr;
-	size_t new_tags_count = PAGE_SIZE / sizeof(struct malloc_tag_entry);
-
-	void *new_tags_phy_page = phy_mem_alloc(PAGE_SIZE);
-	map_page(new_tags_phy_page, new_tags_ptr, READ_WRITE_BIT | PRESENT_BIT);
+	struct vmm_entry tag = (struct vmm_entry){
+		.ptr = free_block->ptr,
+		.size = PAGE_SIZE,
+		.flags = VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT,
+	};
+	RESET_LIST_ITEM(&tag.list);
 
 	free_block->ptr += PAGE_SIZE;
 	free_block->size -= PAGE_SIZE;
 
-	return (struct malloc_tag_entry){
-		.ptr = new_tags_ptr,
-		.page = new_tags_phy_page,
-		.size = PAGE_SIZE,
-		.used = 0,
-	};
+	return tag;
 }
 
-void init_kmalloc(struct list_head *vmm_init_list)
+static void init_vir_manager(struct list_head *vmm_init_list)
 {
-	struct malloc_tag_entry tags_chunk =
-		init_kmalloc_find_free_chunk(vmm_init_list);
+	struct vmm_entry tags_chunk = init_find_free_chunk(vmm_init_list);
 
-	// Adding all the allocated tags to the chain
-	for (size_t i = 0;
-	     i < tags_chunk.size / sizeof(struct malloc_tag_entry); i++) {
-		struct malloc_tag_entry new_tag = { nullptr };
-		((struct malloc_tag_entry *)tags_chunk.ptr)[i] = new_tag;
+	fatptr_t phy_tag_mem = phy_mem_alloc(PAGE_SIZE);
+	map_pages(&phy_tag_mem, &tags_chunk);
 
-		list_add(&((struct malloc_tag_entry *)tags_chunk.ptr)[i].list,
-			 free_malloc_tags_list.prev);
+	for (size_t i = 0; i < tags_chunk.size / sizeof(struct vmm_entry);
+	     i++) {
+		struct vmm_entry new_tag = { nullptr };
+		((struct vmm_entry *)tags_chunk.ptr)[i] = new_tag;
+
+		list_add(&((struct vmm_entry *)tags_chunk.ptr)[i].list,
+			 vmm_tags_list.prev);
 	}
 
 	// Get one unused tag
-	struct malloc_tag_entry *tag =
-		list_entry(list_pop(&free_malloc_tags_list),
-			   struct malloc_tag_entry, list);
+	struct vmm_entry *tag =
+		list_entry(list_pop(&vmm_tags_list), struct vmm_entry, list);
 
 	// Copy the info about the tag chunk
 	*tag = tags_chunk;
+	RESET_LIST_ITEM(&tag->list);
+
+	list_add(&tag->list, &vmm_used_list);
 
 	// Add all the virtual memory mapping to the kmalloc known block
 	list_for_each(vmm_init_list) {
 		struct vmm_entry *vmm_cur =
 			list_entry(it, struct vmm_entry, list);
 
-		struct malloc_tag_entry *vmm_tag =
-			list_entry(list_pop(&free_malloc_tags_list),
-				   struct malloc_tag_entry, list);
+		struct vmm_entry *vmm_tag = list_entry(list_pop(&vmm_tags_list),
+						       struct vmm_entry, list);
 
-		vmm_tag->ptr = vmm_cur->ptr;
-		vmm_tag->page = nullptr;
-		vmm_tag->size = vmm_cur->size;
-		vmm_tag->used = 0;
+		*vmm_tag = *vmm_cur;
 
-		list_add(&vmm_tag->list, malloc_tags_list.prev);
-		if (vmm_tag->ptr - PAGE_SIZE == tag->ptr)
-			list_add(&tag->list, vmm_tag->list.prev);
+		list_add(&vmm_tag->list, vmm_free_list.prev);
 	}
-
-#ifdef DEBUG_KMALLOC
-	kprintf("kmalloc state after init:\n");
-	size_t i = 0;
-	list_for_each(&malloc_tags_list) {
-		struct malloc_tag_entry *tag =
-			list_entry(it, struct malloc_tag_entry, list);
-		kprintf("%u) ptr: %x | size: %x | used: %x\n", i++, tag->ptr,
-			tag->size, tag->used);
-	}
-#endif
 }
 
 void init_vir_mem(multiboot_info_t *mbd)
@@ -608,6 +497,5 @@ void init_vir_mem(multiboot_info_t *mbd)
 	}
 
 	recreate_vir_mem(mbd->u.elf_sec);
-
-	init_kmalloc(&vmm_free_list);
+	init_vir_manager(&vmm_free_list);
 }
