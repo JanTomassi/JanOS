@@ -30,7 +30,8 @@ LIBS:=$(LIBS) $(KERNEL_ARCH_LIBS)
 KERNEL_OBJS=\
 $(KERNEL_ARCH_OBJS) \
 kernel/kernel.o \
-kernel/display.o
+kernel/display.o \
+kernel/mem_allocs.o
 
 OBJS=\
 $(KERNEL_OBJS) \
