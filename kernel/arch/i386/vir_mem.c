@@ -225,28 +225,27 @@ LIST_HEAD(vmm_tags_list);
 static void debug_vmm_list(void)
 {
 	size_t i = 0;
-	kprintf("debug_vmm_list | vmm_tags_list:\n");
-	list_for_each(&vmm_tags_list) {
-		struct vmm_entry *tag = list_entry(it, struct vmm_entry, list);
-		kprintf("%u) ptr: %x | size: %x | flags: %x\n", i++, tag->ptr,
-			tag->size, tag->flags);
-	}
-
-	i = 0;
 	kprintf("debug_vmm_list | vmm_free_list:\n");
 	list_for_each(&vmm_free_list) {
 		struct vmm_entry *tag = list_entry(it, struct vmm_entry, list);
-		kprintf("%u) ptr: %x | size: %x | flags: %x\n", i++, tag->ptr,
-			tag->size, tag->flags);
+		kprintf("    %u) ptr: %x | size: %x | flags: %x\n", i++,
+			tag->ptr, tag->size, tag->flags);
 	}
 
 	i = 0;
 	kprintf("debug_vmm_list | vmm_used_list:\n");
 	list_for_each(&vmm_used_list) {
 		struct vmm_entry *tag = list_entry(it, struct vmm_entry, list);
-		kprintf("%u) ptr: %x | size: %x | flags: %x\n", i++, tag->ptr,
-			tag->size, tag->flags);
+		kprintf("    %u) ptr: %x | size: %x | flags: %x\n", i++,
+			tag->ptr, tag->size, tag->flags);
 	}
+
+	i = 0;
+	kprintf("debug_vmm_list | vmm_tags_list:\n");
+	list_for_each(&vmm_tags_list) {
+		i++;
+	}
+	kprintf("    %u unused vmm_tags\n", i);
 }
 
 static struct list_head *
@@ -258,7 +257,9 @@ vir_mem_find_prev_used_chunk(struct vmm_entry *to_alloc)
 		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
 
 		if (cur->ptr < to_alloc->ptr &&
-		    (next_chunk == &vmm_used_list || cur->ptr > list_entry(next_chunk, struct vmm_entry, list)->ptr))
+		    (next_chunk == &vmm_used_list ||
+		     cur->ptr > list_entry(next_chunk, struct vmm_entry, list)
+					->ptr))
 			next_chunk = &cur->list;
 	}
 	return next_chunk;
