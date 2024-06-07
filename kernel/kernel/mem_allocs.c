@@ -67,23 +67,64 @@ get_phy_mem_tag();
 __attribute__((malloc, malloc(give_malloc_tag, 1))) static struct malloc_tag *
 get_malloc_tag();
 
-static void give_phy_mem_tag(struct phy_mem_tag *ptr)
+static bool rm_tag_from_manager(struct malloc_tag *tag_manager)
 {
-	if (ptr->ref_cnt > 1)
-		ptr->ref_cnt -= 1;
-	memset(ptr, 0, sizeof(struct phy_mem_tag));
+	if (tag_manager == nullptr)
+		return true;
+
+	// tag manager is in his managed space
+	bool rec_tag_manager = false;
+	if (&tag_manager >= tag_manager->ptr &&
+	    tag_manager < tag_manager->ptr + tag_manager->size)
+		rec_tag_manager = true;
+
+	struct phy_mem_tag *tag_phy_mem =
+		list_entry(&tag_manager->phy_mem, struct phy_mem_tag, list);
+
+	if (rec_tag_manager ? --tag_phy_mem->ref_cnt <= 1 :
+			      --tag_phy_mem->ref_cnt == 0) {
+		map_pages(&tag_phy_mem->phy_mem,
+			  &(struct vmm_entry){
+				  .ptr = tag_manager->ptr,
+				  .size = tag_manager->size,
+				  .flags = 0,
+			  });
+		phy_mem_free(tag_phy_mem->phy_mem);
+		vir_mem_free(tag_manager->ptr);
+		return false;
+	}
+
+	return true;
 }
 
-static void give_malloc_tag(struct malloc_tag *ptr)
+static void give_phy_mem_tag(struct phy_mem_tag *tag_phy)
 {
-	list_for_each(&ptr->phy_mem) {
+	tag_phy->ref_cnt -= 1;
+	if (tag_phy->ref_cnt > 0)
+		return;
+
+	bool add_elm_back = rm_tag_from_manager(tag_phy->tag_manager);
+
+	if (add_elm_back) {
+		memset(tag_phy, 0, sizeof(struct phy_mem_tag));
+		list_add(&tag_phy->list, &malloc_phy_mem_tags_list);
+	}
+}
+
+static void give_malloc_tag(struct malloc_tag *tag_virt)
+{
+	list_for_each(&tag_virt->phy_mem) {
 		struct phy_mem_tag *cur =
 			list_entry(it, struct phy_mem_tag, list);
-
-		if (cur->ref_cnt > 1)
-			cur->ref_cnt -= 1;
+		give_phy_mem_tag(cur);
 	}
-	memset(ptr, 0, sizeof(struct malloc_tag));
+
+	bool add_elm_back = rm_tag_from_manager(tag_virt->tag_manager);
+
+	if (add_elm_back) {
+		memset(tag_virt, 0, sizeof(struct malloc_tag));
+		list_add(&tag_virt->list, &malloc_free_tags_list);
+	}
 }
 
 __attribute__((malloc, malloc(give_phy_mem_tag, 1))) static struct phy_mem_tag *
@@ -117,6 +158,7 @@ get_malloc_tag()
 		malloc_alloc_tag();
 		tag_elm = list_pop(&malloc_free_tags_list);
 	}
+
 	struct malloc_tag *tag = list_entry(tag_elm, struct malloc_tag, list);
 
 	if (tag->tag_manager != nullptr) {
@@ -218,7 +260,8 @@ static void malloc_alloc_tag(void)
 	RESET_LIST_ITEM(&tag->phy_mem);
 
 	tag_phy->phy_mem = new_tags_phy;
-	tag_phy->ref_cnt = 1;
+	tag_phy->ref_cnt = &tag >= tag->ptr && tag < tag->ptr + tag->size ? 1 :
+									    0;
 	list_add(&tag_phy->list, &tag->phy_mem);
 
 	malloc_insert_tag(tag);
