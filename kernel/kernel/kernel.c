@@ -15,6 +15,7 @@
 extern void idt_init(void);
 extern void PIC_remap(int offset1, int offset2);
 extern void pic_disable(void);
+extern void init_kmalloc(void);
 
 void section_divisor(char *section_name)
 {
@@ -150,6 +151,8 @@ void kernel_main(multiboot_info_t *mbd, unsigned int magic)
 
 	section_divisor("Virtual memory init:\n");
 	init_vir_mem(mbd);
+
+	init_kmalloc();
 
 	struct vmm_entry *framebuffer_virt = vir_mem_alloc(
 		round_up_to_page(framebuffer_size),
