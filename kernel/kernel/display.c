@@ -8,6 +8,7 @@
 static display_t disps[DISPLAY_MAX_DISPS];
 static uint8_t _last_register = 0;
 static uint8_t current = 0;
+static bool enabled = false;
 
 void __kprintf_va_list(char *str, va_list ap);
 
@@ -139,6 +140,8 @@ int kprintf(const char *str, ...)
 
 void __kprintf_va_list(char *str, va_list ap)
 {
+	if (!enabled)
+		return;
 	char *s = 0;
 	for (size_t i = 0; i < strlen((const char *)str); i++) {
 		if (str[i] == '%') {
@@ -198,6 +201,7 @@ void __kprintf_va_list(char *str, va_list ap)
 /* Registers the display interface and returns its ID */
 uint8_t display_register(display_t d)
 {
+	enabled = true;
 	disps[_last_register] = d;
 	//dispis[_last_register]->onregister();
 	return _last_register++;
