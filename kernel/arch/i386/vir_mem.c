@@ -37,6 +37,27 @@ void *get_physaddr(void *virtualaddr)
 			((size_t)virtualaddr & 0xFFF));
 }
 
+static bool map_page(void *phy_addr, void *virt_addr, uint16_t virt_flags)
+{
+	size_t pd_idx = (size_t)virt_addr >> 22;
+	size_t pt_idx = (size_t)virt_addr >> 12 & 0x03FF;
+
+	size_t *pd = (size_t *)0xFFFFF000;
+	size_t *pt = ((size_t *)0xFFC00000) + (0x400 * pd_idx);
+
+	if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0) {
+		pd[pd_idx] = (size_t)phy_mem_alloc(PAGE_SIZE).ptr;
+		pd[pd_idx] |= VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT;
+		memset(pt, 0, PAGE_SIZE);
+	}
+
+	pt[pt_idx] = ((size_t)phy_addr) | (virt_flags & 0xFFF);
+
+	invalidate(virt_addr);
+
+	return true;
+}
+
 bool map_pages(fatptr_t *phy_mem, struct vmm_entry *virt_mem)
 {
 	if (phy_mem->len != virt_mem->size)
@@ -45,27 +66,15 @@ bool map_pages(fatptr_t *phy_mem, struct vmm_entry *virt_mem)
 		      " - virt_size %x\n",
 		      phy_mem->len, virt_mem->size);
 
-	for (void *virt_addr = virt_mem->ptr, *phy_addr = phy_mem->ptr;
-	     virt_addr < virt_mem->ptr + virt_mem->size;
-	     (virt_addr += PAGE_SIZE, phy_addr += PAGE_SIZE)) {
-		size_t pd_idx = (size_t)virt_addr >> 22;
-		size_t pt_idx = (size_t)virt_addr >> 12 & 0x03FF;
+	void *virt_addr = virt_mem->ptr;
+	void *phy_addr = phy_mem->ptr;
 
-		size_t *pd = (size_t *)0xFFFFF000;
-		size_t *pt = ((size_t *)0xFFC00000) + (0x400 * pd_idx);
-
-		if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0) {
-			pd[pd_idx] = (size_t)phy_mem_alloc(PAGE_SIZE).ptr;
-			pd[pd_idx] |= 1;
-			memset(pt, 0, PAGE_SIZE);
-		}
-
-		pd[pd_idx] |= virt_mem->flags & VMM_ENTRY_READ_WRITE_BIT;
-
-		pt[pt_idx] = ((size_t)phy_addr) | (virt_mem->flags & 0xFFF);
-
-		invalidate(virt_addr);
+	while (virt_addr < virt_mem->ptr + virt_mem->size) {
+		map_page(phy_addr, virt_addr, virt_mem->flags);
+		virt_addr += PAGE_SIZE;
+		phy_addr += PAGE_SIZE;
 	}
+	return true;
 }
 
 static void invalidate_low_range(void)
