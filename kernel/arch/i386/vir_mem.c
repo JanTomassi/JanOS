@@ -176,8 +176,7 @@ static void recreate_vir_mem(multiboot_elf_section_header_table_t elf)
 				px[pd_idx] =
 					(size_t)phy_mem_alloc(PAGE_SIZE).ptr;
 
-				px[pd_idx] |= 1;
-				px[pd_idx] |= cur->flags &
+				px[pd_idx] |= 1 | cur->flags |
 					      VMM_ENTRY_READ_WRITE_BIT;
 
 				map_pages(
@@ -188,7 +187,7 @@ static void recreate_vir_mem(multiboot_elf_section_header_table_t elf)
 					&tmp_virt);
 				memset((void *)0x1000, 0, PAGE_SIZE);
 			} else {
-				px[pd_idx] |= cur->flags &
+				px[pd_idx] |= cur->flags |
 					      VMM_ENTRY_READ_WRITE_BIT;
 
 				map_pages(
