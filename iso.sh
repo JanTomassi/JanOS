@@ -9,6 +9,7 @@ mkdir -p isodir/boot/grub
 cp sysroot/boot/JanOS.kernel isodir/boot/JanOS.kernel
 cat > isodir/boot/grub/grub.cfg << EOF
 set timeout=1
+insmod all_video
 
 menuentry "JanOS" {
 	multiboot /boot/JanOS.kernel
