@@ -170,7 +170,7 @@ static void recreate_vir_mem(multiboot_elf_section_header_table_t elf)
 			size_t pd_idx = (size_t)virt_addr >> 22;
 			size_t pt_idx = (size_t)virt_addr >> 12 & 0x03FF;
 
-			size_t *px = (size_t *)pd.ptr;
+			size_t *px = (size_t *)tmp_virt.ptr;
 
 			if ((px[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0) {
 				px[pd_idx] =
