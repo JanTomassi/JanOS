@@ -432,7 +432,9 @@ static void init_vir_manager(struct list_head *vmm_init_list)
 
 void init_vir_mem(multiboot_info_t *mbd)
 {
-	struct vmm_entry init_vmm_entry[PAGE_SIZE / sizeof(struct vmm_entry)];
+	struct vmm_entry init_vmm_entry[PAGE_SIZE / sizeof(struct vmm_entry)] = {
+		0
+	};
 	size_t init_vmm_entris_used = 0;
 	LIST_HEAD(vmm_free_list);
 
