@@ -185,7 +185,7 @@ static void recreate_vir_mem(multiboot_elf_section_header_table_t elf)
 								~0xfff),
 						.len = PAGE_SIZE },
 					&tmp_virt);
-				memset((void *)0x1000, 0, PAGE_SIZE);
+				memset(tmp_virt.ptr, 0, PAGE_SIZE);
 			} else {
 				px[pd_idx] |= cur->flags |
 					      VMM_ENTRY_READ_WRITE_BIT;
