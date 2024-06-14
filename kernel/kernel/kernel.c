@@ -177,20 +177,17 @@ void kernel_main(multiboot_info_t *mbd, unsigned int magic)
 	/* /\* Entering graphical mode *\/ */
 	/* display_setcurrent(display_register(tty_dpy)); */
 
-	for (size_t j = 0; j < framebuffer_height; j++) {
-		for (size_t i = 0; i < framebuffer_pitch; i++) {
-			((uint8_t *)framebuffer_virt
-				 ->ptr)[i + (j * framebuffer_pitch)] = 0xff;
+	for (uint8_t tick = 0; 1; tick++)
+		for (size_t j = 0; j < framebuffer_height; j++) {
+			for (size_t i = 0; i < framebuffer_width; i++) {
+				size_t where = i * framebuffer_bpp / 8 +
+					       j * framebuffer_pitch;
+				((uint8_t *)framebuffer_virt->ptr)[where] =
+					i * 255.0 / framebuffer_width; // BLUE
+				((uint8_t *)framebuffer_virt->ptr)[where + 1] =
+					j * 255.0 / framebuffer_height; // GREEN
+				((uint8_t *)framebuffer_virt->ptr)[where + 2] =
+					(uint8_t)tick; // RED
+			}
 		}
-	}
-
-	/* while (1) */
-	/* 	for (size_t j = 0; j < framebuffer_height; j++){ */
-	/* 		for (size_t i = 0; i < framebuffer_width; i++) { */
-	/* 			((uint32_t *)framebuffer_virt */
-	/* 			 ->ptr)[i + (j * (framebuffer_pitch / (framebuffer_bpp / 8)))] = */
-	/* 				(uint8_t)(i) << 0 | (uint8_t)(j) << 8 | */
-	/* 				(uint8_t)GLOBAL_TICK << 16 | (0xff << 24); */
-	/* 		} */
-	/* 	} */
 }
