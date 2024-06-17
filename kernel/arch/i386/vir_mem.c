@@ -95,7 +95,7 @@ static void invalidate_low_range(void)
 static inline void print_elf_sector(Elf32_Shdr *elf_sec, char *elf_sec_str,
 				    size_t i)
 {
-	kprintf("Section (%s): [Address: %x, Size: %x, Type: %x, flags: %x]\n",
+	mprint("Section (%s): [Address: %x, Size: %x, Type: %x, flags: %x]\n",
 		&elf_sec_str[elf_sec[i].sh_name], elf_sec[i].sh_addr,
 		elf_sec[i].sh_size, elf_sec[i].sh_type, elf_sec[i].sh_flags);
 }
@@ -111,11 +111,11 @@ static void recreate_vir_mem(multiboot_elf_section_header_table_t elf)
 
 	for (size_t i = 0; i < elf.num; i++) {
 		if ((elf_sec[i].sh_flags & 0x2) == 0) {
-			kprintf("Section (%s) dosn't allocate memory at runtime\n",
+			mprint("Section (%s) dosn't allocate memory at runtime\n",
 				&elf_sec_str[elf_sec[i].sh_name]);
 			continue;
 		} else if (elf_sec[i].sh_addr < &HIGHER_HALF) {
-			kprintf("Section (%s) isn't part of the higher half kernel\n",
+			mprint("Section (%s) isn't part of the higher half kernel\n",
 				&elf_sec_str[elf_sec[i].sh_name]);
 			continue;
 		} else {
@@ -235,27 +235,27 @@ LIST_HEAD(vmm_tags_list);
 static void debug_vmm_list(void)
 {
 	size_t i = 0;
-	kprintf("debug_vmm_list | vmm_free_list:\n");
+	mprint("debug_vmm_list | vmm_free_list:\n");
 	list_for_each(&vmm_free_list) {
 		struct vmm_entry *tag = list_entry(it, struct vmm_entry, list);
-		kprintf("    %u) ptr: %x | size: %x | flags: %x\n", i++,
+		mprint("    %u) ptr: %x | size: %x | flags: %x\n", i++,
 			tag->ptr, tag->size, tag->flags);
 	}
 
 	i = 0;
-	kprintf("debug_vmm_list | vmm_used_list:\n");
+	mprint("debug_vmm_list | vmm_used_list:\n");
 	list_for_each(&vmm_used_list) {
 		struct vmm_entry *tag = list_entry(it, struct vmm_entry, list);
-		kprintf("    %u) ptr: %x | size: %x | flags: %x\n", i++,
+		mprint("    %u) ptr: %x | size: %x | flags: %x\n", i++,
 			tag->ptr, tag->size, tag->flags);
 	}
 
 	i = 0;
-	kprintf("debug_vmm_list | vmm_tags_list:\n");
+	mprint("debug_vmm_list | vmm_tags_list:\n");
 	list_for_each(&vmm_tags_list) {
 		i++;
 	}
-	kprintf("    %u unused vmm_tags\n", i);
+	mprint("    %u unused vmm_tags\n", i);
 }
 
 static struct list_head *
@@ -455,13 +455,13 @@ void init_vir_mem(multiboot_info_t *mbd)
 	char *elf_sec_str = (char *)elf_sec[mbd->u.elf_sec.shndx].sh_addr;
 
 	for (size_t i = 0; i < mbd->u.elf_sec.num; i++) {
-		kprintf("Section (%s): [Address: %x, Size: %x, Type: %x, flags: %x]\n",
+		mprint("Section (%s): [Address: %x, Size: %x, Type: %x, flags: %x]\n",
 			&elf_sec_str[elf_sec[i].sh_name], elf_sec[i].sh_addr,
 			elf_sec[i].sh_size, elf_sec[i].sh_type,
 			elf_sec[i].sh_flags);
 
 		if ((elf_sec[i].sh_flags & 0x2) == 0) {
-			kprintf("Section (%s) dosn't allocate memory at runtime\n",
+			mprint("Section (%s) dosn't allocate memory at runtime\n",
 				&elf_sec_str[elf_sec[i].sh_name]);
 			continue;
 		}
