@@ -39,6 +39,29 @@ void *get_phy_addr(void *vir_addr)
 			((size_t)vir_addr & 0xFFF));
 }
 
+void *get_vir_addr(void *phy_addr)
+{
+	size_t *pd = (size_t *)page_directory_addr;
+
+	for (size_t pd_idx = 0; pd_idx < 1024; pd_idx++) {
+		if (!(pd[pd_idx] & VMM_ENTRY_PRESENT_BIT))
+			continue;
+
+		size_t *pt = ((size_t *)0xFFC00000) + (0x400 * pd_idx);
+		for (size_t pt_idx = 0; pt_idx < 1024; pt_idx++) {
+			if (!(pt[pt_idx] & VMM_ENTRY_PRESENT_BIT) ||
+			    (pt[pt_idx] & VMM_ENTRY_LOCATION_4K_BITS) !=
+				    phy_addr)
+				continue;
+
+			return (void *)((pd_idx << 22 | pt_idx << 12) +
+					((size_t)phy_addr & 0xFFF));
+		}
+	}
+
+	return nullptr;
+}
+
 bool map_page(void *phy_addr, void *virt_addr, uint16_t virt_flags)
 {
 	size_t pd_idx = (size_t)virt_addr >> 22;
