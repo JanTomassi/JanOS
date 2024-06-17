@@ -15,10 +15,10 @@ static void invalidate(void *addr)
 	__asm__ volatile("invlpg (%0)" : : "r"((size_t)addr) : "memory");
 }
 
-void *get_physaddr(void *virtualaddr)
+void *get_phy_addr(void *vir_addr)
 {
-	size_t pd_idx = (size_t)virtualaddr >> 22;
-	size_t pt_idx = (size_t)virtualaddr >> 12 & 0x03FF;
+	size_t pd_idx = (size_t)vir_addr >> 22;
+	size_t pt_idx = (size_t)vir_addr >> 12 & 0x03FF;
 
 	// I'm assuming that the pd will alwais be valid
 	size_t *pd = (size_t *)page_directory_addr;
@@ -28,7 +28,7 @@ void *get_physaddr(void *virtualaddr)
 		return nullptr;
 	else if ((pd[pd_idx] & VMM_ENTRY_PAGE_SIZE_BIT))
 		return (void *)((pd[pd_idx] & VMM_ENTRY_LOCATION_4M_LOW_BITS) +
-				((size_t)virtualaddr &
+				((size_t)vir_addr &
 				 ~VMM_ENTRY_LOCATION_4M_LOW_BITS));
 
 	size_t *pt = ((size_t *)0xFFC00000) + (0x400 * pd_idx);
@@ -36,10 +36,10 @@ void *get_physaddr(void *virtualaddr)
 		return nullptr;
 
 	return (void *)((pt[pt_idx] & VMM_ENTRY_LOCATION_4K_BITS) +
-			((size_t)virtualaddr & 0xFFF));
+			((size_t)vir_addr & 0xFFF));
 }
 
-static bool map_page(void *phy_addr, void *virt_addr, uint16_t virt_flags)
+bool map_page(void *phy_addr, void *virt_addr, uint16_t virt_flags)
 {
 	size_t pd_idx = (size_t)virt_addr >> 22;
 	size_t pt_idx = (size_t)virt_addr >> 12 & 0x03FF;
@@ -73,6 +73,7 @@ bool map_pages(fatptr_t *phy_mem, struct vmm_entry *virt_mem)
 
 	while (virt_addr < virt_mem->ptr + virt_mem->size) {
 		map_page(phy_addr, virt_addr, virt_mem->flags);
+
 		virt_addr += PAGE_SIZE;
 		phy_addr += PAGE_SIZE;
 	}
@@ -200,7 +201,7 @@ static void recreate_vir_mem(multiboot_elf_section_header_table_t elf)
 					&tmp_virt);
 			}
 
-			px[pt_idx] = ((size_t)get_physaddr((void *)virt_addr)) |
+			px[pt_idx] = ((size_t)get_phy_addr((void *)virt_addr)) |
 				     (cur->flags & 0xFFF);
 		}
 	}
