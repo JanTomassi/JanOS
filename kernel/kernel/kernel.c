@@ -167,13 +167,13 @@ void kernel_main(multiboot_info_t *mbd, unsigned int magic)
 
 	map_pages(&framebuffer_phy, framebuffer_virt);
 
-	display_t tty_dpy = tty_initialize((size_t)framebuffer_virt->ptr,
-					   framebuffer_pitch, framebuffer_width,
-					   framebuffer_height, framebuffer_bpp,
-					   framebuffer_type == 1);
+	/* display_t tty_dpy = tty_initialize((size_t)framebuffer_virt->ptr, */
+	/* 				   framebuffer_pitch, framebuffer_width, */
+	/* 				   framebuffer_height, framebuffer_bpp, */
+	/* 				   framebuffer_type == 1); */
 
-	/* Entering graphical mode */
-	display_setcurrent(display_register(tty_dpy));
+	/* /\* Entering graphical mode *\/ */
+	/* display_setcurrent(display_register(tty_dpy)); */
 
 	for (uint8_t tick = 0; 1; tick++)
 		for (size_t j = 0; j < framebuffer_height; j++) {
