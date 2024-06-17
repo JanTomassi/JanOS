@@ -51,14 +51,12 @@ struct vmm_entry {
 	struct list_head list;
 };
 
-void *get_physaddr(void *virtualaddr);
+void *get_phy_addr(void *vir_addr);
+void *get_vir_addr(void *phy_addr);
 
 void init_vir_mem(multiboot_info_t *mbd);
 bool map_pages(fatptr_t *physaddr, struct vmm_entry *virt_mem);
+bool map_page(void *phy_addr, void *virt_addr, uint16_t virt_flags);
 
 struct vmm_entry *vir_mem_alloc(size_t req_size, uint8_t flags);
 void vir_mem_free(void *ptr);
-
-void *kmalloc(size_t);
-void *kcalloc(size_t, size_t);
-void kfree(void *);
