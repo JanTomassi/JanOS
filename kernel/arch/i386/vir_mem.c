@@ -6,6 +6,8 @@
 
 #define page_directory_addr (0xFFFFF000)
 
+MODULE("Virt Memory Manager");
+
 extern size_t HIGHER_HALF;
 
 static void invalidate(void *addr)
