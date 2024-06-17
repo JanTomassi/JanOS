@@ -4,16 +4,16 @@
 #include "tty_text.h"
 #include "../vga.h"
 
-uint16_t *tty_buffer;
+static uint16_t *tty_buffer;
 
-size_t cursor_row;
-size_t cursor_column;
+static size_t cursor_row;
+static size_t cursor_column;
 
-size_t tty_width;
-size_t tty_height;
+static size_t tty_width;
+static size_t tty_height;
 
-uint8_t tty_color;
-uint8_t tty_border_color;
+static uint8_t tty_color;
+static uint8_t tty_border_color;
 
 static inline size_t buffer_offset(size_t x, size_t y, size_t stripe)
 {
