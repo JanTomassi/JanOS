@@ -586,28 +586,34 @@ void init_kmalloc(void)
 	phy_mem_tag_t tags_manager_phy = {
 		.phy_mem = { 0 },
 		.ref_cnt = 0,
+		.tag_manager = nullptr,
 	};
 	phy_mem_tag_t links_manager_phy = {
 		.phy_mem = { 0 },
 		.ref_cnt = 0,
+		.tag_manager = nullptr,
 	};
 	phy_mem_tag_t phy_tags_manager_phy = {
 		.phy_mem = { 0 },
 		.ref_cnt = 0,
+		.tag_manager = nullptr,
 	};
 
 	phy_mem_link_t tags_manager_link = {
 		.phy_mem = &tags_manager_phy,
+		.tag_manager = nullptr,
 	};
 	RESET_LIST_ITEM(&tags_manager_link.list);
 
 	phy_mem_link_t links_manager_link = {
 		.phy_mem = &links_manager_phy,
+		.tag_manager = nullptr,
 	};
 	RESET_LIST_ITEM(&links_manager_link.list);
 
 	phy_mem_link_t phy_tags_manager_link = {
 		.phy_mem = &phy_tags_manager_phy,
+		.tag_manager = nullptr,
 	};
 	RESET_LIST_ITEM(&phy_tags_manager_link.list);
 
