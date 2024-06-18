@@ -107,17 +107,17 @@ static void debug_lists(void)
 	mprint("debug_lists | malloc_tags_list:\n");
 	list_for_each(&tags_list) {
 		malloc_tag_t *tag = list_entry(it, malloc_tag_t, list);
-		mprint("%x) ptr: %x | size: %x | used: %x | manager: %x\n",
-			tag, tag->ptr, tag->size, tag->used,
-			(size_t)tag->tag_manager);
+		mprint("%x) ptr: %x | size: %x | used: %x | manager: %x\n", tag,
+		       tag->ptr, tag->size, tag->used,
+		       (size_t)tag->tag_manager);
 
 		list_for_each(&tag->phy_chain) {
 			phy_mem_tag_t *phy_tag =
 				list_entry(it, phy_mem_link_t, list)->phy_mem;
 			mprint("	%x) ptr: %x | size: %x | ref_cnt: %x | manager: %x\n",
-				phy_tag, phy_tag->phy_mem.ptr,
-				phy_tag->phy_mem.len, phy_tag->ref_cnt,
-				(size_t)tag->tag_manager);
+			       phy_tag, phy_tag->phy_mem.ptr,
+			       phy_tag->phy_mem.len, phy_tag->ref_cnt,
+			       (size_t)tag->tag_manager);
 		}
 	}
 
