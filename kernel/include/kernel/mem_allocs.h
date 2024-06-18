@@ -21,6 +21,15 @@ void *mem_set_ptr_tag(mem_malloc_tag_t *, void *);
 size_t mem_set_size_tag(mem_malloc_tag_t *, size_t);
 size_t mem_set_used_tag(mem_malloc_tag_t *, size_t);
 
+// Find best effort fit for the req return a new allocated
+// malloc_tag_t will return nullptr for no match
+mem_malloc_tag_t *mem_find_best_fit(size_t req);
+
+// Register a malloc_tag to allocator manager
+void mem_register_tag(mem_malloc_tag_t *);
+// Unregister a malloc_tag to allocator manager
+void mem_unregister_tag(mem_malloc_tag_t *);
+
 // Insert phy_mem_tag sorted by ptr in the chain
 void insert_phy_mem_tag(mem_phy_mem_tag_t *tag, struct list_head *chain);
 // Give the phy_mem_tag back to free_phy_tags_list

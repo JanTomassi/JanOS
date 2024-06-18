@@ -706,21 +706,30 @@ void init_kmalloc(void)
 	debug_lists();
 }
 
-/* static struct malloc_tag *kmalloc_find_mem(size_t req) */
-/* { */
-/* 	struct malloc_tag *vir_tag = nullptr; */
-/* 	list_for_each(&malloc_tags_list) { */
-/* 		struct malloc_tag *tag = */
-/* 			list_entry(it, struct malloc_tag, list); */
-/* 		size_t free_space = tag->size - tag->used; */
-/* 		if ((vir_tag == nullptr && free_space >= req) || */
-/* 		    (free_space >= req && */
-/* 		     free_space < vir_tag->size - vir_tag->used)) { */
-/* 			vir_tag = tag; */
-/* 		} */
-/* 	} */
-/* 	return vir_tag; */
-/* } */
+malloc_tag_t *mem_find_best_fit(size_t req)
+{
+	malloc_tag_t *tag = nullptr;
+	list_for_each(&tags_list) {
+		malloc_tag_t *it_tag = list_entry(it, malloc_tag_t, list);
+		size_t free_space = it_tag->size - it_tag->used;
+		if ((tag != nullptr && free_space >= req &&
+		     free_space < tag->size - tag->used) ||
+		    (tag == nullptr && free_space >= req)) {
+			tag = it_tag;
+		}
+	}
+	return tag;
+}
+
+void mem_register_tag(mem_malloc_tag_t *tag)
+{
+	mem_insert_tag(tag, &tags_list);
+}
+
+void mem_unregister_tag(mem_malloc_tag_t *tag)
+{
+	mem_remove_tag(tag);
+}
 
 /* static struct malloc_tag *kmalloc_alloc_mem(size_t req) */
 /* { */
