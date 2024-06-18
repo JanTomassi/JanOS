@@ -40,6 +40,62 @@ struct mem_phy_mem_tag {
 	struct mem_malloc_tag *tag_manager;
 };
 
+fatptr_t mem_get_fatptr_phy_mem(const phy_mem_tag_t *ptr)
+{
+	return ptr->phy_mem;
+}
+size_t mem_get_refcnt_phy_mem(const phy_mem_tag_t *ptr)
+{
+	return ptr->ref_cnt;
+}
+fatptr_t mem_set_fatptr_phy_mem(phy_mem_tag_t *ptr, fatptr_t val)
+{
+	fatptr_t old = ptr->phy_mem;
+	ptr->phy_mem = val;
+	return old;
+}
+size_t mem_set_refcnt_phy_mem(phy_mem_tag_t *ptr, size_t val)
+{
+	size_t old = ptr->ref_cnt;
+	ptr->ref_cnt = val;
+	return old;
+}
+
+void *mem_get_ptr_tag(const malloc_tag_t *ptr)
+{
+	return ptr->ptr;
+}
+size_t mem_get_size_tag(const malloc_tag_t *ptr)
+{
+	return ptr->size;
+}
+size_t mem_get_used_tag(const malloc_tag_t *ptr)
+{
+	return ptr->used;
+}
+struct list_head *mem_get_chain_tag(const malloc_tag_t *ptr)
+{
+	return &ptr->phy_chain;
+}
+void *mem_set_ptr_tag(malloc_tag_t *ptr, void *val)
+{
+	void *old = ptr->ptr;
+	ptr->ptr = val;
+	return old;
+}
+size_t mem_set_size_tag(malloc_tag_t *ptr, size_t val)
+{
+	size_t old = ptr->size;
+	ptr->size = val;
+	return old;
+}
+size_t mem_set_used_tag(malloc_tag_t *ptr, size_t val)
+{
+	size_t old = ptr->used;
+	ptr->used = val;
+	return old;
+}
+
 static LIST_HEAD(tags_list);
 
 static LIST_HEAD(free_tags_list);
