@@ -1,5 +1,8 @@
 #pragma once
 
+#include <stddef.h>
+#include <stdlib.h>
+
 struct mem_malloc_tag;
 struct mem_phy_mem_link;
 struct mem_phy_mem_tag;
