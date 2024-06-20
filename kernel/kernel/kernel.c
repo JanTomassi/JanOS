@@ -6,6 +6,8 @@
 
 #include <kernel/phy_mem.h>
 #include <kernel/vir_mem.h>
+#include <kernel/allocator.h>
+
 #include <kernel/interrupt.h>
 
 #include <string.h>
@@ -160,6 +162,8 @@ void kernel_main(multiboot_info_t *mbd, unsigned int magic)
 	init_vir_mem(mbd);
 
 	init_kmalloc();
+
+	mem_gpa_alloc(4096 * 2);
 
 	struct vmm_entry *framebuffer_virt = vir_mem_alloc(
 		round_up_to_page(framebuffer_size),
