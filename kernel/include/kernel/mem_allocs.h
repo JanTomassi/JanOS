@@ -49,6 +49,9 @@ mem_phy_mem_tag_t *mem_get_phy_tag_from_link(struct list_head *link);
 
 // Insert malloc_tag sorted by ptr in the chain
 void mem_insert_tag(mem_malloc_tag_t *tag, struct list_head *list);
+// Remove malloc_tag and coalesce with the near
+// return true if the coalesce was successful
+bool mem_remove_tag(mem_malloc_tag_t *tag);
 // Give malloc_tag* back to free_tags_list
 void mem_give_tag(mem_malloc_tag_t *);
 // Get malloc_tag* from free_tags_list

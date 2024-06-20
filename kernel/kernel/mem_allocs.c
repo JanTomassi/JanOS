@@ -362,6 +362,11 @@ void mem_insert_tag(malloc_tag_t *tag, struct list_head *list)
 		list_add(&tag->list, &prev->list);
 }
 
+bool mem_remove_tag(malloc_tag_t *tag)
+{
+	panic("TODO: mem remove tag!!!");
+}
+
 static void alloc_phy_mem_tags(void)
 {
 	struct vmm_entry *new_tags_virt = vir_mem_alloc(
