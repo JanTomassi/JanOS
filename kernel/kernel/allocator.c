@@ -52,6 +52,11 @@ fatptr_t mem_gpa_alloc(size_t req)
 		mem_register_tag(mem);
 	}
 	mem_debug_lists();
+
+	return (fatptr_t){
+		.ptr = mem_get_ptr_tag(mem),
+		.len = mem_get_used_tag(mem),
+	};
 }
 
 void mem_gpa_free(fatptr_t freeing)
