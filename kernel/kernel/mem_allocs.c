@@ -102,7 +102,7 @@ static LIST_HEAD(free_tags_list);
 static LIST_HEAD(free_phy_tags_list);
 static LIST_HEAD(free_phy_links_list);
 
-static void debug_lists(void)
+void mem_debug_lists(void)
 {
 	mprint("debug_lists | malloc_tags_list:\n");
 	list_for_each(&tags_list) {
@@ -716,7 +716,7 @@ void init_kmalloc(void)
 		(((phy_mem_tag_t *)tag->ptr)[i]).tag_manager = tag;
 	}
 
-	debug_lists();
+	mem_debug_lists();
 }
 
 malloc_tag_t *mem_find_best_fit(size_t req)
