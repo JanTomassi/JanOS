@@ -277,7 +277,7 @@ phy_mem_link_t *mem_get_phy_mem_link()
 
 	if (tag_elm == nullptr) {
 		alloc_phy_mem_links();
-		tag_elm = list_pop(&free_tags_list);
+		tag_elm = list_pop(&free_phy_links_list);
 	}
 
 	phy_mem_link_t *tag = list_entry(tag_elm, phy_mem_link_t, list);
