@@ -19,7 +19,7 @@ void gpa_make_new_space(malloc_tag_t *tag, size_t req)
 
 	mem_set_ptr_tag(tag, vir_mem->ptr);
 	mem_set_size_tag(tag, vir_mem->size);
-	mem_set_used_tag(tag, req_align);
+	mem_set_used_tag(tag, req);
 	struct list_head *tag_chain = mem_get_chain_tag(tag);
 
 	for (void *vir_ptr = mem_get_ptr_tag(tag);
