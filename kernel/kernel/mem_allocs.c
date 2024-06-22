@@ -235,7 +235,12 @@ void mem_give_tag(malloc_tag_t *tag)
 
 	list_rm(&tag->list);
 
+	malloc_tag_t *manager = tag->tag_manager;
+
 	memset(tag, 0, sizeof(malloc_tag_t));
+
+	tag->tag_manager = manager;
+
 	list_add(&tag->list, &free_tags_list);
 }
 
