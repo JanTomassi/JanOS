@@ -163,7 +163,17 @@ void kernel_main(multiboot_info_t *mbd, unsigned int magic)
 
 	init_kmalloc();
 
-	mem_gpa_alloc(4096 * 2);
+	fatptr_t mem1 = mem_gpa_alloc(4096 + 4);
+	fatptr_t mem2 = mem_gpa_alloc(128);
+
+	mem_gpa_free(mem2);
+	mem_gpa_free(mem1);
+
+	mem1 = mem_gpa_alloc(4096 + 4);
+	mem2 = mem_gpa_alloc(512);
+
+	mem_gpa_free(mem1);
+	mem_gpa_free(mem2);
 
 	struct vmm_entry *framebuffer_virt = vir_mem_alloc(
 		round_up_to_page(framebuffer_size),
