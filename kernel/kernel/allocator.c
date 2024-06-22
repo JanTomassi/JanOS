@@ -188,5 +188,8 @@ fatptr_t mem_gpa_alloc(size_t req)
 
 void mem_gpa_free(fatptr_t freeing)
 {
-	panic("TODO");
+	malloc_tag_t **tag = gpa_get_alloc(freeing.ptr, gpa_allocs);
+	mem_unregister_tag(*tag);
+	tag = nullptr;
+	mem_debug_lists();
 }
