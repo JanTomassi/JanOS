@@ -366,7 +366,8 @@ void mem_insert_tag(malloc_tag_t *tag, struct list_head *list)
 	list_for_each(list) {
 		malloc_tag_t *cur = list_entry(it, malloc_tag_t, list);
 		if (cur->ptr < tag->ptr &&
-		    (prev != nullptr && cur->ptr > prev->ptr))
+		    (prev == nullptr ||
+		     (prev != nullptr && cur->ptr > prev->ptr)))
 			prev = cur;
 	}
 	if (prev == nullptr)
