@@ -153,7 +153,8 @@ static void alloc_phy_mem_tags(void);
 // Free allocated phy_mem_tags
 static void free_phy_mem_tags(malloc_tag_t *);
 // Insert phy_mem_tag sorted by ptr in the chain
-void mem_insert_phy_mem_tag(phy_mem_tag_t *tag, struct list_head *chain);
+void mem_insert_phy_mem_tag(phy_mem_tag_t *tag, struct list_head *chain,
+			    bool sort);
 // Give the phy_mem_tag back to free_phy_tags_list
 void mem_give_phy_mem_tag(phy_mem_tag_t *);
 // Get the phy_mem_tag from free_phy_tags_list
@@ -325,10 +326,16 @@ phy_mem_tag_t *mem_get_phy_mem_tag()
 	return tag;
 }
 
-void mem_insert_phy_mem_tag(phy_mem_tag_t *tag, struct list_head *chain)
+void mem_insert_phy_mem_tag(phy_mem_tag_t *tag, struct list_head *chain,
+			    bool sort)
 {
 	phy_mem_link_t *link = mem_get_phy_mem_link();
 	link->phy_mem = tag;
+
+	if (!sort) {
+		list_add(&link->list, chain->prev);
+		return;
+	}
 
 	phy_mem_link_t *prev = nullptr;
 
@@ -337,8 +344,9 @@ void mem_insert_phy_mem_tag(phy_mem_tag_t *tag, struct list_head *chain)
 		fatptr_t cur_mem = cur->phy_mem->phy_mem;
 		fatptr_t tag_mem = tag->phy_mem;
 		if (cur_mem.ptr < tag_mem.ptr &&
-		    (prev != nullptr &&
-		     cur_mem.ptr > prev->phy_mem->phy_mem.ptr))
+		    (prev == nullptr ||
+		     (prev != nullptr &&
+		      cur_mem.ptr > prev->phy_mem->phy_mem.ptr)))
 			prev = cur;
 	}
 	if (prev == nullptr)
