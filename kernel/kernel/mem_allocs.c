@@ -376,9 +376,17 @@ void mem_insert_tag(malloc_tag_t *tag, struct list_head *list)
 		list_add(&tag->list, &prev->list);
 }
 
-bool mem_remove_tag(malloc_tag_t *tag)
+bool mem_remove_tag(malloc_tag_t *tag, struct list_head *list)
 {
-	panic("TODO: mem remove tag!!!");
+	list_for_each(list) {
+		malloc_tag_t *cur = list_entry(it, malloc_tag_t, list);
+		if (cur->ptr == tag->ptr && cur->size == tag->size &&
+		    cur->used == tag->used) {
+			mem_give_tag(cur);
+			return false;
+		}
+	}
+	return true;
 }
 
 static void alloc_phy_mem_tags(void)
@@ -755,7 +763,7 @@ void mem_register_tag(mem_malloc_tag_t *tag)
 
 void mem_unregister_tag(mem_malloc_tag_t *tag)
 {
-	mem_remove_tag(tag);
+	mem_remove_tag(tag, &tags_list);
 }
 
 /* static struct malloc_tag *kmalloc_alloc_mem(size_t req) */
