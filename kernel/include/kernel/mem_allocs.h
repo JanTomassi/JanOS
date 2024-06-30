@@ -32,6 +32,8 @@ mem_malloc_tag_t *mem_find_best_fit(size_t req);
 
 // Register a malloc_tag to allocator manager
 void mem_register_tag(mem_malloc_tag_t *);
+// Coalesce with free near tag this must be call before mem_unregister_tag
+mem_malloc_tag_t *mem_coalesce_tag(mem_malloc_tag_t *);
 // Unregister a malloc_tag to allocator manager
 void mem_unregister_tag(mem_malloc_tag_t *);
 
