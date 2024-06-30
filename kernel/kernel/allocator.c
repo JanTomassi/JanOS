@@ -23,6 +23,7 @@ static void gpa_make_new_space(malloc_tag_t *tag, size_t req)
 	mem_set_ptr_tag(tag, vir_mem->ptr);
 	mem_set_size_tag(tag, vir_mem->size);
 	mem_set_used_tag(tag, req);
+	mem_set_vmm_tag(tag, vir_mem);
 	struct list_head *tag_chain = mem_get_chain_tag(tag);
 
 	for (void *vir_ptr = mem_get_ptr_tag(tag);
@@ -57,6 +58,7 @@ static malloc_tag_t *gpa_use_space(malloc_tag_t *tag, size_t req)
 	mem_set_ptr_tag(mem, mem_ptr);
 	mem_set_size_tag(mem, tag_free);
 	mem_set_used_tag(mem, req);
+	mem_set_vmm_tag(mem, mem_get_vmm_tag(tag));
 	struct list_head *mem_chain = mem_get_chain_tag(mem);
 
 	size_t len_acc = 0;
@@ -96,6 +98,7 @@ static void gpa_init(malloc_tag_t *mem)
 	mem_set_ptr_tag(mem, vir_mem->ptr);
 	mem_set_size_tag(mem, vir_mem->size);
 	mem_set_used_tag(mem, PAGE_SIZE);
+	mem_set_vmm_tag(mem, vir_mem);
 	struct list_head *tag_chain = mem_get_chain_tag(mem);
 
 	for (void *vir_ptr = mem_get_ptr_tag(mem);

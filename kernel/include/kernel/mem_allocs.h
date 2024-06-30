@@ -19,10 +19,12 @@ size_t mem_set_refcnt_phy_mem(mem_phy_mem_tag_t *, size_t val);
 void *mem_get_ptr_tag(const mem_malloc_tag_t *);
 size_t mem_get_size_tag(const mem_malloc_tag_t *);
 size_t mem_get_used_tag(const mem_malloc_tag_t *);
+struct vmm_entry *mem_get_vmm_tag(const mem_malloc_tag_t *ptr);
 struct list_head *mem_get_chain_tag(const mem_malloc_tag_t *);
 void *mem_set_ptr_tag(mem_malloc_tag_t *, void *);
 size_t mem_set_size_tag(mem_malloc_tag_t *, size_t);
 size_t mem_set_used_tag(mem_malloc_tag_t *, size_t);
+struct vmm_entry *mem_set_vmm_tag(mem_malloc_tag_t *ptr, struct vmm_entry *val);
 
 // Find best effort fit for the req return a new allocated
 // malloc_tag_t will return nullptr for no match
