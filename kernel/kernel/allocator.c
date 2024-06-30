@@ -13,6 +13,8 @@ extern void mem_debug_lists(void);
 static bool gpa_initialized = false;
 static malloc_tag_t *gpa_allocs = nullptr;
 
+MODULE("Allocator");
+
 static void gpa_make_new_space(malloc_tag_t *tag, size_t req)
 {
 	size_t req_align = round_up_to_page(req);
