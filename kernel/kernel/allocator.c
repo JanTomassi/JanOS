@@ -194,7 +194,50 @@ fatptr_t mem_gpa_alloc(size_t req)
 void mem_gpa_free(fatptr_t freeing)
 {
 	malloc_tag_t **tag = gpa_get_alloc(freeing.ptr, gpa_allocs);
-	mem_unregister_tag(*tag);
+	malloc_tag_t *tag_to_free = mem_coalesce_tag(*tag);
+	void *tag_ptr = mem_get_ptr_tag(tag_to_free);
+
+	struct list_head *chain = mem_get_chain_tag(tag_to_free);
+
+	list_for_each(chain) {
+		phy_mem_tag_t *phy_tag = mem_get_phy_tag_from_link(it);
+		fatptr_t fatptr = mem_get_fatptr_phy_mem(phy_tag);
+		switch (mem_get_refcnt_phy_mem(phy_tag)) {
+		case 0:
+			BUG("phy_mem_tag with a zero refcnt\n");
+			break;
+		case 1: {
+			mprint("gpa freeing phy mem [ptr: %x, len: %x]\n",
+			       fatptr.ptr, fatptr.len);
+			struct vmm_entry vir_mem = {
+				.ptr = (void *)((size_t)tag_ptr & 0xfffff000),
+				.size = fatptr.len,
+				.flags = 0,
+			};
+			RESET_LIST_ITEM(&vir_mem.list);
+
+			map_pages(&fatptr, &vir_mem);
+
+			phy_mem_free(fatptr);
+			break;
+		}
+		default:
+			mprint("gpa not freeing phy mem [ptr: %x, len: %x]\n",
+			       fatptr.ptr, fatptr.len);
+			break;
+		}
+		tag_ptr += fatptr.len;
+	}
+	bool same_size = mem_get_vmm_tag(tag_to_free)->size ==
+			 mem_get_size_tag(tag_to_free);
+	bool same_ptr = mem_get_vmm_tag(tag_to_free)->ptr ==
+			mem_get_ptr_tag(tag_to_free);
+
+	if (same_size && same_ptr){
+		vir_mem_free(mem_get_vmm_tag(tag_to_free)->ptr);
+	}
+
+	mem_unregister_tag(tag_to_free);
 	tag = nullptr;
 	mem_debug_lists();
 }
