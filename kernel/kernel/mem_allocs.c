@@ -17,6 +17,7 @@ struct mem_malloc_tag {
 	void *ptr; // Virtual address for specific allocaiton
 	size_t size; // Total block size
 	size_t used; // Sized used by this block
+	struct vmm_entry *vmm;
 	struct mem_malloc_tag *tag_manager;
 
 	// head of type struct phy_mem_link
@@ -73,6 +74,10 @@ size_t mem_get_used_tag(const malloc_tag_t *ptr)
 {
 	return ptr->used;
 }
+struct vmm_entry *mem_get_vmm_tag(const malloc_tag_t *ptr)
+{
+	return ptr->vmm;
+}
 struct list_head *mem_get_chain_tag(const malloc_tag_t *ptr)
 {
 	return &ptr->phy_chain;
@@ -95,6 +100,12 @@ size_t mem_set_used_tag(malloc_tag_t *ptr, size_t val)
 	ptr->used = val;
 	return old;
 }
+struct vmm_entry *mem_set_vmm_tag(malloc_tag_t *ptr, struct vmm_entry *val)
+{
+	struct vmm_entry *old = ptr->vmm;
+	ptr->vmm = val;
+	return old;
+}
 
 static LIST_HEAD(tags_list);
 
@@ -107,8 +118,8 @@ void mem_debug_lists(void)
 	mprint("debug_lists | malloc_tags_list:\n");
 	list_for_each(&tags_list) {
 		malloc_tag_t *tag = list_entry(it, malloc_tag_t, list);
-		mprint("%x) ptr: %x | size: %x | used: %x | manager: %x\n", tag,
-		       tag->ptr, tag->size, tag->used,
+		mprint("%x) ptr: %x | size: %x | used: %x | vmm: %x | manager: %x\n",
+		       tag, tag->ptr, tag->size, tag->used, tag->vmm,
 		       (size_t)tag->tag_manager);
 
 		list_for_each(&tag->phy_chain) {
@@ -420,6 +431,7 @@ static void alloc_phy_mem_tags(void)
 	tag->ptr = new_tags_virt->ptr;
 	tag->size = new_tags_virt->size;
 	tag->used = new_tags_virt_count * sizeof(phy_mem_tag_t);
+	tag->vmm = new_tags_virt;
 
 	tag_phy->phy_mem = new_tags_phy;
 	tag_phy->ref_cnt = &tag >= tag->ptr && tag < tag->ptr + tag->size;
@@ -463,6 +475,7 @@ static void alloc_phy_mem_links(void)
 	tag->ptr = new_tags_virt->ptr;
 	tag->size = new_tags_virt->size;
 	tag->used = new_tags_virt_count * sizeof(phy_mem_link_t);
+	tag->vmm = new_tags_virt;
 
 	tag_phy->phy_mem = new_tags_phy;
 	tag_phy->ref_cnt = &tag >= tag->ptr && tag < tag->ptr + tag->size;
@@ -505,6 +518,7 @@ static void alloc_tags(void)
 	tag->ptr = new_tags_virt->ptr;
 	tag->size = new_tags_virt->size;
 	tag->used = new_tags_virt_count * sizeof(malloc_tag_t);
+	tag->vmm = new_tags_virt;
 
 	tag_phy->phy_mem = new_tags_phy;
 	tag_phy->ref_cnt = &tag >= tag->ptr && tag < tag->ptr + tag->size;
@@ -533,6 +547,7 @@ static void init_tags(malloc_tag_t *manager)
 	manager->ptr = new_tags_virt->ptr;
 	manager->size = new_tags_virt->size;
 	manager->used = new_tags_virt_count * sizeof(malloc_tag_t);
+	manager->vmm = new_tags_virt;
 	phy_mem_link_t *link =
 		list_entry(manager->phy_chain.next, phy_mem_link_t, list);
 	link->phy_mem->phy_mem = new_tags_phy;
@@ -562,6 +577,7 @@ static void init_phy_mem_links(malloc_tag_t *manager)
 	manager->ptr = new_tags_virt->ptr;
 	manager->size = new_tags_virt->size;
 	manager->used = new_tags_virt_count * sizeof(phy_mem_link_t);
+	manager->vmm = new_tags_virt;
 	phy_mem_link_t *link =
 		list_entry(manager->phy_chain.next, phy_mem_link_t, list);
 	link->phy_mem->phy_mem = new_tags_phy;
@@ -591,6 +607,7 @@ static void init_phy_mem_tags(malloc_tag_t *manager)
 	manager->ptr = new_tags_virt->ptr;
 	manager->size = new_tags_virt->size;
 	manager->used = new_tags_virt_count * sizeof(phy_mem_tag_t);
+	manager->vmm = new_tags_virt;
 	phy_mem_link_t *link =
 		list_entry(manager->phy_chain.next, phy_mem_link_t, list);
 	link->phy_mem->phy_mem = new_tags_phy;
@@ -685,6 +702,7 @@ void init_kmalloc(void)
 	tag->ptr = tags_manager.ptr;
 	tag->size = tags_manager.size;
 	tag->used = tags_manager.used;
+	tag->vmm = tags_manager.vmm;
 
 	tag_phy->phy_mem = tags_manager_phy.phy_mem;
 	tag_phy->ref_cnt = tags_manager_phy.ref_cnt;
@@ -705,6 +723,7 @@ void init_kmalloc(void)
 	tag->ptr = links_manager.ptr;
 	tag->size = links_manager.size;
 	tag->used = links_manager.used;
+	tag->vmm = links_manager.vmm;
 
 	tag_phy->phy_mem = links_manager_phy.phy_mem;
 	tag_phy->ref_cnt = links_manager_phy.ref_cnt;
@@ -725,6 +744,7 @@ void init_kmalloc(void)
 	tag->ptr = phy_tags_manager.ptr;
 	tag->size = phy_tags_manager.size;
 	tag->used = phy_tags_manager.used;
+	tag->vmm = phy_tags_manager.vmm;
 
 	tag_phy->phy_mem = phy_tags_manager_phy.phy_mem;
 	tag_phy->ref_cnt = phy_tags_manager_phy.ref_cnt;
