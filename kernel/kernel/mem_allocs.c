@@ -781,6 +781,73 @@ void mem_register_tag(mem_malloc_tag_t *tag)
 	mem_insert_tag(tag, &tags_list);
 }
 
+mem_malloc_tag_t *mem_coalesce_tag(mem_malloc_tag_t *tag)
+{
+	mem_malloc_tag_t *prev =
+		list_entry(tag->list.prev, mem_malloc_tag_t, list);
+	mem_malloc_tag_t *next =
+		list_entry(tag->list.next, mem_malloc_tag_t, list);
+
+	bool coalesce_prev = prev->ptr + prev->size == tag->ptr &&
+			     prev->vmm == tag->vmm;
+	bool coalesce_next = tag->ptr + tag->size == next->ptr &&
+			     next->used == 0 && next->vmm == tag->vmm;
+
+	mem_malloc_tag_t *mem_to_free = tag;
+
+	tag->used = 0;
+	if (coalesce_next) {
+		tag->size += next->size;
+		list_for_each(&next->phy_chain) {
+			mem_phy_mem_link_t *phy_link =
+				list_entry(it, mem_phy_mem_link_t, list);
+			mem_phy_mem_tag_t *phy_tag = phy_link->phy_mem;
+
+			list_for_each(&tag->phy_chain) {
+				mem_phy_mem_link_t *phy_link2 = list_entry(
+					it, mem_phy_mem_link_t, list);
+				mem_phy_mem_tag_t *phy_tag2 = phy_link->phy_mem;
+				if (phy_tag == phy_tag2)
+					goto continue_next;
+			}
+
+			struct list_head *elm = next->phy_chain.prev;
+			list_rm(elm);
+			list_add(elm, tag->phy_chain.prev);
+continue_next:
+		}
+	}
+
+	if (coalesce_prev) {
+		prev->size += tag->size;
+		list_for_each(&tag->phy_chain) {
+			mem_phy_mem_link_t *phy_link =
+				list_entry(it, mem_phy_mem_link_t, list);
+			mem_phy_mem_tag_t *phy_tag = phy_link->phy_mem;
+
+			list_for_each(&prev->phy_chain) {
+				mem_phy_mem_link_t *phy_link2 = list_entry(
+					it, mem_phy_mem_link_t, list);
+				mem_phy_mem_tag_t *phy_tag2 = phy_link->phy_mem;
+				if (phy_tag == phy_tag2)
+					goto continue_curr;
+			}
+
+			struct list_head *elm = next->phy_chain.prev;
+			list_rm(elm);
+			list_add(elm, tag->phy_chain.prev);
+continue_curr:
+		}
+	}
+
+	if (prev->used == 0) {
+		mem_unregister_tag(tag);
+		return prev;
+	} else {
+		return tag;
+	}
+}
+
 void mem_unregister_tag(mem_malloc_tag_t *tag)
 {
 	mem_remove_tag(tag, &tags_list);
