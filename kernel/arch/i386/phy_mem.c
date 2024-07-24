@@ -82,8 +82,7 @@ void phy_mem_add_region(size_t addr, size_t len)
 	phy_mem_set_region(addr, len, false);
 }
 
-__attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t
-phy_mem_alloc(size_t size)
+__attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc(size_t size)
 {
 	const size_t req_size = size + (size % BLOCK_SIZE);
 	const size_t req_block = req_size / BLOCK_SIZE;
