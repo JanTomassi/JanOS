@@ -2,7 +2,7 @@
 set -e
 . ./headers.sh
 
-if [ $(command -v etags &> /dev/null) && $(command -v find &> /dev/null) ]
+if $(command -v etags &> /dev/null) && $(command -v find &> /dev/null)
 then
     find ${PROJECTS} -name "*.[chCH]" -print | etags -
 fi
