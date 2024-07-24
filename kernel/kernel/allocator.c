@@ -233,7 +233,7 @@ void mem_gpa_free(fatptr_t freeing)
 	bool same_ptr = mem_get_vmm_tag(tag_to_free)->ptr ==
 			mem_get_ptr_tag(tag_to_free);
 
-	if (same_size && same_ptr){
+	if (same_size && same_ptr) {
 		vir_mem_free(mem_get_vmm_tag(tag_to_free)->ptr);
 	}
 

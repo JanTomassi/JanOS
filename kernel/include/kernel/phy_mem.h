@@ -51,5 +51,4 @@ size_t phy_mem_get_used_blocks();
 size_t phy_mem_get_free_blocks();
 
 void phy_mem_free(fatptr_t addr_ptr);
-__attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t
-phy_mem_alloc(size_t len);
+__attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc(size_t len);

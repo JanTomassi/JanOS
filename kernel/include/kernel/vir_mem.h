@@ -27,7 +27,7 @@
 #define PAGE_SIZE (4096)
 #define round_up_to_page(x) ((x) + (-(x) % PAGE_SIZE))
 #define round_down_to_page(x) \
-	(((x)-PAGE_SIZE - 1) + (-((x)-PAGE_SIZE - 1) % PAGE_SIZE))
+	(((x) - PAGE_SIZE - 1) + (-((x) - PAGE_SIZE - 1) % PAGE_SIZE))
 
 extern uint32_t initial_page_dir[1024];
 
