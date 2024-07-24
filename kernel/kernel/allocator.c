@@ -241,3 +241,8 @@ void mem_gpa_free(fatptr_t freeing)
 	tag = nullptr;
 	mem_debug_lists();
 }
+
+allocator_t get_gpa_allocator()
+{
+	return (allocator_t){ .alloc = mem_gpa_alloc, .free = mem_gpa_free };
+}
