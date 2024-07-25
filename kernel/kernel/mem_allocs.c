@@ -13,6 +13,14 @@ typedef mem_malloc_tag_t malloc_tag_t;
 typedef mem_phy_mem_link_t phy_mem_link_t;
 typedef mem_phy_mem_tag_t phy_mem_tag_t;
 
+#ifdef DEBUG
+typedef enum {
+	MANAGER,
+	USED,
+	FREE,
+} type_struct_t;
+#endif
+
 struct mem_malloc_tag {
 	void *ptr; // Virtual address for specific allocaiton
 	size_t size; // Total block size
@@ -24,6 +32,10 @@ struct mem_malloc_tag {
 	struct list_head phy_chain;
 	// entry of type struct malloc_tag
 	struct list_head list;
+
+#ifdef DEBUG
+	type_struct_t type;
+#endif
 };
 
 struct mem_phy_mem_link {
@@ -32,6 +44,10 @@ struct mem_phy_mem_link {
 
 	// entry of type struct phy_mem_link
 	struct list_head list;
+
+#ifdef DEBUG
+	type_struct_t type;
+#endif
 };
 
 struct mem_phy_mem_tag {
@@ -39,6 +55,10 @@ struct mem_phy_mem_tag {
 	size_t ref_cnt;
 
 	struct mem_malloc_tag *tag_manager;
+
+#ifdef DEBUG
+	type_struct_t type;
+#endif
 };
 
 fatptr_t mem_get_fatptr_phy_mem(const phy_mem_tag_t *ptr)
@@ -113,22 +133,37 @@ static LIST_HEAD(free_tags_list);
 static LIST_HEAD(free_phy_tags_list);
 static LIST_HEAD(free_phy_links_list);
 
+#ifdef DEBUG
+char *get_str_type_struct(type_struct_t type)
+{
+	switch (type) {
+	case MANAGER:
+		return "Manager";
+	case USED:
+		return "Used";
+	case FREE:
+		return "Free";
+	}
+}
+
 void mem_debug_lists(void)
 {
 	mprint("debug_lists | malloc_tags_list:\n");
 	list_for_each(&tags_list) {
 		malloc_tag_t *tag = list_entry(it, malloc_tag_t, list);
-		mprint("%x) ptr: %x | size: %x | used: %x | vmm: %x | manager: %x\n",
+		mprint("%x) ptr: %x | size: %x | used: %x | vmm: %x | manager: %x | type: %s\n",
 		       tag, tag->ptr, tag->size, tag->used, tag->vmm,
-		       (size_t)tag->tag_manager);
+		       (size_t)tag->tag_manager,
+		       get_str_type_struct(tag->type));
 
 		list_for_each(&tag->phy_chain) {
 			phy_mem_tag_t *phy_tag =
 				list_entry(it, phy_mem_link_t, list)->phy_mem;
-			mprint("	%x) ptr: %x | size: %x | ref_cnt: %x | manager: %x\n",
+			mprint("	%x) ptr: %x | size: %x | ref_cnt: %x | manager: %x | type: %s\n",
 			       phy_tag, phy_tag->phy_mem.ptr,
 			       phy_tag->phy_mem.len, phy_tag->ref_cnt,
-			       (size_t)tag->tag_manager);
+			       (size_t)tag->tag_manager,
+			       get_str_type_struct(tag->type));
 		}
 	}
 
@@ -153,6 +188,7 @@ void mem_debug_lists(void)
 	}
 	mprint("    %u unused phy_mem_link\n", i);
 }
+#endif
 
 // Increment ref_cnt of phy mem
 static void register_to_manager(malloc_tag_t *);
@@ -252,6 +288,10 @@ void mem_give_tag(malloc_tag_t *tag)
 
 	tag->tag_manager = manager;
 
+#ifdef DEBUG
+	tag->type = FREE;
+#endif
+
 	list_add(&tag->list, &free_tags_list);
 }
 
@@ -266,6 +306,10 @@ malloc_tag_t *mem_get_tag()
 
 	malloc_tag_t *tag = list_entry(tag_elm, malloc_tag_t, list);
 	RESET_LIST_ITEM(&tag->phy_chain);
+
+#ifdef DEBUG
+	tag->type = USED;
+#endif
 
 	if (tag->tag_manager != nullptr) {
 		register_to_manager(tag->tag_manager);
@@ -286,6 +330,10 @@ void mem_give_phy_mem_link(phy_mem_link_t *link)
 	list_rm(&link->list);
 
 	list_add(&link->list, &free_phy_links_list);
+
+#ifdef DEBUG
+	link->type = FREE;
+#endif
 }
 
 phy_mem_link_t *mem_get_phy_mem_link()
@@ -303,6 +351,10 @@ phy_mem_link_t *mem_get_phy_mem_link()
 		register_to_manager(tag->tag_manager);
 	}
 
+#ifdef DEBUG
+	tag->type = USED;
+#endif
+
 	return tag;
 }
 
@@ -318,6 +370,10 @@ void mem_give_phy_mem_tag(phy_mem_tag_t *tag)
 	link->phy_mem = tag;
 
 	list_add(&link->list, &free_phy_tags_list);
+
+#ifdef DEBUG
+	tag->type = FREE;
+#endif
 }
 
 phy_mem_tag_t *mem_get_phy_mem_tag()
@@ -338,6 +394,10 @@ phy_mem_tag_t *mem_get_phy_mem_tag()
 	if (tag->tag_manager != nullptr) {
 		register_to_manager(tag->tag_manager);
 	}
+
+#ifdef DEBUG
+	tag->type = USED;
+#endif
 
 	return tag;
 }
@@ -414,6 +474,9 @@ static void alloc_phy_mem_tags(void)
 	// Adding all the allocated tags to the chain
 	for (size_t i = 0; i < new_tags_virt_count; i++) {
 		phy_mem_tag_t new_tag = { 0 };
+#ifdef DEBUG
+		new_tag.type = FREE;
+#endif
 		((phy_mem_tag_t *)new_tags_virt->ptr)[i] = new_tag;
 
 		phy_mem_link_t *tag_link = mem_get_phy_mem_link();
@@ -460,6 +523,9 @@ static void alloc_phy_mem_links(void)
 	// Adding all the allocated tags to the chain
 	for (size_t i = 0; i < new_tags_virt_count; i++) {
 		phy_mem_link_t new_tag = { nullptr };
+#ifdef DEBUG
+		new_tag.type = FREE;
+#endif
 		((phy_mem_link_t *)new_tags_virt->ptr)[i] = new_tag;
 
 		list_add(&((phy_mem_link_t *)new_tags_virt->ptr)[i].list,
@@ -503,6 +569,9 @@ static void alloc_tags(void)
 	// Adding all the allocated tags to the chain
 	for (size_t i = 0; i < new_tags_virt_count; i++) {
 		malloc_tag_t new_tag = { nullptr };
+#ifdef DEBUG
+		new_tag.type = FREE;
+#endif
 		((malloc_tag_t *)new_tags_virt->ptr)[i] = new_tag;
 
 		list_add(&((malloc_tag_t *)new_tags_virt->ptr)[i].list,
@@ -552,10 +621,19 @@ static void init_tags(malloc_tag_t *manager)
 		list_entry(manager->phy_chain.next, phy_mem_link_t, list);
 	link->phy_mem->phy_mem = new_tags_phy;
 
+#ifdef DEBUG
+	manager->type = MANAGER;
+	link->type = USED;
+	link->phy_mem->type = USED;
+#endif
+
 	// Adding all the allocated tags to the chain
 	for (size_t i = 0; i < new_tags_virt_count; i++) {
 		malloc_tag_t new_tag = { nullptr };
 		new_tag.tag_manager = manager;
+#ifdef DEBUG
+		new_tag.type = FREE;
+#endif
 		((malloc_tag_t *)new_tags_virt->ptr)[i] = new_tag;
 
 		list_add(&((malloc_tag_t *)new_tags_virt->ptr)[i].list,
@@ -582,10 +660,19 @@ static void init_phy_mem_links(malloc_tag_t *manager)
 		list_entry(manager->phy_chain.next, phy_mem_link_t, list);
 	link->phy_mem->phy_mem = new_tags_phy;
 
+#ifdef DEBUG
+	manager->type = MANAGER;
+	link->type = USED;
+	link->phy_mem->type = USED;
+#endif
+
 	// Adding all the allocated tags to the chain
 	for (size_t i = 0; i < new_tags_virt_count; i++) {
 		phy_mem_link_t new_tag = { nullptr };
 		new_tag.tag_manager = manager;
+#ifdef DEBUG
+		new_tag.type = FREE;
+#endif
 		((phy_mem_link_t *)new_tags_virt->ptr)[i] = new_tag;
 
 		list_add(&((phy_mem_link_t *)new_tags_virt->ptr)[i].list,
@@ -612,10 +699,19 @@ static void init_phy_mem_tags(malloc_tag_t *manager)
 		list_entry(manager->phy_chain.next, phy_mem_link_t, list);
 	link->phy_mem->phy_mem = new_tags_phy;
 
+#ifdef DEBUG
+	manager->type = MANAGER;
+	link->type = USED;
+	link->phy_mem->type = USED;
+#endif
+
 	// Adding all the allocated tags to the chain
 	for (size_t i = 0; i < new_tags_virt_count; i++) {
 		phy_mem_tag_t new_tag = { 0 };
 		new_tag.tag_manager = manager;
+#ifdef DEBUG
+		new_tag.type = FREE;
+#endif
 		((phy_mem_tag_t *)new_tags_virt->ptr)[i] = new_tag;
 
 		phy_mem_link_t *tag_link = mem_get_phy_mem_link();
@@ -703,11 +799,20 @@ void init_kmalloc(void)
 	tag->size = tags_manager.size;
 	tag->used = tags_manager.used;
 	tag->vmm = tags_manager.vmm;
+#ifdef DEBUG
+	tag->type = tags_manager.type;
+#endif
 
 	tag_phy->phy_mem = tags_manager_phy.phy_mem;
 	tag_phy->ref_cnt = tags_manager_phy.ref_cnt;
+#ifdef DEBUG
+	tag_phy->type = tags_manager_phy.type;
+#endif
 
 	tag_link->phy_mem = tag_phy;
+#ifdef DEBUG
+	tag_link->type = tags_manager_link.type;
+#endif
 
 	list_add(&tag_link->list, &tag->phy_chain);
 	mem_insert_tag(tag, &tags_list);
@@ -724,11 +829,20 @@ void init_kmalloc(void)
 	tag->size = links_manager.size;
 	tag->used = links_manager.used;
 	tag->vmm = links_manager.vmm;
+#ifdef DEBUG
+	tag->type = links_manager.type;
+#endif
 
 	tag_phy->phy_mem = links_manager_phy.phy_mem;
 	tag_phy->ref_cnt = links_manager_phy.ref_cnt;
+#ifdef DEBUG
+	tag_phy->type = links_manager_phy.type;
+#endif
 
 	tag_link->phy_mem = tag_phy;
+#ifdef DEBUG
+	tag_link->type = links_manager_link.type;
+#endif
 
 	list_add(&tag_link->list, &tag->phy_chain);
 	mem_insert_tag(tag, &tags_list);
@@ -745,11 +859,20 @@ void init_kmalloc(void)
 	tag->size = phy_tags_manager.size;
 	tag->used = phy_tags_manager.used;
 	tag->vmm = phy_tags_manager.vmm;
+#ifdef DEBUG
+	tag->type = phy_tags_manager.type;
+#endif
 
 	tag_phy->phy_mem = phy_tags_manager_phy.phy_mem;
 	tag_phy->ref_cnt = phy_tags_manager_phy.ref_cnt;
+#ifdef DEBUG
+	tag_phy->type = phy_tags_manager_phy.type;
+#endif
 
 	tag_link->phy_mem = tag_phy;
+#ifdef DEBUG
+	tag_link->type = phy_tags_manager_link.type;
+#endif
 
 	list_add(&tag_link->list, &tag->phy_chain);
 	mem_insert_tag(tag, &tags_list);
