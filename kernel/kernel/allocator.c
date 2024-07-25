@@ -8,8 +8,6 @@ typedef mem_malloc_tag_t malloc_tag_t;
 typedef mem_phy_mem_link_t phy_mem_link_t;
 typedef mem_phy_mem_tag_t phy_mem_tag_t;
 
-extern void mem_debug_lists(void);
-
 static bool gpa_initialized = false;
 static malloc_tag_t *gpa_allocs = nullptr;
 
@@ -183,7 +181,9 @@ fatptr_t mem_gpa_alloc(size_t req)
 
 	gpa_set_alloc(mem, gpa_allocs);
 
+#ifdef DEBUG
 	mem_debug_lists();
+#endif
 
 	return (fatptr_t){
 		.ptr = mem_get_ptr_tag(mem),
@@ -239,7 +239,9 @@ void mem_gpa_free(fatptr_t freeing)
 
 	mem_unregister_tag(tag_to_free);
 	tag = nullptr;
+#ifdef DEBUG
 	mem_debug_lists();
+#endif
 }
 
 allocator_t get_gpa_allocator()

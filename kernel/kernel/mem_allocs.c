@@ -620,6 +620,7 @@ static void init_tags(malloc_tag_t *manager)
 	phy_mem_link_t *link =
 		list_entry(manager->phy_chain.next, phy_mem_link_t, list);
 	link->phy_mem->phy_mem = new_tags_phy;
+	link->phy_mem->ref_cnt = 0;
 
 #ifdef DEBUG
 	manager->type = MANAGER;
@@ -881,7 +882,9 @@ void init_kmalloc(void)
 		(((phy_mem_tag_t *)tag->ptr)[i]).tag_manager = tag;
 	}
 
+#ifdef DEBUG
 	mem_debug_lists();
+#endif
 }
 
 malloc_tag_t *mem_find_best_fit(size_t req)

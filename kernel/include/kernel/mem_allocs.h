@@ -61,3 +61,7 @@ bool mem_remove_tag(mem_malloc_tag_t *tag, struct list_head *list);
 void mem_give_tag(mem_malloc_tag_t *);
 // Get malloc_tag* from free_tags_list
 mem_malloc_tag_t *mem_get_tag();
+
+#ifdef DEBUG
+void mem_debug_lists(void);
+#endif
