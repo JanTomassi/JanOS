@@ -119,9 +119,11 @@ static void invalidate_low_range(void)
 static inline void print_elf_sector(Elf32_Shdr *elf_sec, char *elf_sec_str,
 				    size_t i)
 {
+#ifdef DEBUG
 	mprint("Section (%s): [Address: %x, Size: %x, Type: %x, flags: %x]\n",
 	       &elf_sec_str[elf_sec[i].sh_name], elf_sec[i].sh_addr,
 	       elf_sec[i].sh_size, elf_sec[i].sh_type, elf_sec[i].sh_flags);
+#endif
 }
 
 static void recreate_vir_mem(multiboot_elf_section_header_table_t elf)
@@ -135,12 +137,16 @@ static void recreate_vir_mem(multiboot_elf_section_header_table_t elf)
 
 	for (size_t i = 0; i < elf.num; i++) {
 		if ((elf_sec[i].sh_flags & 0x2) == 0) {
+#ifdef DEBUG
 			mprint("Section (%s) dosn't allocate memory at runtime\n",
 			       &elf_sec_str[elf_sec[i].sh_name]);
+#endif
 			continue;
 		} else if (elf_sec[i].sh_addr < &HIGHER_HALF) {
+#ifdef DEBUG
 			mprint("Section (%s) isn't part of the higher half kernel\n",
 			       &elf_sec_str[elf_sec[i].sh_name]);
+#endif
 			continue;
 		} else {
 			print_elf_sector(elf_sec, elf_sec_str, i);
@@ -256,6 +262,7 @@ LIST_HEAD(vmm_free_list);
 LIST_HEAD(vmm_used_list);
 LIST_HEAD(vmm_tags_list);
 
+#ifdef DEBUG
 static void debug_vmm_list(void)
 {
 	size_t i = 0;
@@ -281,6 +288,7 @@ static void debug_vmm_list(void)
 	}
 	mprint("    %u unused vmm_tags\n", i);
 }
+#endif
 
 static struct list_head *
 vir_mem_find_prev_used_chunk(struct vmm_entry *to_alloc)
@@ -334,7 +342,9 @@ struct vmm_entry *vir_mem_alloc(size_t req_size, uint8_t flags)
 
 	list_add(&tag->list, vir_mem_find_prev_used_chunk(tag)->prev);
 
+#ifdef DEBUG
 	debug_vmm_list();
+#endif
 
 	return tag;
 }
@@ -389,7 +399,9 @@ void vir_mem_free(void *ptr)
 		}
 	}
 
+#ifdef DEBUG
 	debug_vmm_list();
+#endif
 }
 
 static struct vmm_entry init_find_free_chunk(struct list_head *vmm_init_list)
@@ -479,14 +491,18 @@ void init_vir_mem(multiboot_info_t *mbd)
 	char *elf_sec_str = (char *)elf_sec[mbd->u.elf_sec.shndx].sh_addr;
 
 	for (size_t i = 0; i < mbd->u.elf_sec.num; i++) {
+#ifdef DEBUG
 		mprint("Section (%s): [Address: %x, Size: %x, Type: %x, flags: %x]\n",
 		       &elf_sec_str[elf_sec[i].sh_name], elf_sec[i].sh_addr,
 		       elf_sec[i].sh_size, elf_sec[i].sh_type,
 		       elf_sec[i].sh_flags);
+#endif
 
 		if ((elf_sec[i].sh_flags & 0x2) == 0) {
+#ifdef DEBUG
 			mprint("Section (%s) dosn't allocate memory at runtime\n",
 			       &elf_sec_str[elf_sec[i].sh_name]);
+#endif
 			continue;
 		}
 
