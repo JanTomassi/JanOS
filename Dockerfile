@@ -13,8 +13,8 @@ RUN pacman -Syu --noconfirm nasm grub libisoburn mtools
 
 FROM build-env as build
 WORKDIR /build
-COPY build.sh clean.sh config.sh default-host.sh headers.sh iso.sh qemu.sh target-triplet-to-arch.sh ./
-RUN ./iso.sh
+COPY Makefile make.config ./
+RUN make JanOS.iso
 
 
 FROM scratch AS iso

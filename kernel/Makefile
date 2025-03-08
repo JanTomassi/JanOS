@@ -1,6 +1,6 @@
-DEFAULT_HOST!=../default-host.sh
-HOST?=DEFAULT_HOST
-HOSTARCH!=../target-triplet-to-arch.sh $(HOST)
+ROOT_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+
+include ../make.config
 
 CFLAGS?=-O0 -g
 CPPFLAGS?=
@@ -42,9 +42,6 @@ $(LDFLAGS) \
 $(KERNEL_OBJS) \
 $(LIBS) \
 
-.PHONY: all clean install install-headers install-kernel
-.SUFFIXES: .o .c .S
-
 all: JanOS.kernel
 
 JanOS.kernel: $(OBJS) $(ARCHDIR)/linker.ld
@@ -73,3 +70,6 @@ install-kernel: JanOS.kernel
 	cp JanOS.kernel $(DESTDIR)$(BOOTDIR)
 
 -include $(OBJS:.o=.d)
+
+.PHONY: all clean install install-headers install-kernel
+.SUFFIXES: .o .c .S
