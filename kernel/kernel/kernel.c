@@ -137,9 +137,6 @@ void kernel_main(multiboot_info_t *mbd, unsigned int magic)
 	idt_init();
 	kprintf("IDT initialized\n");
 
-	section_divisor("Screen stats:\n");
-	kprintf("    - WIDTH: %d\n", mbd->framebuffer_width);
-	kprintf("    - HEIGHT: %d\n", mbd->framebuffer_height);
 	section_divisor("Control registers:\n");
 	debug_CR_reg();
 
@@ -157,6 +154,16 @@ void kernel_main(multiboot_info_t *mbd, unsigned int magic)
 		.ptr = (void *)mbd->framebuffer_addr,
 		.len = round_up_to_page(framebuffer_size),
 	};
+
+	section_divisor("Screen stats:\n");
+	kprintf("    - WIDTH: %d\n",   framebuffer_width);
+	kprintf("    - HEIGHT: %d\n",  framebuffer_height);
+	kprintf("    - PITCH: %d\n",   framebuffer_pitch);
+	kprintf("    - BPP: %d\n",     framebuffer_bpp);
+	kprintf("    - TYPE: %d\n",    framebuffer_type);
+	kprintf("    - SIZE: %d\n",    framebuffer_size);
+	kprintf("    - PHY.ptr: %x\n", framebuffer_phy.ptr);
+	kprintf("    - PHY.len: %d\n", framebuffer_phy.len);
 
 	section_divisor("Virtual memory init:\n");
 	init_vir_mem(mbd);
