@@ -109,8 +109,11 @@ void phy_memory_test()
 void kernel_main(multiboot_info_t *mbd, unsigned int magic)
 {
 	display_t serial_dpy = init_serial();
-	if (serial_dpy.putc != nullptr || serial_dpy.puts != nullptr)
-		display_setcurrent(display_register(serial_dpy));
+	uint8_t serial_dpy_reg = DISPLAY_MAX_DISPS;
+	if (serial_dpy.putc != nullptr || serial_dpy.puts != nullptr){
+		serial_dpy_reg = display_register(serial_dpy);
+		display_setcurrent(serial_dpy_reg);
+	}
 
 	/* Make sure the magic number matches for memory mapping*/
 	if (magic != MULTIBOOT_BOOTLOADER_MAGIC) {
