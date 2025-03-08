@@ -66,13 +66,15 @@ JanOS.iso: build
 
 
 qemu_debug: JanOS.iso
-	qemu-system-${ARCH} -s -S -cdrom $< -audiodev pa,id=speaker \
-	-machine pcspk-audiodev=speaker
+	qemu-system-${ARCH} -s -S -audiodev pa,id=speaker \
+	-machine pcspk-audiodev=speaker \
+	-drive file=JanOS.iso,format=raw -drive file=empty.fat32,format=raw
 
 
 qemu: JanOS.iso
-	qemu-system-${ARCH} -cdrom JanOS.iso -audiodev pa,id=speaker \
-	-machine pcspk-audiodev=speaker
+	qemu-system-${ARCH} -audiodev pa,id=speaker \
+	-machine pcspk-audiodev=speaker \
+	-drive file=JanOS.iso,format=raw -drive file=empty.fat32,format=raw
 
 
 .PHONY: build clean headers qemu qemu_debug
