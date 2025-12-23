@@ -8,25 +8,25 @@ isr_default_msg:
 section .data
 global isr_stub_table
 isr_stub_table:
-	%assign i 0 
+	%assign i 0
 	%rep    256
     	dd 	isr_stub_%+i ; use DQ instead if targeting 64-bit
-	%assign i i+1 
+	%assign i i+1
 	%endrep
-	
-section .text
-%macro  get_GOT 0 
 
-        call    %%getgot 
-%%getgot: 
-        pop     ebx 
-        add     ebx,_GLOBAL_OFFSET_TABLE_+$$-%%getgot wrt ..gotpc 
+section .text
+%macro  get_GOT 0
+
+        call    %%getgot
+%%getgot:
+        pop     ebx
+        add     ebx,_GLOBAL_OFFSET_TABLE_+$$-%%getgot wrt ..gotpc
 
 %endmacro
 
 %macro isr_err_stub 1
 extern isr_%+%1_handler:function
-	
+
 isr_%+%1_handler:
 	;; printing the default msg
 	push 	0
@@ -34,16 +34,16 @@ isr_%+%1_handler:
 	push	isr_default_msg
 	call 	kprintf
 	add	esp, 12
-	
+
 	ret
-	
+
 isr_stub_%+%1:
 	pusha
 
 	get_GOT
-	
+
 	call 	[ebx+isr_%+%1_handler wrt ..got]
-	
+
 	popa
 
 	mov	[esp], eax
@@ -54,7 +54,7 @@ isr_stub_%+%1:
 
 %macro isr_no_err_stub 1
 extern isr_%+%1_handler:function
-	
+
 isr_%+%1_handler:
 	;; printing the default msg
 	push 	0
@@ -62,7 +62,7 @@ isr_%+%1_handler:
 	push	isr_default_msg
 	call 	kprintf
 	add	esp, 12
-	
+
 	ret
 
 global isr_stub_%+%1:function
@@ -72,7 +72,7 @@ isr_stub_%+%1:
 	get_GOT
 
 	call	[ebx + isr_%+%1_handler wrt ..got]
-	
+
 	popa
 	iret
 %endmacro
@@ -80,7 +80,7 @@ isr_stub_%+%1:
 %macro isr_irq_master_stub 1
 global isr_%+%1_handler:function weak
 extern isr_%+%1_handler:function strong
-	
+
 isr_%+%1_handler:
 	;; printing the default msg
 	push 	0
@@ -88,7 +88,7 @@ isr_%+%1_handler:
 	push	isr_default_msg
 	call 	kprintf
 	add	esp, 12
-	
+
 	ret
 
 global isr_stub_%+%1:function
@@ -98,10 +98,10 @@ isr_stub_%+%1:
 	get_GOT
 
 	call	[ebx + isr_%+%1_handler wrt ..got]
-	
+
 	mov 	al,0x20
 	out 	0x20,al	;; acknowledge the interrupt to the PIC
-	
+
 	popa
 	iret
 %endmacro
@@ -109,7 +109,7 @@ isr_stub_%+%1:
 %macro isr_irq_slave_stub 1
 global isr_%+%1_handler:function weak
 extern isr_%+%1_handler:function strong
-	
+
 isr_%+%1_handler:
 	;; printing the default msg
 	push 	0
@@ -117,7 +117,7 @@ isr_%+%1_handler:
 	push	isr_default_msg
 	call 	kprintf
 	add	esp, 12
-	
+
 	ret
 
 global isr_stub_%+%1:function
@@ -127,15 +127,15 @@ isr_stub_%+%1:
 	get_GOT
 
 	call	[ebx + isr_%+%1_handler wrt ..got]
-	
+
 	mov 	al,0x20
 	out 	0xa0,al
 	out 	0x20,al	;; acknowledge the interrupt to the PIC
-	
+
 	popa
 	iret
-%endmacro	
-	
+%endmacro
+
 
 isr_no_err_stub 0
 isr_no_err_stub 1
