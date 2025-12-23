@@ -57,24 +57,35 @@ JanOS.iso: build
 	cp sysroot/boot/JanOS.kernel isodir/boot/JanOS.kernel
 
 	echo "set timeout=1"                     > isodir/boot/grub/grub.cfg
-	echo "insmod all_video"                 >> isodir/boot/grub/grub.cfg
-	echo 'menuentry "JanOS" {'              >> isodir/boot/grub/grub.cfg
-	echo "    multiboot /boot/JanOS.kernel" >> isodir/boot/grub/grub.cfg
-	echo "}"                                >> isodir/boot/grub/grub.cfg
+	echo "insmod all_video"                  >> isodir/boot/grub/grub.cfg
+	echo "insmod acpi"                  	 >> isodir/boot/grub/grub.cfg
+	echo 'menuentry "JanOS" {'               >> isodir/boot/grub/grub.cfg
+	echo "    multiboot2 /boot/JanOS.kernel" >> isodir/boot/grub/grub.cfg
+	echo "}"                                 >> isodir/boot/grub/grub.cfg
 
 	grub-mkrescue -o JanOS.iso isodir
 
 
 qemu_debug: JanOS.iso
 	qemu-system-${ARCH} -s -S -audiodev pa,id=speaker \
+	-m 1G \
 	-machine pcspk-audiodev=speaker \
-	-drive file=JanOS.iso,format=raw -drive file=empty.fat32,format=raw
+	-drive file=JanOS.iso,format=raw -drive file=harry_potter.raw,format=raw
 
-
-qemu: JanOS.iso
+qemu_sata: JanOS.iso
 	qemu-system-${ARCH} -audiodev pa,id=speaker \
+	-m 1G \
 	-machine pcspk-audiodev=speaker \
-	-drive file=JanOS.iso,format=raw -drive file=empty.fat32,format=raw
+	-drive id=os_file,file=JanOS.iso,format=raw,if=none -drive id=test_disk,file=harry_potter.raw,format=raw,if=none \
+	-device ahci,id=ahci -device ide-hd,drive=os_file,bus=ahci.0 -device ide-hd,drive=test_disk,bus=ahci.1
 
+# -bios /usr/share/OVMF/x64/OVMF.4m.fd
+qemu: JanOS.iso
+	qemu-system-${ARCH} \
+	-m 1G \
+	-machine q35 -cpu qemu64 \
+	-cdrom JanOS.iso \
+	-boot order=d \
+	-drive id=test_disk,file=harry_potter.raw,format=raw
 
 .PHONY: build clean headers qemu qemu_debug

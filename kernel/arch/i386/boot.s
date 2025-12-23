@@ -1,63 +1,47 @@
-PAGE_ALIGN	equ 	(1<<0) ;; align loaded modules on page boundaries 
-MEMINFO 	equ		(1<<1) ;; provide memory map 
-VIDEOMODE   equ		(2<<1) ;; provide video mode info and suggests setting 
-FLAGS 		equ 	VIDEOMODE | PAGE_ALIGN | MEMINFO	;; this is the Multiboot 'flag' field 
-MAGIC 		equ 	0x1BADB002 ;; 'magic number' lets bootloader find the header 
-CHECKSUM 	equ 	-(MAGIC + FLAGS) ;; checksum of above, to prove we are multiboot
-
-;; Declare a multiboot header that marks the program as a kernel. These are magic
-;; values that are documented in the multiboot standard. The bootloader will
-;; search for this signature in the first 8 KiB of the kernel file, aligned at a
-;; 32-bit boundary. The signature is in its own section so the header can be
-;; forced to be within the first 8 KiB of the kernel file.
-;; Offset	Type	Field Name		Note
-;; 0		u32		magic			required
-;; 4		u32		flags			required
-;; 8		u32		checksum		required
-;; 12		u32		header_addr		if flags[16] is set
-;; 16		u32		load_addr		if flags[16] is set
-;; 20		u32		load_end_addr	if flags[16] is set
-;; 24		u32		bss_end_addr	if flags[16] is set
-;; 28		u32		entry_addr		if flags[16] is set
-;; 32		u32		mode_type		if flags[2] is set
-;; 36		u32		width			if flags[2] is set
-;; 40		u32		height			if flags[2] is set
-;; 44		u32		depth			if flags[2] is set
 section .multiboot
-	align 4
-	dd MAGIC	; magic
-	dd FLAGS	; falgs
-	dd CHECKSUM	; checksum
-	dd 0		; header_addr
-	dd 0		; load_addr
-	dd 0		; load_end_addr
-	dd 0		; bss_edn_addr
-	dd 0		; entry_addr
-	dd 0		; mode_type
-	dd 0		; width
-	dd 0		; height
-	dd 32		; depth
+	align 8
+multiboot_header:
+	dd 0xe85250d6				   ; magic
+	dd 0					   ; architecture
+	dd multiboot_header_end - multiboot_header ; length
+	dd -(0xe85250d6 + 0 + (multiboot_header_end - multiboot_header)) ; checksum
+	align 8
+framebuffer_tag_start:
+	align 8
+        dw 5
+        dw 1
+        dd framebuffer_tag_end - framebuffer_tag_start
+        dd 800
+        dd 400
+        dd 32
+	align 8
+framebuffer_tag_end:
+	align 8
+	dd 0
+        dd 8
+	align 8
+multiboot_header_end:
 
 
 extern kernel_main
 extern exception_handler
-extern kprintf	
-	
+extern kprintf
 
-isr_halt:	
+
+isr_halt:
 	cli
 .inf_loop:
 	hlt
 	jmp .inf_loop
 
 extern _GLOBAL_OFFSET_TABLE_
-	
-%macro  get_GOT 0 
 
-        call    %%getgot 
-  %%getgot: 
-        pop     ebx 
-        add     ebx,_GLOBAL_OFFSET_TABLE_+$$-%%getgot wrt ..gotpc 
+%macro  get_GOT 0
+
+        call    %%getgot
+  %%getgot:
+        pop     ebx
+        add     ebx,_GLOBAL_OFFSET_TABLE_+$$-%%getgot wrt ..gotpc
 
 %endmacro
 
@@ -80,7 +64,7 @@ gdt_kcode:	dq 58434644969848831
 gdt_kdata: 	dq 58425848876826623
 gdt_ucode:	dq 58540198086115327
 gdt_udata:	dq 58531401993093119
-gdt.end:	
+gdt.end:
 
 gdtr:
 	dw 	gdt.end - gdt
@@ -108,7 +92,6 @@ _start:
 	or	ecx, 0x10
 	mov	cr4, ecx
 
-	;; 
 	mov	ecx, cr0
 	or	ecx, 0x80000000
 	mov 	cr0, ecx
@@ -142,7 +125,7 @@ stack_bottom:
 stack_top:
 
 
-section .text	
+section .text
 call_kernel:
 	;; The bootloader has loaded us into 32-bit protected mode on a x86
 	;; machine. Interrupts are disabled. Paging is disabled. The processor
@@ -155,22 +138,22 @@ call_kernel:
 	;; itself. It has absolute and complete power over the
 	;; machine.
 
-	
 	;; To set up a stack, we set the esp register to point to the top of the
 	;; stack (as it grows downwards on x86 systems). This is necessarily done
 	;; in assembly as languages such as C cannot function without a stack.
-	
+
 	mov 	esp, stack_top
 	mov 	ebp, stack_top
 
-	push 	eax
 	push	ebx
+	push 	eax
+
 
 	mov 	eax, cr0
 	and 	ax, 0xFFFB	; clear coprocessor emulation CR0.EM
 	or 	ax, 0x2		; set coprocessor monitoring  CR0.MP
-	mov 	cr0, eax	
-	mov 	eax, cr4	
+	mov 	cr0, eax
+	mov 	eax, cr4
 	or 	ax, 3 << 9 ; set CR4.OSFXSR and CR4.OSXMMEXCPT at the same time
 	mov 	cr4, eax
 
@@ -182,19 +165,19 @@ call_kernel:
 	;; yet. The GDT should be loaded here. Paging should be enabled here.
 	;; C++ features such as global constructors and exceptions will require
 	;; runtime support to work as well.
-	
+
 	lgdt  	[gdtr]
 	call 	reloadSegments
 
 	;; call _init
-	
+
 	;; Enter the high-level kernel. The ABI requires the stack is 16-byte
 	;; aligned at the time of the call instruction (which afterwards pushes
 	;; the return pointer of size 4 bytes). The stack was originally 16-byte
 	;; aligned above and we've pushed a multiple of 16 bytes to the
 	;; stack since (pushed 0 bytes so far), so the alignment has thus been
 	;; preserved and the call is well defined.
-	
+
 	call 	kernel_main
 
 	;; If the system has nothing more to do, put the computer into an
@@ -207,12 +190,12 @@ call_kernel:
 	;;    Since they are disabled, this will lock up the computer.
 	;; 3) Jump to the hlt instruction if it ever wakes up due to a
 	;;    non-maskable interrupt occurring or due to system management mode.
-	
+
 	;; cli
 .inf_loop:
 	hlt
 	jmp 	.inf_loop
-	
+
 setGdt:
 	mov	ax, [esp + 4]
 	mov	[gdtr], ax
@@ -225,7 +208,7 @@ setGdt:
 reloadSegments:
 	;; Reload CS register containing code selector:
 	jmp   	0x08:.reload_CS ; 0x08 is a stand-in for your code segment
-	
+
 .reload_CS:
 	;; Reload data segment registers:
 	mov	ax, 0x10 ; 0x10 is a stand-in for your data segment

@@ -2,7 +2,7 @@ ROOT_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
 include ../make.config
 
-CFLAGS?=-O0 -g
+CFLAGS?=-O2 -g
 CPPFLAGS?=
 LDFLAGS?=
 LIBS?=
@@ -46,7 +46,7 @@ all: JanOS.kernel
 
 JanOS.kernel: $(OBJS) $(ARCHDIR)/linker.ld
 	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS) $(LINK_LIST)
-	grub-file --is-x86-multiboot JanOS.kernel
+	grub-file --is-x86-multiboot2 JanOS.kernel
 
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=c2x $(CFLAGS) $(CPPFLAGS)
