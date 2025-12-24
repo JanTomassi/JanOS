@@ -3,15 +3,16 @@
 #include <kernel/tty.h>
 #include <kernel/serial.h>
 #include <kernel/display.h>
+#include <kernel/elf32.h>
 
-/* #include <kernel/phy_mem.h> */
-/* #include <kernel/vir_mem.h> */
-/* #include <kernel/allocator.h> */
+#include <kernel/phy_mem.h>
+#include <kernel/vir_mem.h>
+#include <kernel/allocator.h>
 
-/* #include <kernel/interrupt.h> */
+#include <kernel/interrupt.h>
 
 #include <string.h>
-/* #include "../arch/i386/ata_pio.h" */
+#include "../arch/i386/ata_pio.h"
 #include "../arch/i386/control_register.h"
 #include "../arch/i386/cpuid.h"
 
@@ -20,11 +21,11 @@ extern void PIC_remap(int offset1, int offset2);
 extern void pic_disable(void);
 extern void init_kmalloc(void);
 
-/* size_t GLOBAL_TICK = 0; */
-/* DEFINE_IRQ(32) */
-/* { */
-/* 	++GLOBAL_TICK; */
-/* } */
+size_t GLOBAL_TICK = 0;
+DEFINE_IRQ(32)
+{
+	++GLOBAL_TICK;
+}
 
 void section_divisor(char *section_name)
 {
@@ -35,77 +36,61 @@ void section_divisor(char *section_name)
 		"-------------------------------------\n");
 }
 
-void setup_phy_mem(void *mbd);
-/* { */
-/* 	phy_mem_reset(); */
+void setup_phy_mem(const struct multiboot_tag_mmap *mmap_tag,
+		   const struct multiboot_tag_elf_sections *elf_tag)
+{
+	phy_mem_reset();
 
-/* 	section_divisor("Multiboot memory map:\n"); */
+	for (const struct multiboot_mmap_entry *mmap = mmap_tag->entries;
+	     (multiboot_uint8_t *) mmap
+	     < (multiboot_uint8_t *) mmap_tag + mmap_tag->size;
+	     mmap = (multiboot_memory_map_t *)((unsigned long) mmap + mmap_tag->entry_size)){
+		if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE) {
+			phy_mem_add_region(mmap->addr, mmap->len);
+		}
+	}
 
-/* 	/\* Loop through the memory map and display the values *\/ */
-/* 	for (size_t i = 0; i < mbd->mmap_length; */
-/* 	     i += sizeof(multiboot_memory_map_t)) { */
-/* 		multiboot_memory_map_t *mmmt = */
-/* 			(multiboot_memory_map_t *)(mbd->mmap_addr + i); */
+	const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)elf_tag->sections;
+	for (size_t i = 0; i < elf_tag->num; i++)
+		phy_mem_rm_region(elf_sec[i].sh_addr, elf_sec[i].sh_size);
 
-/* 		kprintf("Start Addr: %x | Length: %x | Size: %x | Type: %u\n", */
-/* 			(uint32_t)mmmt->addr, (uint32_t)mmmt->len, */
-/* 			(uint32_t)mmmt->size, (uint32_t)mmmt->type); */
+	section_divisor("Physical memory allocator:\n");
 
-/* 		if (mmmt->type == MULTIBOOT_MEMORY_AVAILABLE) { */
-/* 			phy_mem_add_region(mmmt->addr, mmmt->len); */
-/* 		} */
-/* 	} */
+	kprintf("   - Number of blocks: %x\n", phy_mem_get_tot_blocks());
+	kprintf("   - Number of used blocks: %x\n", phy_mem_get_used_blocks());
+	kprintf("   - Number of free blocks: %x\n", phy_mem_get_free_blocks());
+}
 
-/* 	section_divisor("ELF section header:\n"); */
+void phy_memory_test()
+{
+	section_divisor("1. Physical memory allocation test:\nTesting if they will overlap:\n");
 
-/* 	Elf32_Shdr *elf_sec = mbd->u.elf_sec.addr; */
-/* 	char *elf_sec_str = (char *)elf_sec[mbd->u.elf_sec.shndx].sh_addr; */
-/* 	for (size_t i = 0; i < mbd->u.elf_sec.num; i++) { */
-/* 		kprintf("Section (%s): [Address: %x, Size: %x]\n", */
-/* 			&elf_sec_str[elf_sec[i].sh_name], elf_sec[i].sh_addr, */
-/* 			elf_sec[i].sh_size); */
+	fatptr_t alloc = phy_mem_alloc(4096 * 1);
+	kprintf("Step 1 alloc one block without freeing: %x\n", alloc.ptr);
 
-/* 		phy_mem_rm_region(elf_sec[i].sh_addr, elf_sec[i].sh_size); */
-/* 	} */
+	fatptr_t alloc2 = phy_mem_alloc(4096 * 1);
+	kprintf("Step 2 alloc one block without freeing: %x\n", alloc2.ptr);
 
-/* 	section_divisor("Physical memory allocator:\n"); */
+	kprintf("Step 3 are they equal: %s\n",
+		alloc.ptr == alloc2.ptr ? "true" : "false");
 
-/* 	kprintf("   - Number of blocks: %x\n", phy_mem_get_tot_blocks()); */
-/* 	kprintf("   - Number of used blocks: %x\n", phy_mem_get_used_blocks()); */
-/* 	kprintf("   - Number of free blocks: %x\n", phy_mem_get_free_blocks()); */
-/* } */
+	section_divisor(
+		"2. Physical memory allocation test:\nTesting if reuse work:\n");
 
-void phy_memory_test();
-/* { */
-/* 	section_divisor( */
-/* 		"1. Physical memory allocation test:\nTesting if they will overlap:\n"); */
+	fatptr_t alloc3 = phy_mem_alloc(4096 * 1);
+	kprintf("Step 1 alloc one block then free it: %x\n", alloc3.ptr);
+	phy_mem_free(alloc3);
 
-/* 	fatptr_t alloc = phy_mem_alloc(4096 * 1); */
-/* 	kprintf("Step 1 alloc one block without freeing: %x\n", alloc.ptr); */
+	fatptr_t alloc4 = phy_mem_alloc(4096 * 1);
+	kprintf("Step 2 alloc one block then free it: %x\n", alloc4.ptr);
+	phy_mem_free(alloc4);
 
-/* 	fatptr_t alloc2 = phy_mem_alloc(4096 * 1); */
-/* 	kprintf("Step 2 alloc one block without freeing: %x\n", alloc2.ptr); */
+	kprintf("Step 3 are they equal: %s\n",
+		alloc3.ptr == alloc4.ptr ? "true" : "false");
 
-/* 	kprintf("Step 3 are they equal: %s\n", */
-/* 		alloc.ptr == alloc2.ptr ? "true" : "false"); */
-
-/* 	section_divisor( */
-/* 		"2. Physical memory allocation test:\nTesting if reuse work:\n"); */
-
-/* 	fatptr_t alloc3 = phy_mem_alloc(4096 * 1); */
-/* 	kprintf("Step 1 alloc one block then free it: %x\n", alloc3.ptr); */
-/* 	phy_mem_free(alloc3); */
-
-/* 	fatptr_t alloc4 = phy_mem_alloc(4096 * 1); */
-/* 	kprintf("Step 2 alloc one block then free it: %x\n", alloc4.ptr); */
-/* 	phy_mem_free(alloc4); */
-
-/* 	kprintf("Step 3 are they equal: %s\n", */
-/* 		alloc3.ptr == alloc4.ptr ? "true" : "false"); */
-
-/* 	phy_mem_free(alloc2); */
-/* 	phy_mem_free(alloc); */
-/* } */
+	phy_mem_free(alloc2);
+	phy_mem_free(alloc);
+}
 
 void kernel_main(unsigned int magic, unsigned long addr)
 {
@@ -132,6 +117,9 @@ void kernel_main(unsigned int magic, unsigned long addr)
 
 	size_t size = *(unsigned *) addr;
 	kprintf("Announced mbi size %x\n", size);
+
+	struct multiboot_tag_mmap *mmap_tag = nullptr;
+	struct multiboot_tag_elf_sections *elf_sec_tag = nullptr;
 
 	for (struct multiboot_tag *tag = (struct multiboot_tag *) (addr + 8);
 	     tag->type != MULTIBOOT_TAG_TYPE_END;
@@ -165,14 +153,13 @@ void kernel_main(unsigned int magic, unsigned long addr)
 				((struct multiboot_tag_bootdev *) tag)->part);
 			break;
 		case MULTIBOOT_TAG_TYPE_MMAP: {
+			mmap_tag = (struct multiboot_tag_mmap *)tag;
 			multiboot_memory_map_t *mmap;
 			kprintf("mmap\n");
-			for (mmap = ((struct multiboot_tag_mmap *) tag)->entries;
+			for (mmap = mmap_tag->entries;
 			     (multiboot_uint8_t *) mmap
 			     < (multiboot_uint8_t *) tag + tag->size;
-			     mmap = (multiboot_memory_map_t *)
-                   ((unsigned long) mmap
-                    + ((struct multiboot_tag_mmap *) tag)->entry_size))
+			     mmap = (multiboot_memory_map_t *)((unsigned long) mmap + mmap_tag->entry_size))
 				kprintf(" base_addr = %x%x,"
 					" length = %x%x, type = %x\n",
 					(unsigned) (mmap->addr >> 32),
@@ -180,6 +167,16 @@ void kernel_main(unsigned int magic, unsigned long addr)
 					(unsigned) (mmap->len >> 32),
 					(unsigned) (mmap->len & 0xffffffff),
 					(unsigned) mmap->type);
+		}
+			break;
+		case MULTIBOOT_TAG_TYPE_ELF_SECTIONS: {
+			elf_sec_tag = (struct multiboot_tag_elf_sections *)tag;
+			const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)elf_sec_tag->sections;
+			const char *elf_sec_str = (char*)(elf_sec[elf_sec_tag->shndx].sh_addr);
+			for (size_t i = 0; i < elf_sec_tag->num; i++)
+				kprintf("Section (%s): [Address: %x, Size: %x]\n",
+					&elf_sec_str[elf_sec[i].sh_name], elf_sec[i].sh_addr,
+					elf_sec[i].sh_size);
 		}
 			break;
 		case MULTIBOOT_TAG_TYPE_FRAMEBUFFER: {
@@ -226,63 +223,54 @@ void kernel_main(unsigned int magic, unsigned long addr)
 				break;
 			}
 
-			for (i = 0; i < tagfb->common.framebuffer_width
-				    && i < tagfb->common.framebuffer_height; i++){
-				switch (tagfb->common.framebuffer_bpp){
-				case 8:{
-					multiboot_uint8_t *pixel = fb+ tagfb->common.framebuffer_pitch * i + i;
-					*pixel = color;
-				}
-					break;
-				case 15:
-				case 16:{
-					multiboot_uint16_t *pixel
-						= fb + tagfb->common.framebuffer_pitch * i + 2 * i;
-					*pixel = color;
-				}
-					break;
-				case 24:{
-					multiboot_uint32_t *pixel
-						= fb + tagfb->common.framebuffer_pitch * i + 3 * i;
-					*pixel = (color & 0xffffff) | (*pixel & 0xff000000);
-				}
-					break;
+			/* for (i = 0; i < tagfb->common.framebuffer_width */
+			/* 	    && i < tagfb->common.framebuffer_height; i++){ */
+			/* 	switch (tagfb->common.framebuffer_bpp){ */
+			/* 	case 8:{ */
+			/* 		multiboot_uint8_t *pixel = fb+ tagfb->common.framebuffer_pitch * i + i; */
+			/* 	} */
+			/* 		break; */
+			/* 	case 15: */
+			/* 	case 16:{ */
+			/* 		multiboot_uint16_t *pixel */
+			/* 			= fb + tagfb->common.framebuffer_pitch * i + 2 * i; */
+			/* 	} */
+			/* 		break; */
+			/* 	case 24:{ */
+			/* 		multiboot_uint32_t *pixel */
+			/* 			= fb + tagfb->common.framebuffer_pitch * i + 3 * i; */
+			/* 	} */
+			/* 		break; */
 
-				case 32:{
-					multiboot_uint32_t *pixel
-						= fb + tagfb->common.framebuffer_pitch * i + 4 * i;
-					*pixel = color;
-				}
-					break;
-				}
-			}
+			/* 	case 32:{ */
+			/* 		multiboot_uint32_t *pixel */
+			/* 			= fb + tagfb->common.framebuffer_pitch * i + 4 * i; */
+			/* 	} */
+			/* 		break; */
+			/* 	} */
+			/* } */
 			break;
 		}
 		}
 	}
 
-	/* Check bit 6 to see if we have a valid memory map */
-	/* if (!(mbd->flags >> 6 & 0x1)) { */
-	/* 	panic("invalid memory map given by GRUB bootloader\n"); */
-	/* } */
+	section_divisor("Initializing programable interrupt controller:\n");
 
-	/* section_divisor("Initializing programable interrupt controller:\n"); */
+	PIC_remap(0x20, 0x28);
 
-	/* PIC_remap(0x20, 0x28); */
+	kprintf("- IRQ Master: start at dec: %u, hex: %x\n"
+		"                end at dec: %u, hex: %x\n",
+		0x20, 0x20, 0x20 + 7, 0x20 + 7);
+	kprintf("- IRQ Slave:  start at dec: %u, hex: %x\n"
+		"                end at dec: %u, hex: %x\n",
+		0x28, 0x28, 0x28 + 7, 0x28 + 7);
 
-	/* kprintf("    - IRQ Master: start at dec: %u, hex: %x\n" */
-	/* 	"                    end at dec: %u, hex: %x\n", */
-	/* 	0x20, 0x20, 0x20 + 7, 0x20 + 7); */
-	/* kprintf("    - IRQ Slave:  start at dec: %u, hex: %x\n" */
-	/* 	"                    end at dec: %u, hex: %x\n", */
-	/* 	0x28, 0x28, 0x28 + 7, 0x28 + 7); */
+	section_divisor("Initializing interrupt description table:\n");
+	idt_init();
+	kprintf("IDT initialized\n");
 
-	/* section_divisor("Initializing interrupt description table:\n"); */
-	/* idt_init(); */
-	/* kprintf("IDT initialized\n"); */
-
-	/* setup_phy_mem(mbd); */
-	/* phy_memory_test(); */
+	setup_phy_mem(mmap_tag, elf_sec_tag);
+	phy_memory_test();
 
 	/* size_t framebuffer_width = mbd->framebuffer_width; */
 	/* size_t framebuffer_height = mbd->framebuffer_height; */
@@ -306,35 +294,47 @@ void kernel_main(unsigned int magic, unsigned long addr)
 	/* kprintf("    - PHY.ptr: %x\n", framebuffer_phy.ptr); */
 	/* kprintf("    - PHY.len: %d\n", framebuffer_phy.len); */
 
-	/* section_divisor("Virtual memory init:\n"); */
-	/* init_vir_mem(mbd); */
+	section_divisor("Virtual memory init:\n");
+	init_vir_mem(elf_sec_tag);
 
-	/* init_kmalloc(); */
+	section_divisor("Init kernel memory allocator:\n");
 
-	/* allocator_t gpa_alloc = get_gpa_allocator(); */
+	init_kmalloc();
 
-	/* fatptr_t mem1 = gpa_alloc.alloc(4096 + 4); */
-	/* fatptr_t mem2 = gpa_alloc.alloc(128); */
+	allocator_t gpa_alloc = get_gpa_allocator();
 
-	/* gpa_alloc.free(mem2); */
-	/* gpa_alloc.free(mem1); */
+	section_divisor("Testing gpa alloc:\n");
 
-	/* mem1 = gpa_alloc.alloc(4096 + 4); */
-	/* mem2 = gpa_alloc.alloc(512); */
+	fatptr_t mem1 = gpa_alloc.alloc(4096);
+	kprintf("mem1 allocated\n");
+	fatptr_t mem2 = gpa_alloc.alloc(128);
+	kprintf("mem2 allocated\n");
 
-	/* gpa_alloc.free(mem1); */
-	/* gpa_alloc.free(mem2); */
+	gpa_alloc.free(mem2);
+	kprintf("mem2 freed\n");
+	gpa_alloc.free(mem1);
+	kprintf("mem1 freed\n");
 
-	/* section_divisor("ATA PIO Test drives:\n"); */
-	/* kprintf("    - hda: %s type \n", ata_pio_debug_devtype(ata_pio_detect_devtype(0))); */
-	/* kprintf("    - hdb: %s type\n", ata_pio_debug_devtype(ata_pio_detect_devtype(0))); */
+	mem1 = gpa_alloc.alloc(4096);
+	kprintf("mem1 allocated\n");
+	mem2 = gpa_alloc.alloc(512);
+	kprintf("mem2 allocated\n");
 
-	/* // kprintf("Content of hdb\n\n"); */
-	/* // for (size_t i = 0; i < (430*1024) / 512; i++){ */
-	/* // 	char test_array[512] = {0}; */
-	/* // 	ata_pio_28_read(i, 1, test_array); */
-	/* // 	kprintf("%s", test_array); */
-	/* // } */
+	gpa_alloc.free(mem1);
+	kprintf("mem1 freed\n");
+	gpa_alloc.free(mem2);
+	kprintf("mem2 freed\n");
+
+	section_divisor("ATA PIO Test drives:\n");
+	kprintf("    - hda: %s type \n", ata_pio_debug_devtype(ata_pio_detect_devtype(0)));
+	kprintf("    - hdb: %s type\n", ata_pio_debug_devtype(ata_pio_detect_devtype(0)));
+
+	kprintf("Content of hdb\n\n");
+	for (size_t i = 0; i < (430*1024) / 512; i++){
+		char test_array[512] = {0};
+		ata_pio_28_read(i, 1, test_array);
+		kprintf("%s", test_array);
+	}
 
 	/* struct vmm_entry *framebuffer_virt = vir_mem_alloc( */
 	/* 	round_up_to_page(framebuffer_size), */
