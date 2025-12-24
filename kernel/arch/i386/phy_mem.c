@@ -8,9 +8,9 @@
 	(GIBI(4ULL) / BLOCK_SIZE / BIT(sizeof(uint32_t))) // (0x8000)
 static_assert(ALLOC_BITMAP == 0x8000); // Limit to x86_32 max addressable memory
 
-/** 
+/**
  * Memory book keeping will be keept using a linked list of block all
- * the element of each block will be a fast pointer (address and size)
+ * the element of each block will be a fat pointer (address and size)
  * and the last element will rapresent links to next and prev
  **/
 #define BOOKING_COUNT BLOCK_SIZE / sizeof(fatptr_t) - 1
