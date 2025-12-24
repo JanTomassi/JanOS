@@ -54,7 +54,7 @@ struct vmm_entry {
 void *get_phy_addr(void *vir_addr);
 void *get_vir_addr(void *phy_addr);
 
-void init_vir_mem(multiboot_info_t *mbd);
+void init_vir_mem(const struct multiboot_tag_elf_sections *elf_tag);
 bool map_pages(fatptr_t *physaddr, struct vmm_entry *virt_mem);
 bool map_page(void *phy_addr, void *virt_addr, uint16_t virt_flags);
 
