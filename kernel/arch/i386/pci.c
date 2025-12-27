@@ -4,12 +4,8 @@
 #define PCI_CONFIG_ADDRESS 0xCF8
 #define PCI_CONFIG_DATA 0xCFC
 
-#define PCI_HEADER_TYPE 0x0E
-#define PCI_BAR0 0x10
-#define PCI_INTERRUPT_LINE 0x3C
-#define PCI_COMMAND 0x04
-
-uint32_t pci_config_read_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset)
+uint32_t pci_config_read_dword(uint8_t bus, uint8_t slot, uint8_t func,
+			       uint8_t offset)
 {
 	uint32_t address = (uint32_t)((bus << 16) | (slot << 11) | (func << 8) | (offset & 0xFC) | 0x80000000);
 	outd(PCI_CONFIG_ADDRESS, address);

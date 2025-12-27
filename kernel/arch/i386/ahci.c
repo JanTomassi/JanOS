@@ -406,7 +406,8 @@ bool ahci_probe(struct ahci_controller *out)
 				if (!is_ahci_class(bus_id, slot, func))
 					continue;
 
-				uint32_t bar5 = pci_config_read_dword(bus_id, slot, func, PCI_BAR5_OFFSET);
+				uint32_t bar5 = pci_config_read_dword(
+					bus_id, slot, func, PCI_BAR5);
 				if (!bar5 || (bar5 & 0x1))
 					continue;
 
@@ -431,7 +432,8 @@ bool ahci_probe(struct ahci_controller *out)
 				if (!port_map)
 					continue;
 
-				uint32_t line_reg = pci_config_read_dword(bus_id, slot, func, PCI_INTERRUPT_LINE_OFFSET);
+				uint32_t line_reg = pci_config_read_dword(
+					bus_id, slot, func, PCI_INTERRUPT_LINE);
 				out->bus = bus_id;
 				out->device = slot;
 				out->function = func;
