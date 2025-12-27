@@ -3,6 +3,10 @@ export PROJECTS ::= libc kernel
 
 include make.config
 
+# Toolchain requirements:
+# - nasm available as "nasm -f elf32" on PATH.
+# - Cross tools i686-elf-{gcc,ar,ld} expected in tools/build/bin; run
+#   "cd tools && ./get-tool.sh" to build/install them locally.
 export AR ::= $(shell pwd)/tools/build/bin/i686-elf-ar
 export AS ::= nasm -f elf32
 export CC ::= $(shell pwd)/tools/build/bin/i686-elf-gcc

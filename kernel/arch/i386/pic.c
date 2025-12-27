@@ -1,3 +1,4 @@
+#include "pic.h"
 #include "port.h"
 
 #define PIC1 0x20 /* IO base address for master PIC */
@@ -86,4 +87,31 @@ void pic_enable(void)
 {
 	outb(PIC1_DATA, 0x00);
 	outb(PIC2_DATA, 0x00);
+}
+
+static uint16_t pic_data_port(uint8_t irq)
+{
+	return irq < 8 ? PIC1_DATA : PIC2_DATA;
+}
+
+void pic_set_mask(uint8_t irq)
+{
+	uint8_t line = irq & 7;
+	uint16_t port = pic_data_port(irq);
+	uint8_t value = inb(port) | (1u << line);
+	outb(port, value);
+}
+
+void pic_clear_mask(uint8_t irq)
+{
+	uint8_t line = irq & 7;
+	uint16_t port = pic_data_port(irq);
+	uint8_t value = inb(port) & ~(1u << line);
+	outb(port, value);
+
+	if (irq >= 8) {
+		/* Make sure the cascade line is also unmasked on the master. */
+		value = inb(PIC1_DATA) & ~(1u << 2);
+		outb(PIC1_DATA, value);
+	}
 }

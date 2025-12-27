@@ -12,17 +12,17 @@
 #include <kernel/interrupt.h>
 
 #include <string.h>
-#include "../arch/i386/ata_pio.h"
+#include "../arch/i386/storage.h"
 #include "../arch/i386/control_register.h"
+#include "../arch/i386/ps2.h"
+#include "../arch/i386/pic.h"
 #include "../arch/i386/cpuid.h"
 
 extern void idt_init(void);
-extern void PIC_remap(int offset1, int offset2);
-extern void pic_disable(void);
 extern void init_kmalloc(void);
 
 size_t GLOBAL_TICK = 0;
-DEFINE_IRQ(32)
+static void pit_tick(void)
 {
 	++GLOBAL_TICK;
 }
@@ -265,6 +265,10 @@ void kernel_main(unsigned int magic, unsigned long addr)
 		"                end at dec: %u, hex: %x\n",
 		0x28, 0x28, 0x28 + 7, 0x28 + 7);
 
+	irq_register_handler(0, pit_tick);
+	pic_clear_mask(0);
+	ps2_init();
+
 	section_divisor("Initializing interrupt description table:\n");
 	idt_init();
 	kprintf("IDT initialized\n");
@@ -325,15 +329,23 @@ void kernel_main(unsigned int magic, unsigned long addr)
 	gpa_alloc.free(mem2);
 	kprintf("mem2 freed\n");
 
-	section_divisor("ATA PIO Test drives:\n");
-	kprintf("    - hda: %s type \n", ata_pio_debug_devtype(ata_pio_detect_devtype(0)));
-	kprintf("    - hdb: %s type\n", ata_pio_debug_devtype(ata_pio_detect_devtype(0)));
+	storage_init();
+	const struct storage_driver *storage = storage_get_driver();
+
+	section_divisor("Storage Test drives:\n");
+	kprintf("    - driver: %s\n", storage_driver_name(storage->type));
+	if (storage->detect_devtype) {
+		kprintf("    - hda: %s type \n", ata_pio_debug_devtype(storage->detect_devtype(ATA_PRIMARY, ATA_MASTER)));
+		kprintf("    - hdb: %s type\n", ata_pio_debug_devtype(storage->detect_devtype(ATA_PRIMARY, ATA_SLAVE)));
+	}
 
 	kprintf("Content of hdb\n\n");
-	for (size_t i = 0; i < (430*1024) / 512; i++){
-		char test_array[512] = {0};
-		ata_pio_28_read(i, 1, test_array);
-		kprintf("%s", test_array);
+	if (storage->read28) {
+		for (size_t i = 0; i < (430*1024) / 512; i++){
+			char test_array[512] = {0};
+			storage->read28(ATA_PRIMARY, ATA_SLAVE, i, 1, test_array);
+			kprintf("%s", test_array);
+		}
 	}
 
 	/* struct vmm_entry *framebuffer_virt = vir_mem_alloc( */

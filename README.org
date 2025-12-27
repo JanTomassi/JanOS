@@ -29,21 +29,24 @@ allocation of [1, 4096] byte
 
 ** Build
 *** Tools
-This tools are need to compile the building environment
+These tools are needed to bootstrap the cross toolchain and build the
+kernel:
 
 - bash
 - make
 - gcc
-- nasm
+- nasm (system-wide, required by the build as `nasm -f elf32`)
 - tar
 - xz
 
-Enter in the directory tools and execute the bash script get-tools.sh
+Enter in the directory tools and execute the bash script get-tools.sh.
+It builds the required i686-elf binutils/GCC/GDB toolchain into
+`tools/build/bin` (the Makefile already points CC/AR there).
 #+begin_src bash
   cd tools && ./get-tools.sh
 #+end_src
-this will download and compile or the tools needed for development
-except for nams
+This will download and compile all the tools needed for development,
+except for nasm (install it via your package manager).
 
 *** Project
 Running the build.sh script should be enough to build the kernel elf
