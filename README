@@ -1,10 +1,10 @@
-* Jan OS
+# Jan OS
 This simple kernel is an exploration project that I am developing in
 my free time, the kernel is for x86 arch I do not know if I will ever move it
 to x86_64, the booting process is made with grub and the multiboot1
 specs.
 
-** Current Feature
+## Current Feature
 The kernel support logging on serial and VGA text mode there is a
 common interface *display* to select witch output stream to use, for
 input device only ps2 is supported, all standard x86 interrupt are
@@ -13,7 +13,7 @@ for physical and virtual page allocation but is only 4KiB no 4MiB page
 and the implementation of kmalloc(memory allocator) can only handle
 allocation of [1, 4096] byte
 
-** Future Feature
+## Future Feature
 - [ ] Basic user space
   - [ ] Context switching
 - [ ] Better GPA
@@ -27,8 +27,8 @@ allocation of [1, 4096] byte
   - [ ] Display custom shape
   - [ ] Printing text as in VGA text mode
 
-** Build
-*** Tools
+## Build
+### Tools
 These tools are needed to bootstrap the cross toolchain and build the
 kernel:
 
@@ -42,21 +42,21 @@ kernel:
 Enter in the directory tools and execute the bash script get-tools.sh.
 It builds the required i686-elf binutils/GCC/GDB toolchain into
 `tools/build/bin` (the Makefile already points CC/AR there).
-#+begin_src bash
+```bash
   cd tools && ./get-tools.sh
-#+end_src
+```
 This will download and compile all the tools needed for development,
 except for nasm (install it via your package manager).
 
-*** Project
+### Project
 Running the build.sh script should be enough to build the kernel elf
 and make a UNIX like root structure in sysroot
 
-** Run
-*** ISO
+## Run
+### ISO
 To get an ISO run the iso.sh and it will output a JanOS.iso on the
 current directory.
 
-*** QEMU
+### QEMU
 If you want to use QEMU *(recommended)* run the qemu.sh script it will
 build create the iso and then run a temporary QEMU instance
