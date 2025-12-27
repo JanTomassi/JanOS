@@ -15,6 +15,11 @@ MEMORY
 
 SECTIONS
 {
+	.smp_trampoline 0x0 :
+	{
+		KEEP(*(.smp_trampoline))
+	} AT> rom
+
 	/DISCARD/ :
 	{
 		/* *(.got*) */

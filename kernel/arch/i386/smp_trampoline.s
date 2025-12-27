@@ -2,18 +2,18 @@
 ; This file is copied by the BSP to physical 0x8000 (code) and
 ; the data structure is filled separately at 0x7000.
 
-%define TRAMPOLINE_CODE_BASE 0x8000
 %define TRAMPOLINE_DATA_BASE 0x7000
 
 %define TRAMP_DATA_STACK (TRAMPOLINE_DATA_BASE + 0)
 %define TRAMP_DATA_ENTRY (TRAMPOLINE_DATA_BASE + 4)
 %define TRAMP_DATA_CR3   (TRAMPOLINE_DATA_BASE + 8)
 
-section .text
+section .smp_trampoline align=16 vstart=0
 bits 16
 
 global smp_trampoline_start
 global smp_trampoline_end
+global smp_trampoline_size
 
 smp_trampoline_start:
 	cli
@@ -66,3 +66,5 @@ gdt_descriptor:
 	dd	gdt_start
 
 smp_trampoline_end:
+align 4
+smp_trampoline_size: equ smp_trampoline_end - smp_trampoline_start
