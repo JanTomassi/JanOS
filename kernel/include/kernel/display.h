@@ -16,29 +16,26 @@ typedef struct {
 #define MODULE(name) static char *__MODULE_NAME = name;
 #define mprint(...) __mprintf(__MODULE_NAME, __VA_ARGS__);
 
-#define kerror(...)                                                       \
-	{                                                                 \
-		kprintf("***KERNEL ERROR*** in %s:%d in function: %s:\n", \
-			__FILE__, __LINE__, __func__);                    \
-		kprintf(__VA_ARGS__);                                     \
+#define kerror(...)                                                                                      \
+	{                                                                                                \
+		kprintf("***KERNEL ERROR*** in %s:%d in function: %s:\n", __FILE__, __LINE__, __func__); \
+		kprintf(__VA_ARGS__);                                                                    \
 	}
-#define BUG(...)                                                                \
-	{                                                                       \
-		kprintf("\n\n*** KERNEL BUG*** in %s:%d in function %s:\n",     \
-			__FILE__, __LINE__, __func__);                          \
-		kprintf(__VA_ARGS__);                                           \
-		_Pragma("GCC diagnostic push");                                 \
-		_Pragma("GCC diagnostic ignored \"-Wanalyzer-infinite-loop\""); \
-		while (1)                                                       \
-			;                                                       \
-		_Pragma("GCC diagnostic pop");                                  \
+#define BUG(...)                                                                                           \
+	{                                                                                                  \
+		kprintf("\n\n*** KERNEL BUG*** in %s:%d in function %s:\n", __FILE__, __LINE__, __func__); \
+		kprintf(__VA_ARGS__);                                                                      \
+		_Pragma("GCC diagnostic push");                                                            \
+		_Pragma("GCC diagnostic ignored \"-Wanalyzer-infinite-loop\"");                            \
+		while (1)                                                                                  \
+			;                                                                                  \
+		_Pragma("GCC diagnostic pop");                                                             \
 	}
-#define panic(...)                                                       \
-	{                                                                \
-		kprintf("***KERNEL PANIC*** in %s:%d in function: %s\n", \
-			__FILE__, __LINE__, __func__);                   \
-		kprintf(__VA_ARGS__);                                    \
-		abort();                                                 \
+#define panic(...)                                                                                      \
+	{                                                                                               \
+		kprintf("***KERNEL PANIC*** in %s:%d in function: %s\n", __FILE__, __LINE__, __func__); \
+		kprintf(__VA_ARGS__);                                                                   \
+		abort();                                                                                \
 	}
 
 uint8_t display_register(display_t);

@@ -31,8 +31,7 @@ static void scroll_up()
 	for (size_t y = 2; y < tty_height - 1; y++)
 		for (size_t x = 2; x < tty_width - 2; x++) {
 			const size_t new_index = buffer_offset(x, y, tty_width);
-			const size_t old_index =
-				buffer_offset(x, y - 1, tty_width);
+			const size_t old_index = buffer_offset(x, y - 1, tty_width);
 			tty_buffer[old_index] = tty_buffer[new_index];
 		}
 
@@ -76,21 +75,17 @@ void tty_putchar(char c)
 	}
 
 	if (cursor_column == tty_width - 2) {
-		tty_putentryat(' ', tty_border_color, cursor_column,
-			       cursor_row);
+		tty_putentryat(' ', tty_border_color, cursor_column, cursor_row);
 		advanced_one();
 
-		tty_putentryat('|', tty_border_color, cursor_column,
-			       cursor_row);
+		tty_putentryat('|', tty_border_color, cursor_column, cursor_row);
 		advanced_one();
 	}
 	if (cursor_column == 0) {
-		tty_putentryat('|', tty_border_color, cursor_column,
-			       cursor_row);
+		tty_putentryat('|', tty_border_color, cursor_column, cursor_row);
 		advanced_one();
 
-		tty_putentryat(' ', tty_border_color, cursor_column,
-			       cursor_row);
+		tty_putentryat(' ', tty_border_color, cursor_column, cursor_row);
 		advanced_one();
 	}
 
@@ -126,8 +121,7 @@ static void tty_reset()
 		}
 }
 
-display_t tty_text_initialize(size_t buffer_addr, size_t pitch, size_t width,
-			      size_t height, uint8_t bit_per_pixel)
+display_t tty_text_initialize(size_t buffer_addr, size_t pitch, size_t width, size_t height, uint8_t bit_per_pixel)
 {
 	tty_buffer = (void *)buffer_addr;
 
@@ -142,8 +136,5 @@ display_t tty_text_initialize(size_t buffer_addr, size_t pitch, size_t width,
 
 	tty_reset();
 
-	return (display_t){ .width = tty_width,
-			    .height = tty_height,
-			    .putc = tty_putchar,
-			    .puts = tty_write_str };
+	return (display_t){ .width = tty_width, .height = tty_height, .putc = tty_putchar, .puts = tty_write_str };
 }

@@ -4,7 +4,7 @@
 
 static struct storage_driver active_driver = {
 	.type = STORAGE_DRIVER_NONE,
-	.ahci = {0},
+	.ahci = { 0 },
 	.detect_devtype = 0,
 	.read28 = 0,
 	.write28 = 0,
@@ -25,7 +25,7 @@ const char *storage_driver_name(enum storage_driver_type type)
 
 void storage_init(void)
 {
-	struct ahci_controller ctrl = {0};
+	struct ahci_controller ctrl = { 0 };
 	if (ahci_probe(&ctrl) && ahci_init(&ctrl)) {
 		active_driver.type = STORAGE_DRIVER_AHCI;
 		active_driver.ahci = ctrl;
@@ -35,10 +35,9 @@ void storage_init(void)
 		return;
 	}
 
-	struct pci_device_info ide_dev = {0};
+	struct pci_device_info ide_dev = { 0 };
 	if (pci_find_storage(0x01, 0x01, &ide_dev)) {
-		ide_initialize(ide_dev.bar[0], ide_dev.bar[1], ide_dev.bar[2],
-			       ide_dev.bar[3], ide_dev.bar[4]);
+		ide_initialize(ide_dev.bar[0], ide_dev.bar[1], ide_dev.bar[2], ide_dev.bar[3], ide_dev.bar[4]);
 	} else {
 		ide_initialize(0, 0, 0, 0, 0);
 	}

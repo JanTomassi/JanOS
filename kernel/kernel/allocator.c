@@ -17,8 +17,7 @@ static void gpa_make_new_space(malloc_tag_t *tag, size_t req)
 {
 	size_t req_align = round_up_to_page(req);
 
-	struct vmm_entry *vir_mem = vir_mem_alloc(
-		req_align, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
+	struct vmm_entry *vir_mem = vir_mem_alloc(req_align, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
 
 	mem_set_ptr_tag(tag, vir_mem->ptr);
 	mem_set_size_tag(tag, vir_mem->size);
@@ -26,9 +25,7 @@ static void gpa_make_new_space(malloc_tag_t *tag, size_t req)
 	mem_set_vmm_tag(tag, vir_mem);
 	struct list_head *tag_chain = mem_get_chain_tag(tag);
 
-	for (void *vir_ptr = mem_get_ptr_tag(tag);
-	     vir_ptr < mem_get_ptr_tag(tag) + mem_get_size_tag(tag);
-	     vir_ptr += PAGE_SIZE) {
+	for (void *vir_ptr = mem_get_ptr_tag(tag); vir_ptr < mem_get_ptr_tag(tag) + mem_get_size_tag(tag); vir_ptr += PAGE_SIZE) {
 		fatptr_t phy_mem = phy_mem_alloc(PAGE_SIZE);
 		struct vmm_entry vir_info = {
 			.ptr = vir_ptr,
@@ -67,8 +64,7 @@ static malloc_tag_t *gpa_use_space(malloc_tag_t *tag, size_t req)
 		fatptr_t cur_phy = mem_get_fatptr_phy_mem(cur);
 
 		size_t mem_s = (size_t)mem_get_ptr_tag(mem);
-		size_t mem_e =
-			(size_t)mem_get_ptr_tag(mem) + mem_get_size_tag(mem);
+		size_t mem_e = (size_t)mem_get_ptr_tag(mem) + mem_get_size_tag(mem);
 
 		size_t tag_s = (size_t)mem_get_ptr_tag(tag) + len_acc;
 		size_t tag_e = (size_t)tag_s + cur_phy.len;
@@ -77,8 +73,7 @@ static malloc_tag_t *gpa_use_space(malloc_tag_t *tag, size_t req)
 			size_t rang_s = mem_s > tag_s ? mem_s : tag_s;
 			size_t rang_e = mem_e < tag_e ? mem_e : tag_e;
 
-			mem_set_refcnt_phy_mem(cur,
-					       mem_get_refcnt_phy_mem(cur) + 1);
+			mem_set_refcnt_phy_mem(cur, mem_get_refcnt_phy_mem(cur) + 1);
 			mem_insert_phy_mem_tag(cur, mem_chain, false);
 		}
 
@@ -92,8 +87,7 @@ static malloc_tag_t *gpa_use_space(malloc_tag_t *tag, size_t req)
 
 static void gpa_init(malloc_tag_t *mem)
 {
-	struct vmm_entry *vir_mem = vir_mem_alloc(
-		PAGE_SIZE, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
+	struct vmm_entry *vir_mem = vir_mem_alloc(PAGE_SIZE, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
 
 	mem_set_ptr_tag(mem, vir_mem->ptr);
 	mem_set_size_tag(mem, vir_mem->size);
@@ -101,9 +95,7 @@ static void gpa_init(malloc_tag_t *mem)
 	mem_set_vmm_tag(mem, vir_mem);
 	struct list_head *tag_chain = mem_get_chain_tag(mem);
 
-	for (void *vir_ptr = mem_get_ptr_tag(mem);
-	     vir_ptr < mem_get_ptr_tag(mem) + mem_get_size_tag(mem);
-	     vir_ptr += PAGE_SIZE) {
+	for (void *vir_ptr = mem_get_ptr_tag(mem); vir_ptr < mem_get_ptr_tag(mem) + mem_get_size_tag(mem); vir_ptr += PAGE_SIZE) {
 		fatptr_t phy_mem = phy_mem_alloc(PAGE_SIZE);
 		struct vmm_entry vir_info = {
 			.ptr = vir_ptr,
@@ -207,8 +199,7 @@ void mem_gpa_free(fatptr_t freeing)
 			BUG("phy_mem_tag with a zero refcnt\n");
 			break;
 		case 1: {
-			mprint("gpa freeing phy mem [ptr: %x, len: %x]\n",
-			       fatptr.ptr, fatptr.len);
+			mprint("gpa freeing phy mem [ptr: %x, len: %x]\n", fatptr.ptr, fatptr.len);
 			struct vmm_entry vir_mem = {
 				.ptr = (void *)((size_t)tag_ptr & 0xfffff000),
 				.size = fatptr.len,
@@ -222,16 +213,13 @@ void mem_gpa_free(fatptr_t freeing)
 			break;
 		}
 		default:
-			mprint("gpa not freeing phy mem [ptr: %x, len: %x]\n",
-			       fatptr.ptr, fatptr.len);
+			mprint("gpa not freeing phy mem [ptr: %x, len: %x]\n", fatptr.ptr, fatptr.len);
 			break;
 		}
 		tag_ptr += fatptr.len;
 	}
-	bool same_size = mem_get_vmm_tag(tag_to_free)->size ==
-			 mem_get_size_tag(tag_to_free);
-	bool same_ptr = mem_get_vmm_tag(tag_to_free)->ptr ==
-			mem_get_ptr_tag(tag_to_free);
+	bool same_size = mem_get_vmm_tag(tag_to_free)->size == mem_get_size_tag(tag_to_free);
+	bool same_ptr = mem_get_vmm_tag(tag_to_free)->ptr == mem_get_ptr_tag(tag_to_free);
 
 	if (same_size && same_ptr) {
 		vir_mem_free(mem_get_vmm_tag(tag_to_free)->ptr);

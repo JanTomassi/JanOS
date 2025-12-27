@@ -65,8 +65,7 @@ static size_t unumber_to_str(uintmax_t num, char *str, size_t str_len)
 
 	str[num_len] = '\0';
 
-	for (size_t digit = num % 10, i = num_len - 1; num != 0;
-	     (--i, num /= 10, digit = num % 10))
+	for (size_t digit = num % 10, i = num_len - 1; num != 0; (--i, num /= 10, digit = num % 10))
 		str[i] = '0' + digit;
 
 	return 0;
@@ -106,8 +105,7 @@ static size_t hex_to_str(uintmax_t num, char *str, size_t str_len)
 
 	str[num_len] = '\0';
 
-	for (size_t digit = num % 16, i = num_len - 1; num != 0;
-	     (--i, num /= 16, digit = num % 16)) {
+	for (size_t digit = num % 16, i = num_len - 1; num != 0; (--i, num /= 16, digit = num % 16)) {
 		if (digit >= 0 && digit <= 9)
 			str[i] = '0' + digit;
 		else if (digit >= 0xA && digit <= 0xF)

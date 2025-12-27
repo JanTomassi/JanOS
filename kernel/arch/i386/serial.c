@@ -43,17 +43,11 @@ display_t init_serial()
 
 	// Check if serial is faulty (i.e: not same byte as sent)
 	if (inb(PORT + 0) != 0xAE)
-		return (display_t){ .width = 0,
-				    .height = 0,
-				    .putc = nullptr,
-				    .puts = nullptr };
+		return (display_t){ .width = 0, .height = 0, .putc = nullptr, .puts = nullptr };
 
 	// If serial is not faulty set it in normal operation mode
 	// (not-loopback with IRQs enabled and OUT#1 and OUT#2 bits enabled)
 	outb(PORT + 4, 0x0F);
 
-	return (display_t){ .width = 0,
-			    .height = 0,
-			    .putc = write_char,
-			    .puts = serial_write_str };
+	return (display_t){ .width = 0, .height = 0, .putc = write_char, .puts = serial_write_str };
 }

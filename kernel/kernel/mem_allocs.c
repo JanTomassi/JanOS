@@ -22,7 +22,7 @@ typedef enum {
 #endif
 
 struct mem_malloc_tag {
-	void *ptr; // Virtual address for specific allocaiton
+	void *ptr;   // Virtual address for specific allocaiton
 	size_t size; // Total block size
 	size_t used; // Sized used by this block
 	struct vmm_entry *vmm;
@@ -151,19 +151,13 @@ void mem_debug_lists(void)
 	mprint("debug_lists | malloc_tags_list:\n");
 	list_for_each(&tags_list) {
 		malloc_tag_t *tag = list_entry(it, malloc_tag_t, list);
-		mprint("%x) ptr: %x | size: %x | used: %x | vmm: %x | manager: %x | type: %s\n",
-		       tag, tag->ptr, tag->size, tag->used, tag->vmm,
-		       (size_t)tag->tag_manager,
-		       get_str_type_struct(tag->type));
+		mprint("%x) ptr: %x | size: %x | used: %x | vmm: %x | manager: %x | type: %s\n", tag, tag->ptr, tag->size, tag->used, tag->vmm,
+		       (size_t)tag->tag_manager, get_str_type_struct(tag->type));
 
 		list_for_each(&tag->phy_chain) {
-			phy_mem_tag_t *phy_tag =
-				list_entry(it, phy_mem_link_t, list)->phy_mem;
-			mprint("	%x) ptr: %x | size: %x | ref_cnt: %x | manager: %x | type: %s\n",
-			       phy_tag, phy_tag->phy_mem.ptr,
-			       phy_tag->phy_mem.len, phy_tag->ref_cnt,
-			       (size_t)tag->tag_manager,
-			       get_str_type_struct(tag->type));
+			phy_mem_tag_t *phy_tag = list_entry(it, phy_mem_link_t, list)->phy_mem;
+			mprint("	%x) ptr: %x | size: %x | ref_cnt: %x | manager: %x | type: %s\n", phy_tag, phy_tag->phy_mem.ptr, phy_tag->phy_mem.len,
+			       phy_tag->ref_cnt, (size_t)tag->tag_manager, get_str_type_struct(tag->type));
 		}
 	}
 
@@ -200,8 +194,7 @@ static void alloc_phy_mem_tags(void);
 // Free allocated phy_mem_tags
 static void free_phy_mem_tags(malloc_tag_t *);
 // Insert phy_mem_tag sorted by ptr in the chain
-void mem_insert_phy_mem_tag(phy_mem_tag_t *tag, struct list_head *chain,
-			    bool sort);
+void mem_insert_phy_mem_tag(phy_mem_tag_t *tag, struct list_head *chain, bool sort);
 // Give the phy_mem_tag back to free_phy_tags_list
 void mem_give_phy_mem_tag(phy_mem_tag_t *);
 // Get the phy_mem_tag from free_phy_tags_list
@@ -241,8 +234,7 @@ static void register_to_manager(malloc_tag_t *manager)
 		BUG("manager does not manage memory")
 	}
 
-	phy_mem_tag_t *phy_mem =
-		mem_get_phy_tag_from_link(manager->phy_chain.next);
+	phy_mem_tag_t *phy_mem = mem_get_phy_tag_from_link(manager->phy_chain.next);
 	phy_mem->ref_cnt += 1;
 }
 
@@ -255,8 +247,7 @@ static void unregister_to_manager(malloc_tag_t *manager)
 		BUG("manager does not manage memory")
 	}
 
-	phy_mem_tag_t *phy_mem =
-		mem_get_phy_tag_from_link(manager->phy_chain.next);
+	phy_mem_tag_t *phy_mem = mem_get_phy_tag_from_link(manager->phy_chain.next);
 	phy_mem->ref_cnt -= 1;
 
 	bool rec_manager = manager->tag_manager == manager;
@@ -271,10 +262,8 @@ static void unregister_to_manager(malloc_tag_t *manager)
 void mem_give_tag(malloc_tag_t *tag)
 {
 	struct list_head *rm_chain_elm;
-	while (rm_chain_elm = list_pop(&tag->phy_chain),
-	       rm_chain_elm != nullptr) {
-		phy_mem_link_t *link =
-			list_entry(rm_chain_elm, phy_mem_link_t, list);
+	while (rm_chain_elm = list_pop(&tag->phy_chain), rm_chain_elm != nullptr) {
+		phy_mem_link_t *link = list_entry(rm_chain_elm, phy_mem_link_t, list);
 		mem_give_phy_mem_link(link);
 	}
 
@@ -402,8 +391,7 @@ phy_mem_tag_t *mem_get_phy_mem_tag()
 	return tag;
 }
 
-void mem_insert_phy_mem_tag(phy_mem_tag_t *tag, struct list_head *chain,
-			    bool sort)
+void mem_insert_phy_mem_tag(phy_mem_tag_t *tag, struct list_head *chain, bool sort)
 {
 	phy_mem_link_t *link = mem_get_phy_mem_link();
 	link->phy_mem = tag;
@@ -419,10 +407,7 @@ void mem_insert_phy_mem_tag(phy_mem_tag_t *tag, struct list_head *chain,
 		phy_mem_link_t *cur = list_entry(it, phy_mem_link_t, list);
 		fatptr_t cur_mem = cur->phy_mem->phy_mem;
 		fatptr_t tag_mem = tag->phy_mem;
-		if (cur_mem.ptr < tag_mem.ptr &&
-		    (prev == nullptr ||
-		     (prev != nullptr &&
-		      cur_mem.ptr > prev->phy_mem->phy_mem.ptr)))
+		if (cur_mem.ptr < tag_mem.ptr && (prev == nullptr || (prev != nullptr && cur_mem.ptr > prev->phy_mem->phy_mem.ptr)))
 			prev = cur;
 	}
 	if (prev == nullptr)
@@ -436,9 +421,7 @@ void mem_insert_tag(malloc_tag_t *tag, struct list_head *list)
 	malloc_tag_t *prev = nullptr;
 	list_for_each(list) {
 		malloc_tag_t *cur = list_entry(it, malloc_tag_t, list);
-		if (cur->ptr < tag->ptr &&
-		    (prev == nullptr ||
-		     (prev != nullptr && cur->ptr > prev->ptr)))
+		if (cur->ptr < tag->ptr && (prev == nullptr || (prev != nullptr && cur->ptr > prev->ptr)))
 			prev = cur;
 	}
 	if (prev == nullptr)
@@ -451,8 +434,7 @@ bool mem_remove_tag(malloc_tag_t *tag, struct list_head *list)
 {
 	list_for_each(list) {
 		malloc_tag_t *cur = list_entry(it, malloc_tag_t, list);
-		if (cur->ptr == tag->ptr && cur->size == tag->size &&
-		    cur->used == tag->used) {
+		if (cur->ptr == tag->ptr && cur->size == tag->size && cur->used == tag->used) {
 			mem_give_tag(cur);
 			return false;
 		}
@@ -462,10 +444,8 @@ bool mem_remove_tag(malloc_tag_t *tag, struct list_head *list)
 
 static void alloc_phy_mem_tags(void)
 {
-	struct vmm_entry *new_tags_virt = vir_mem_alloc(
-		PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
-	size_t new_tags_virt_count =
-		new_tags_virt->size / sizeof(phy_mem_tag_t);
+	struct vmm_entry *new_tags_virt = vir_mem_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
+	size_t new_tags_virt_count = new_tags_virt->size / sizeof(phy_mem_tag_t);
 
 	fatptr_t new_tags_phy = phy_mem_alloc(new_tags_virt->size);
 
@@ -511,10 +491,8 @@ static void alloc_phy_mem_tags(void)
 
 static void alloc_phy_mem_links(void)
 {
-	struct vmm_entry *new_tags_virt = vir_mem_alloc(
-		PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
-	size_t new_tags_virt_count =
-		new_tags_virt->size / sizeof(phy_mem_link_t);
+	struct vmm_entry *new_tags_virt = vir_mem_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
+	size_t new_tags_virt_count = new_tags_virt->size / sizeof(phy_mem_link_t);
 
 	fatptr_t new_tags_phy = phy_mem_alloc(new_tags_virt->size);
 
@@ -528,8 +506,7 @@ static void alloc_phy_mem_links(void)
 #endif
 		((phy_mem_link_t *)new_tags_virt->ptr)[i] = new_tag;
 
-		list_add(&((phy_mem_link_t *)new_tags_virt->ptr)[i].list,
-			 free_phy_links_list.prev);
+		list_add(&((phy_mem_link_t *)new_tags_virt->ptr)[i].list, free_phy_links_list.prev);
 	}
 
 	// Get one unused tag
@@ -558,8 +535,7 @@ static void alloc_phy_mem_links(void)
 
 static void alloc_tags(void)
 {
-	struct vmm_entry *new_tags_virt = vir_mem_alloc(
-		PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
+	struct vmm_entry *new_tags_virt = vir_mem_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
 	size_t new_tags_virt_count = new_tags_virt->size / sizeof(malloc_tag_t);
 
 	fatptr_t new_tags_phy = phy_mem_alloc(new_tags_virt->size);
@@ -574,8 +550,7 @@ static void alloc_tags(void)
 #endif
 		((malloc_tag_t *)new_tags_virt->ptr)[i] = new_tag;
 
-		list_add(&((malloc_tag_t *)new_tags_virt->ptr)[i].list,
-			 free_tags_list.prev);
+		list_add(&((malloc_tag_t *)new_tags_virt->ptr)[i].list, free_tags_list.prev);
 	}
 
 	// Get one unused tag
@@ -605,8 +580,7 @@ static void alloc_tags(void)
 
 static void init_tags(malloc_tag_t *manager)
 {
-	struct vmm_entry *new_tags_virt = vir_mem_alloc(
-		PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
+	struct vmm_entry *new_tags_virt = vir_mem_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
 	size_t new_tags_virt_count = new_tags_virt->size / sizeof(malloc_tag_t);
 
 	fatptr_t new_tags_phy = phy_mem_alloc(new_tags_virt->size);
@@ -617,8 +591,7 @@ static void init_tags(malloc_tag_t *manager)
 	manager->size = new_tags_virt->size;
 	manager->used = new_tags_virt_count * sizeof(malloc_tag_t);
 	manager->vmm = new_tags_virt;
-	phy_mem_link_t *link =
-		list_entry(manager->phy_chain.next, phy_mem_link_t, list);
+	phy_mem_link_t *link = list_entry(manager->phy_chain.next, phy_mem_link_t, list);
 	link->phy_mem->phy_mem = new_tags_phy;
 	link->phy_mem->ref_cnt = 0;
 
@@ -637,17 +610,14 @@ static void init_tags(malloc_tag_t *manager)
 #endif
 		((malloc_tag_t *)new_tags_virt->ptr)[i] = new_tag;
 
-		list_add(&((malloc_tag_t *)new_tags_virt->ptr)[i].list,
-			 free_tags_list.prev);
+		list_add(&((malloc_tag_t *)new_tags_virt->ptr)[i].list, free_tags_list.prev);
 	}
 }
 
 static void init_phy_mem_links(malloc_tag_t *manager)
 {
-	struct vmm_entry *new_tags_virt = vir_mem_alloc(
-		PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
-	size_t new_tags_virt_count =
-		new_tags_virt->size / sizeof(phy_mem_link_t);
+	struct vmm_entry *new_tags_virt = vir_mem_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
+	size_t new_tags_virt_count = new_tags_virt->size / sizeof(phy_mem_link_t);
 
 	fatptr_t new_tags_phy = phy_mem_alloc(new_tags_virt->size);
 
@@ -657,8 +627,7 @@ static void init_phy_mem_links(malloc_tag_t *manager)
 	manager->size = new_tags_virt->size;
 	manager->used = new_tags_virt_count * sizeof(phy_mem_link_t);
 	manager->vmm = new_tags_virt;
-	phy_mem_link_t *link =
-		list_entry(manager->phy_chain.next, phy_mem_link_t, list);
+	phy_mem_link_t *link = list_entry(manager->phy_chain.next, phy_mem_link_t, list);
 	link->phy_mem->phy_mem = new_tags_phy;
 
 #ifdef DEBUG
@@ -676,17 +645,14 @@ static void init_phy_mem_links(malloc_tag_t *manager)
 #endif
 		((phy_mem_link_t *)new_tags_virt->ptr)[i] = new_tag;
 
-		list_add(&((phy_mem_link_t *)new_tags_virt->ptr)[i].list,
-			 free_phy_links_list.prev);
+		list_add(&((phy_mem_link_t *)new_tags_virt->ptr)[i].list, free_phy_links_list.prev);
 	}
 }
 
 static void init_phy_mem_tags(malloc_tag_t *manager)
 {
-	struct vmm_entry *new_tags_virt = vir_mem_alloc(
-		PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
-	size_t new_tags_virt_count =
-		new_tags_virt->size / sizeof(phy_mem_tag_t);
+	struct vmm_entry *new_tags_virt = vir_mem_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
+	size_t new_tags_virt_count = new_tags_virt->size / sizeof(phy_mem_tag_t);
 
 	fatptr_t new_tags_phy = phy_mem_alloc(new_tags_virt->size);
 
@@ -696,8 +662,7 @@ static void init_phy_mem_tags(malloc_tag_t *manager)
 	manager->size = new_tags_virt->size;
 	manager->used = new_tags_virt_count * sizeof(phy_mem_tag_t);
 	manager->vmm = new_tags_virt;
-	phy_mem_link_t *link =
-		list_entry(manager->phy_chain.next, phy_mem_link_t, list);
+	phy_mem_link_t *link = list_entry(manager->phy_chain.next, phy_mem_link_t, list);
 	link->phy_mem->phy_mem = new_tags_phy;
 
 #ifdef DEBUG
@@ -893,9 +858,7 @@ malloc_tag_t *mem_find_best_fit(size_t req)
 	list_for_each(&tags_list) {
 		malloc_tag_t *it_tag = list_entry(it, malloc_tag_t, list);
 		size_t free_space = it_tag->size - it_tag->used;
-		if ((tag != nullptr && free_space >= req &&
-		     free_space < tag->size - tag->used) ||
-		    (tag == nullptr && free_space >= req)) {
+		if ((tag != nullptr && free_space >= req && free_space < tag->size - tag->used) || (tag == nullptr && free_space >= req)) {
 			tag = it_tag;
 		}
 	}
@@ -909,15 +872,11 @@ void mem_register_tag(mem_malloc_tag_t *tag)
 
 mem_malloc_tag_t *mem_coalesce_tag(mem_malloc_tag_t *tag)
 {
-	mem_malloc_tag_t *prev =
-		list_entry(tag->list.prev, mem_malloc_tag_t, list);
-	mem_malloc_tag_t *next =
-		list_entry(tag->list.next, mem_malloc_tag_t, list);
+	mem_malloc_tag_t *prev = list_entry(tag->list.prev, mem_malloc_tag_t, list);
+	mem_malloc_tag_t *next = list_entry(tag->list.next, mem_malloc_tag_t, list);
 
-	bool coalesce_prev = prev->ptr + prev->size == tag->ptr &&
-			     prev->vmm == tag->vmm;
-	bool coalesce_next = tag->ptr + tag->size == next->ptr &&
-			     next->used == 0 && next->vmm == tag->vmm;
+	bool coalesce_prev = prev->ptr + prev->size == tag->ptr && prev->vmm == tag->vmm;
+	bool coalesce_next = tag->ptr + tag->size == next->ptr && next->used == 0 && next->vmm == tag->vmm;
 
 	mem_malloc_tag_t *mem_to_free = tag;
 
@@ -925,13 +884,11 @@ mem_malloc_tag_t *mem_coalesce_tag(mem_malloc_tag_t *tag)
 	if (coalesce_next) {
 		tag->size += next->size;
 		list_for_each(&next->phy_chain) {
-			mem_phy_mem_link_t *phy_link =
-				list_entry(it, mem_phy_mem_link_t, list);
+			mem_phy_mem_link_t *phy_link = list_entry(it, mem_phy_mem_link_t, list);
 			mem_phy_mem_tag_t *phy_tag = phy_link->phy_mem;
 
 			list_for_each(&tag->phy_chain) {
-				mem_phy_mem_link_t *phy_link2 = list_entry(
-					it, mem_phy_mem_link_t, list);
+				mem_phy_mem_link_t *phy_link2 = list_entry(it, mem_phy_mem_link_t, list);
 				mem_phy_mem_tag_t *phy_tag2 = phy_link->phy_mem;
 				if (phy_tag == phy_tag2)
 					goto continue_next;
@@ -947,13 +904,11 @@ continue_next:
 	if (coalesce_prev) {
 		prev->size += tag->size;
 		list_for_each(&tag->phy_chain) {
-			mem_phy_mem_link_t *phy_link =
-				list_entry(it, mem_phy_mem_link_t, list);
+			mem_phy_mem_link_t *phy_link = list_entry(it, mem_phy_mem_link_t, list);
 			mem_phy_mem_tag_t *phy_tag = phy_link->phy_mem;
 
 			list_for_each(&prev->phy_chain) {
-				mem_phy_mem_link_t *phy_link2 = list_entry(
-					it, mem_phy_mem_link_t, list);
+				mem_phy_mem_link_t *phy_link2 = list_entry(it, mem_phy_mem_link_t, list);
 				mem_phy_mem_tag_t *phy_tag2 = phy_link->phy_mem;
 				if (phy_tag == phy_tag2)
 					goto continue_curr;

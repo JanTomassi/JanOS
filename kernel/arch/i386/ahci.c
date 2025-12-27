@@ -114,15 +114,15 @@ typedef volatile struct {
  *   prdbc  : byte count transferred by HBA.
  *   ctba/u : physical base of the command table. */
 typedef struct {
-	uint8_t cfl:5;
-	uint8_t a:1;
-	uint8_t w:1;
-	uint8_t p:1;
-	uint8_t r:1;
-	uint8_t b:1;
-	uint8_t c:1;
-	uint8_t rsv0:1;
-	uint8_t pmp:4;
+	uint8_t cfl : 5;
+	uint8_t a : 1;
+	uint8_t w : 1;
+	uint8_t p : 1;
+	uint8_t r : 1;
+	uint8_t b : 1;
+	uint8_t c : 1;
+	uint8_t rsv0 : 1;
+	uint8_t pmp : 4;
 	uint16_t prdtl;
 	uint32_t prdbc;
 	uint32_t ctba;
@@ -139,9 +139,9 @@ typedef struct {
 	uint32_t dba;
 	uint32_t dbau;
 	uint32_t rsv0;
-	uint32_t dbc:22;
-	uint32_t rsv1:9;
-	uint32_t i:1;
+	uint32_t dbc : 22;
+	uint32_t rsv1 : 9;
+	uint32_t i : 1;
 } __attribute__((packed)) hba_prdt_entry_t;
 
 /* Register host-to-device FIS (section 7.2.2). Packed so the CFIS byte array in
@@ -150,9 +150,9 @@ typedef struct {
  * hold the 48-bit LBA and sector count. */
 typedef struct {
 	uint8_t fis_type;
-	uint8_t pmport:4;
-	uint8_t rsv0:3;
-	uint8_t c:1;
+	uint8_t pmport : 4;
+	uint8_t rsv0 : 3;
+	uint8_t c : 1;
 	uint8_t command;
 	uint8_t featurel;
 	uint8_t lba0;
@@ -203,9 +203,9 @@ struct ahci_port_state {
 	struct dma_buffer cmd_tables[AHCI_MAX_CMD_SLOTS];
 };
 
-static struct ahci_controller g_ctrl = {0};
+static struct ahci_controller g_ctrl = { 0 };
 static volatile hba_mem_t *g_hba = 0;
-static struct ahci_port_state g_ports[AHCI_PORT_MAX] = {0};
+static struct ahci_port_state g_ports[AHCI_PORT_MAX] = { 0 };
 static uint8_t g_irq_line = 0xFF;
 static bool g_irq_registered = false;
 
@@ -297,8 +297,7 @@ static void ahci_irq_handler(void)
 	}
 }
 
-static size_t fill_prdts(hba_prdt_entry_t *prdts, uint32_t phys_base,
-			 uint32_t byte_count)
+static size_t fill_prdts(hba_prdt_entry_t *prdts, uint32_t phys_base, uint32_t byte_count)
 {
 	uint32_t remaining = byte_count;
 	size_t idx = 0;
@@ -370,8 +369,7 @@ static bool ahci_rebase_port(uint8_t portno)
 	port->fb = state->fis.phys;
 	port->fbu = 0;
 
-	hba_cmd_header_t *cmd_header =
-		(hba_cmd_header_t *)(uintptr_t)state->cmd_list.virt;
+	hba_cmd_header_t *cmd_header = (hba_cmd_header_t *)(uintptr_t)state->cmd_list.virt;
 	for (int i = 0; i < AHCI_MAX_CMD_SLOTS; i++) {
 		cmd_header[i].prdtl = 0;
 		cmd_header[i].ctba = state->cmd_tables[i].phys;
@@ -395,30 +393,24 @@ bool ahci_probe(struct ahci_controller *out)
 	for (uint16_t bus = 0; bus < 256; bus++) {
 		uint8_t bus_id = (uint8_t)bus;
 		for (uint8_t slot = 0; slot < 32; slot++) {
-			uint32_t vendor_device =
-				pci_config_read_dword(bus_id, slot, 0, 0x00);
+			uint32_t vendor_device = pci_config_read_dword(bus_id, slot, 0, 0x00);
 			if (vendor_device == 0xFFFFFFFF)
 				continue;
 
-			uint8_t max_func =
-				is_multifunction(bus_id, slot) ? 8 : 1;
+			uint8_t max_func = is_multifunction(bus_id, slot) ? 8 : 1;
 			for (uint8_t func = 0; func < max_func; func++) {
-				vendor_device = pci_config_read_dword(
-					bus_id, slot, func, 0x00);
+				vendor_device = pci_config_read_dword(bus_id, slot, func, 0x00);
 				if (vendor_device == 0xFFFFFFFF)
 					continue;
 
 				if (!is_ahci_class(bus_id, slot, func))
 					continue;
 
-				uint32_t bar5 = pci_config_read_dword(
-					bus_id, slot, func, PCI_BAR5_OFFSET);
+				uint32_t bar5 = pci_config_read_dword(bus_id, slot, func, PCI_BAR5_OFFSET);
 				if (!bar5 || (bar5 & 0x1))
 					continue;
 
-				volatile hba_mem_t *hba =
-					(volatile hba_mem_t *)(uintptr_t)(
-						bar5 & 0xFFFFFFF0);
+				volatile hba_mem_t *hba = (volatile hba_mem_t *)(uintptr_t)(bar5 & 0xFFFFFFF0);
 				uint32_t pi = hba->pi;
 				uint32_t port_map = 0;
 				uint8_t chosen_port = 0xFF;
@@ -427,8 +419,7 @@ bool ahci_probe(struct ahci_controller *out)
 					if (!(pi & (1u << p)))
 						continue;
 
-					volatile hba_port_t *port =
-						&hba->ports[p];
+					volatile hba_port_t *port = &hba->ports[p];
 					if (!port_device_present(port))
 						continue;
 
@@ -440,9 +431,7 @@ bool ahci_probe(struct ahci_controller *out)
 				if (!port_map)
 					continue;
 
-				uint32_t line_reg = pci_config_read_dword(
-					bus_id, slot, func,
-					PCI_INTERRUPT_LINE_OFFSET);
+				uint32_t line_reg = pci_config_read_dword(bus_id, slot, func, PCI_INTERRUPT_LINE_OFFSET);
 				out->bus = bus_id;
 				out->device = slot;
 				out->function = func;
@@ -490,29 +479,26 @@ bool ahci_init(const struct ahci_controller *ctrl)
 		g_ports[p].irq_pending = false;
 		g_ports[p].irq_error = false;
 
-			if (!ahci_rebase_port(p))
-				return false;
-			found_port = true;
-		}
+		if (!ahci_rebase_port(p))
+			return false;
+		found_port = true;
+	}
 
 	if (!found_port)
 		return false;
 
 	if (g_irq_line < 16) {
 		pic_clear_mask(g_irq_line);
-		g_irq_registered = irq_register_handler(g_irq_line,
-							ahci_irq_handler);
+		g_irq_registered = irq_register_handler(g_irq_line, ahci_irq_handler);
 	}
 
 	if (!g_irq_registered) {
-		kprintf("AHCI controller %x:%x.%x found but IRQ %u could not be registered\n",
-			ctrl->bus, ctrl->device, ctrl->function, g_irq_line);
+		kprintf("AHCI controller %x:%x.%x found but IRQ %u could not be registered\n", ctrl->bus, ctrl->device, ctrl->function, g_irq_line);
 		return false;
 	}
 
-	kprintf("AHCI controller %x:%x.%x (ports %x, BAR5=%x, IRQ %u) initialized\n",
-		ctrl->bus, ctrl->device, ctrl->function, ctrl->port_map,
-		ctrl->bar5, g_irq_line);
+	kprintf("AHCI controller %x:%x.%x (ports %x, BAR5=%x, IRQ %u) initialized\n", ctrl->bus, ctrl->device, ctrl->function, ctrl->port_map, ctrl->bar5,
+		g_irq_line);
 
 	return true;
 }
@@ -530,8 +516,7 @@ static uint8_t pick_port(uint8_t requested)
 	return 0xFF;
 }
 
-bool ahci_read28(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
-		 uint16_t sector_count, char* dest)
+bool ahci_read28(uint8_t channel, uint8_t slavebit, uint32_t lba_addr, uint16_t sector_count, char *dest)
 {
 	(void)slavebit;
 
@@ -554,7 +539,7 @@ bool ahci_read28(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
 	if (!wait_ready(state->port))
 		return false;
 
-	struct dma_buffer io_buf = {0};
+	struct dma_buffer io_buf = { 0 };
 	if (!dma_alloc(byte_count, &io_buf))
 		return false;
 
@@ -565,10 +550,8 @@ bool ahci_read28(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
 	state->port->is = (uint32_t)-1;
 	g_hba->is = (uint32_t)-1;
 
-	hba_cmd_header_t *cmdheader =
-		(hba_cmd_header_t *)(uintptr_t)state->cmd_list.virt;
-	hba_cmd_tbl_t *cmdtbl =
-		(hba_cmd_tbl_t *)(uintptr_t)state->cmd_tables[slot].virt;
+	hba_cmd_header_t *cmdheader = (hba_cmd_header_t *)(uintptr_t)state->cmd_list.virt;
+	hba_cmd_tbl_t *cmdtbl = (hba_cmd_tbl_t *)(uintptr_t)state->cmd_tables[slot].virt;
 
 	memset(cmdtbl, 0, sizeof(hba_cmd_tbl_t));
 	size_t prdt_count = fill_prdts(cmdtbl->prdt_entry, io_buf.phys, byte_count);
@@ -609,8 +592,7 @@ bool ahci_read28(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
 	return (state->port->tfd & ATA_SR_ERR) == 0;
 }
 
-bool ahci_write28(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
-		  uint16_t sector_count, const char* src)
+bool ahci_write28(uint8_t channel, uint8_t slavebit, uint32_t lba_addr, uint16_t sector_count, const char *src)
 {
 	(void)slavebit;
 
@@ -633,7 +615,7 @@ bool ahci_write28(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
 	if (!wait_ready(state->port))
 		return false;
 
-	struct dma_buffer io_buf = {0};
+	struct dma_buffer io_buf = { 0 };
 	if (!dma_alloc(byte_count, &io_buf))
 		return false;
 	memcpy(io_buf.virt, src, byte_count);
@@ -645,10 +627,8 @@ bool ahci_write28(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
 	state->port->is = (uint32_t)-1;
 	g_hba->is = (uint32_t)-1;
 
-	hba_cmd_header_t *cmdheader =
-		(hba_cmd_header_t *)(uintptr_t)state->cmd_list.virt;
-	hba_cmd_tbl_t *cmdtbl =
-		(hba_cmd_tbl_t *)(uintptr_t)state->cmd_tables[slot].virt;
+	hba_cmd_header_t *cmdheader = (hba_cmd_header_t *)(uintptr_t)state->cmd_list.virt;
+	hba_cmd_tbl_t *cmdtbl = (hba_cmd_tbl_t *)(uintptr_t)state->cmd_tables[slot].virt;
 
 	memset(cmdtbl, 0, sizeof(hba_cmd_tbl_t));
 	size_t prdt_count = fill_prdts(cmdtbl->prdt_entry, io_buf.phys, byte_count);

@@ -19,9 +19,7 @@ bool dma_alloc(size_t len, struct dma_buffer *out)
 	if (!phys.ptr)
 		return false;
 
-	struct vmm_entry *virt =
-		vir_mem_alloc(alloc_len, VMM_PAGE_FLAG_PRESENT_BIT |
-					      VMM_PAGE_FLAG_READ_WRITE_BIT);
+	struct vmm_entry *virt = vir_mem_alloc(alloc_len, VMM_PAGE_FLAG_PRESENT_BIT | VMM_PAGE_FLAG_READ_WRITE_BIT);
 	if (!virt || !virt->ptr) {
 		phy_mem_free(phys);
 		return false;
@@ -46,8 +44,7 @@ void dma_free(struct dma_buffer *buf)
 		return;
 
 	vir_mem_free(buf->virt);
-	phy_mem_free((fatptr_t){ .ptr = (void *)(uintptr_t)buf->phys,
-				 .len = buf->len });
+	phy_mem_free((fatptr_t){ .ptr = (void *)(uintptr_t)buf->phys, .len = buf->len });
 	buf->virt = NULL;
 	buf->phys = 0;
 	buf->len = 0;

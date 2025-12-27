@@ -17,13 +17,10 @@ size_t strlen(const char *str)
 	return len;
 }
 
-display_t tty_initialize(size_t buffer_addr, size_t pitch, size_t width,
-			 size_t height, uint8_t bit_per_pixel, bool is_text)
+display_t tty_initialize(size_t buffer_addr, size_t pitch, size_t width, size_t height, uint8_t bit_per_pixel, bool is_text)
 {
 	if (is_text)
-		return tty_text_initialize(buffer_addr, pitch, width, height,
-					   bit_per_pixel);
+		return tty_text_initialize(buffer_addr, pitch, width, height, bit_per_pixel);
 	else
-		return tty_frame_initialize(buffer_addr, pitch, width, height,
-					    bit_per_pixel);
+		return tty_frame_initialize(buffer_addr, pitch, width, height, bit_per_pixel);
 }

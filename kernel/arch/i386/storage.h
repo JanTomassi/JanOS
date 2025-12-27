@@ -16,10 +16,8 @@ struct storage_driver {
 	enum storage_driver_type type;
 	struct ahci_controller ahci;
 	uint32_t (*detect_devtype)(uint8_t channel, uint8_t slavebit);
-	bool (*read28)(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
-		       uint16_t sector_count, char* dest);
-	bool (*write28)(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
-			uint16_t sector_count, const char* src);
+	bool (*read28)(uint8_t channel, uint8_t slavebit, uint32_t lba_addr, uint16_t sector_count, char *dest);
+	bool (*write28)(uint8_t channel, uint8_t slavebit, uint32_t lba_addr, uint16_t sector_count, const char *src);
 };
 
 void storage_init(void);

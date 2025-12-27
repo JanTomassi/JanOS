@@ -4,75 +4,77 @@
 #include "ata_pio.h"
 
 enum ATA_SR {
-	ATA_SR_BSY  = 0x80, // Busy
+	ATA_SR_BSY = 0x80,  // Busy
 	ATA_SR_DRDY = 0x40, // Drive ready
-	ATA_SR_DF   = 0x20, // Drive write fault
-	ATA_SR_DSC  = 0x10, // Drive seek complete
-	ATA_SR_DRQ  = 0x08, // Data request ready
+	ATA_SR_DF = 0x20,   // Drive write fault
+	ATA_SR_DSC = 0x10,  // Drive seek complete
+	ATA_SR_DRQ = 0x08,  // Data request ready
 	ATA_SR_CORR = 0x04, // Corrected data
-	ATA_SR_IDX  = 0x02, // Index
-	ATA_SR_ERR  = 0x01, // Error
+	ATA_SR_IDX = 0x02,  // Index
+	ATA_SR_ERR = 0x01,  // Error
 };
 
 enum ATA_ER {
-	ATA_ER_BBK   = 0x80, // Bad block
-	ATA_ER_UNC   = 0x40, // Uncorrectable data
-	ATA_ER_MC    = 0x20, // Media changed
-	ATA_ER_IDNF  = 0x10, // ID mark not found
-	ATA_ER_MCR   = 0x08, // Media change request
-	ATA_ER_ABRT  = 0x04, // Command aborted
+	ATA_ER_BBK = 0x80,   // Bad block
+	ATA_ER_UNC = 0x40,   // Uncorrectable data
+	ATA_ER_MC = 0x20,    // Media changed
+	ATA_ER_IDNF = 0x10,  // ID mark not found
+	ATA_ER_MCR = 0x08,   // Media change request
+	ATA_ER_ABRT = 0x04,  // Command aborted
 	ATA_ER_TK0NF = 0x02, // Track 0 not found
-	ATA_ER_AMNF  = 0x01, // No address mark
+	ATA_ER_AMNF = 0x01,  // No address mark
 };
 
 enum ATA_CMD {
-	ATA_CMD_READ_PIO        = 0x20,
-	ATA_CMD_READ_PIO_EXT    = 0x24,
-	ATA_CMD_READ_DMA        = 0xC8,
-	ATA_CMD_READ_DMA_EXT    = 0x25,
-	ATA_CMD_WRITE_PIO       = 0x30,
-	ATA_CMD_WRITE_PIO_EXT   = 0x34,
-	ATA_CMD_WRITE_DMA       = 0xCA,
-	ATA_CMD_WRITE_DMA_EXT   = 0x35,
-	ATA_CMD_CACHE_FLUSH     = 0xE7,
+	ATA_CMD_READ_PIO = 0x20,
+	ATA_CMD_READ_PIO_EXT = 0x24,
+	ATA_CMD_READ_DMA = 0xC8,
+	ATA_CMD_READ_DMA_EXT = 0x25,
+	ATA_CMD_WRITE_PIO = 0x30,
+	ATA_CMD_WRITE_PIO_EXT = 0x34,
+	ATA_CMD_WRITE_DMA = 0xCA,
+	ATA_CMD_WRITE_DMA_EXT = 0x35,
+	ATA_CMD_CACHE_FLUSH = 0xE7,
 	ATA_CMD_CACHE_FLUSH_EXT = 0xEA,
-	ATA_CMD_PACKET          = 0xA0,
+	ATA_CMD_PACKET = 0xA0,
 	ATA_CMD_IDENTIFY_PACKET = 0xA1,
-	ATA_CMD_IDENTIFY        = 0xEC,
+	ATA_CMD_IDENTIFY = 0xEC,
 };
 
 enum ATA_IDENT {
-	ATA_IDENT_DEVICETYPE   = 0,
-	ATA_IDENT_CYLINDERS    = 2,
-	ATA_IDENT_HEADS        = 6,
-	ATA_IDENT_SECTORS      = 12,
-	ATA_IDENT_SERIAL       = 20,
-	ATA_IDENT_MODEL        = 54,
+	ATA_IDENT_DEVICETYPE = 0,
+	ATA_IDENT_CYLINDERS = 2,
+	ATA_IDENT_HEADS = 6,
+	ATA_IDENT_SECTORS = 12,
+	ATA_IDENT_SERIAL = 20,
+	ATA_IDENT_MODEL = 54,
 	ATA_IDENT_CAPABILITIES = 98,
-	ATA_IDENT_FIELDVALID   = 106,
-	ATA_IDENT_MAX_LBA      = 120,
-	ATA_IDENT_COMMANDSETS  = 164,
-	ATA_IDENT_MAX_LBA_EXT  = 200,
+	ATA_IDENT_FIELDVALID = 106,
+	ATA_IDENT_MAX_LBA = 120,
+	ATA_IDENT_COMMANDSETS = 164,
+	ATA_IDENT_MAX_LBA_EXT = 200,
 };
 
 struct IDEChannelRegisters {
 	unsigned short base;  // I/O Base.
 	unsigned short ctrl;  // Control Base
 	unsigned short bmide; // Bus Master IDE
-	unsigned char  nIEN;  // nIEN (No Interrupt);
+	unsigned char nIEN;   // nIEN (No Interrupt);
 } channels[2];
 
-static const uint16_t fallback_bases[] = {0x1F0, 0x170};
-static const uint16_t fallback_ctrls[] = {0x3F6, 0x376};
+static const uint16_t fallback_bases[] = { 0x1F0, 0x170 };
+static const uint16_t fallback_ctrls[] = { 0x3F6, 0x376 };
 
-static void wait_device(uint16_t ctrl){
+static void wait_device(uint16_t ctrl)
+{
 	inb(ctrl); /* wait 400ns for drive select to work */
 	inb(ctrl);
 	inb(ctrl);
 	inb(ctrl);
 }
 
-static void soft_reset(uint16_t ctrl){
+static void soft_reset(uint16_t ctrl)
+{
 	wait_device(ctrl);
 
 	outb(ctrl, 0x4);
@@ -87,11 +89,11 @@ static void soft_reset(uint16_t ctrl){
 /* on Primary bus: ctrl->base =0x1F0, ctrl->dev_ctl =0x3F6. REG_CYL_LO=4, REG_CYL_HI=5, REG_DEVSEL=6 */
 uint32_t ata_pio_detect_devtype(uint8_t channel, uint8_t slavebit)
 {
-	uint8_t REG_CYL_LO=4;
-	uint8_t REG_CYL_HI=5;
-	uint8_t REG_DEVSEL=6;
+	uint8_t REG_CYL_LO = 4;
+	uint8_t REG_CYL_HI = 5;
+	uint8_t REG_DEVSEL = 6;
 
-	if (channel >= sizeof(channels) / sizeof(channels[0])){
+	if (channel >= sizeof(channels) / sizeof(channels[0])) {
 		panic("Invalid ATA channel %d", channel);
 	}
 	uint16_t base = channels[channel].base;
@@ -104,17 +106,20 @@ uint32_t ata_pio_detect_devtype(uint8_t channel, uint8_t slavebit)
 	outb(base + REG_DEVSEL, 0xA0 | slavebit << 4);
 	wait_device(ctrl);
 
-	unsigned cl=inb(base + REG_CYL_LO); /* get the "signature bytes" */
-	unsigned ch=inb(base + REG_CYL_HI);
+	unsigned cl = inb(base + REG_CYL_LO); /* get the "signature bytes" */
+	unsigned ch = inb(base + REG_CYL_HI);
 
 	/* differentiate ATA, ATAPI, SATA and SATAPI */
-	if (cl==0x14 && ch==0xEB) return ATADEV_PATAPI;
-	if (cl==0x69 && ch==0x96) return ATADEV_SATAPI;
-	if (cl==0 && ch == 0) return ATADEV_PATA;
-	if (cl==0x3c && ch==0xc3) return ATADEV_SATA;
+	if (cl == 0x14 && ch == 0xEB)
+		return ATADEV_PATAPI;
+	if (cl == 0x69 && ch == 0x96)
+		return ATADEV_SATAPI;
+	if (cl == 0 && ch == 0)
+		return ATADEV_PATA;
+	if (cl == 0x3c && ch == 0xc3)
+		return ATADEV_SATA;
 	return ATADEV_UNKNOWN;
 }
-
 
 /*
   Send 0xE0 for the "master" or 0xF0 for the "slave", ORed with the highest 4 bits of the LBA to port 0x1F6: outb(0x1F6, 0xE0 | (slavebit << 4) | ((LBA >> 24) & 0x0F))
@@ -128,9 +133,9 @@ uint32_t ata_pio_detect_devtype(uint8_t channel, uint8_t slavebit)
  Transfer 256 16-bit values, a uint16_t at a time, into your buffer from I/O port 0x1F0. (In assembler, REP INSW works well for this.)
   Then loop back to waiting for the next IRQ (or poll again -- see next note) for each successive sector.
 */
-bool ata_pio_28_read(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
-		     uint16_t sector_count, char* dest){
-	if (channel >= sizeof(channels) / sizeof(channels[0])){
+bool ata_pio_28_read(uint8_t channel, uint8_t slavebit, uint32_t lba_addr, uint16_t sector_count, char *dest)
+{
+	if (channel >= sizeof(channels) / sizeof(channels[0])) {
 		panic("Invalid ATA channel %d", channel);
 	}
 	uint16_t base = channels[channel].base;
@@ -154,9 +159,10 @@ bool ata_pio_28_read(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
 	outb(base + 7, 0x20);
 
 	size_t dest_idx = 0;
-	while (sector_count--){
-		while (inb(base + 7) & 0x80);
-		if (inb(base+7) & 0x21)
+	while (sector_count--) {
+		while (inb(base + 7) & 0x80)
+			;
+		if (inb(base + 7) & 0x21)
 			panic("ERR or DF set, error reg is %x", inb(base + 1));
 
 		/* in al, dx		; grab a status byte */
@@ -165,7 +171,7 @@ bool ata_pio_28_read(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
 		/* test al, 0x21	; ERR or DF set? */
 		/* jne short .fail */
 		uint16_t word_to_trans = 256;
-		while(word_to_trans--){
+		while (word_to_trans--) {
 			uint16_t data = inw(base);
 			dest[dest_idx++] = (char)data;
 			dest[dest_idx++] = (char)(data >> 8);
@@ -175,10 +181,9 @@ bool ata_pio_28_read(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
 	return true;
 }
 
-bool ata_pio_28_write(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
-		      uint16_t sector_count, const char* src)
+bool ata_pio_28_write(uint8_t channel, uint8_t slavebit, uint32_t lba_addr, uint16_t sector_count, const char *src)
 {
-	if (channel >= sizeof(channels) / sizeof(channels[0])){
+	if (channel >= sizeof(channels) / sizeof(channels[0])) {
 		panic("Invalid ATA channel %d", channel);
 	}
 	uint16_t base = channels[channel].base;
@@ -199,15 +204,15 @@ bool ata_pio_28_write(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
 	outb(base + 7, ATA_CMD_WRITE_PIO);
 
 	size_t src_idx = 0;
-	while (sector_count--){
-		while (inb(base + 7) & 0x80);
-		if (inb(base+7) & 0x21)
+	while (sector_count--) {
+		while (inb(base + 7) & 0x80)
+			;
+		if (inb(base + 7) & 0x21)
 			panic("ERR or DF set, error reg is %x", inb(base + 1));
 
 		uint16_t word_to_trans = 256;
-		while (word_to_trans--){
-			uint16_t value = (uint16_t)src[src_idx] |
-					 ((uint16_t)src[src_idx + 1] << 8);
+		while (word_to_trans--) {
+			uint16_t value = (uint16_t)src[src_idx] | ((uint16_t)src[src_idx + 1] << 8);
 			src_idx += 2;
 			outw(base, value);
 		}
@@ -216,8 +221,9 @@ bool ata_pio_28_write(uint8_t channel, uint8_t slavebit, uint32_t lba_addr,
 	return true;
 }
 
-char *ata_pio_debug_devtype(enum ATADEV dev_type){
-	switch(dev_type){
+char *ata_pio_debug_devtype(enum ATADEV dev_type)
+{
+	switch (dev_type) {
 	case ATADEV_PATAPI:
 		return "pata-pi";
 	case ATADEV_SATAPI:
@@ -246,15 +252,14 @@ static unsigned short mask_bar(unsigned int bar, unsigned short fallback)
 	return (unsigned short)(bar & 0xFFFFFFFC);
 }
 
-void ide_initialize(unsigned int BAR0, unsigned int BAR1, unsigned int BAR2,
-		    unsigned int BAR3, unsigned int BAR4)
+void ide_initialize(unsigned int BAR0, unsigned int BAR1, unsigned int BAR2, unsigned int BAR3, unsigned int BAR4)
 {
 	(void)BAR4; /* Bus master support is not used yet */
-	channels[ATA_PRIMARY].base  = mask_bar(BAR0, fallback_bases[0]);
-	channels[ATA_PRIMARY].ctrl  = mask_bar(BAR1, fallback_ctrls[0]);
+	channels[ATA_PRIMARY].base = mask_bar(BAR0, fallback_bases[0]);
+	channels[ATA_PRIMARY].ctrl = mask_bar(BAR1, fallback_ctrls[0]);
 	channels[ATA_PRIMARY].bmide = 0;
 
-	channels[ATA_SECONDARY].base  = mask_bar(BAR2, fallback_bases[1]);
-	channels[ATA_SECONDARY].ctrl  = mask_bar(BAR3, fallback_ctrls[1]);
+	channels[ATA_SECONDARY].base = mask_bar(BAR2, fallback_bases[1]);
+	channels[ATA_SECONDARY].ctrl = mask_bar(BAR3, fallback_ctrls[1]);
 	channels[ATA_SECONDARY].bmide = 0;
 }

@@ -3,7 +3,7 @@
 
 #define IRQ_LINES 16
 
-static irq_handler_t irq_handlers[IRQ_LINES] = {0};
+static irq_handler_t irq_handlers[IRQ_LINES] = { 0 };
 
 static void irq_dispatch(uint8_t irq)
 {
@@ -30,10 +30,10 @@ void irq_unregister_handler(uint8_t irq)
 		irq_handlers[irq] = 0;
 }
 
-#define DEFINE_IRQ_STUB(num)          \
-	void isr_##num##_handler(void) \
-	{                             \
-		irq_dispatch((num)-32); \
+#define DEFINE_IRQ_STUB(num)              \
+	void isr_##num##_handler(void)    \
+	{                                 \
+		irq_dispatch((num) - 32); \
 	}
 
 DEFINE_IRQ_STUB(32)
