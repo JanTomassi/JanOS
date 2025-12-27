@@ -53,7 +53,9 @@ JanOS.kernel: $(OBJS) $(ARCHDIR)/linker.ld
 	$(CC) -MD -c $< -o $@ -std=c2x $(CFLAGS) $(CPPFLAGS)
 
 .S.o:
-	$(CC) -MD -c $< -o $@ $(CFLAGS) $(CPPFLAGS)
+	$(AS) -MD -c $< -o $@ $(CFLAGS) $(CPPFLAGS)
+.s.o:
+	$(AS) -MD -c $< -o $@ $(CFLAGS) $(CPPFLAGS)
 
 clean:
 	rm -f JanOS.kernel
