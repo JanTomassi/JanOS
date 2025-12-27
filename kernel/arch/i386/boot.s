@@ -1,48 +1,65 @@
-section.multiboot align 8 multiboot_header : dd 0xe85250d6;
-magic dd 0;
-architecture dd multiboot_header_end - multiboot_header;
-length dd - (0xe85250d6 + 0 + (multiboot_header_end - multiboot_header));
-checksum align 8 framebuffer_tag_start : align 8 dw 5 dw 1 dd framebuffer_tag_end - framebuffer_tag_start dd 800 dd 400 dd 32 align 8 framebuffer_tag_end
-	: align 8 dd 0 dd 8 align 8 multiboot_header_end :
+section .multiboot
+	align 8
+multiboot_header:
+	dd 0xe85250d6				   ; magic
+	dd 0					   ; architecture
+	dd multiboot_header_end - multiboot_header ; length
+	dd -(0xe85250d6 + 0 + (multiboot_header_end - multiboot_header)) ; checksum
+	align 8
+framebuffer_tag_start:
+	align 8
+        dw 5
+        dw 1
+        dd framebuffer_tag_end - framebuffer_tag_start
+        dd 800
+        dd 400
+        dd 32
+	align 8
+framebuffer_tag_end:
+	align 8
+	dd 0
+        dd 8
+	align 8
+multiboot_header_end:
 
-	extern kernel_main extern exception_handler extern kprintf
 
-		isr_halt : cli.inf_loop : hlt jmp.inf_loop
+extern kernel_main
+extern exception_handler
+extern kprintf
 
-					  extern _GLOBAL_OFFSET_TABLE_
 
-											    % macro get_GOT 0
+isr_halt:
+	cli
+.inf_loop:
+	hlt
+	jmp .inf_loop
 
-											    call %
-											    % getgot % % getgot : pop ebx add ebx,
-	_GLOBAL_OFFSET_TABLE_ + $$ - % % getgot wrt..gotpc
+extern _GLOBAL_OFFSET_TABLE_
 
-					     % endmacro
+%macro  get_GOT 0
 
-	;
-;
-The multiboot standard does not define the value of the stack pointer register;
-; (esp) and it is up to the kernel to provide a stack. This allocates room for a
-;
-;
-small stack by creating a symbol at the bottom of it, then allocating 16384;
-; bytes for it, and finally creating a symbol at the top. The stack grows
-;
-;
-downwards on x86.The stack is in its own section so it can be marked nobits, ;
-;
-which means the kernel file is smaller because it does not contain an;
-;
-uninitialized stack.The stack on x86 must be 16 - byte aligned according to the;
-;
-System V ABI standard and de - facto extensions.The compiler will assume the;
-;
-stack is properly aligned and failure to align the stack will result in;
-;
-undefined
-	behavior.
+        call    %%getgot
+  %%getgot:
+        pop     ebx
+        add     ebx,_GLOBAL_OFFSET_TABLE_+$$-%%getgot wrt ..gotpc
 
-	section.rodata global gdt : data(gdt.end - gdt) hidden gdt : gdt_null : dq 0; Set 8 bytes to zero for the Null descriptor
+%endmacro
+
+;; The multiboot standard does not define the value of the stack pointer register
+;; (esp) and it is up to the kernel to provide a stack. This allocates room for a
+;; small stack by creating a symbol at the bottom of it, then allocating 16384
+;; bytes for it, and finally creating a symbol at the top. The stack grows
+;; downwards on x86. The stack is in its own section so it can be marked nobits,
+;; which means the kernel file is smaller because it does not contain an
+;; uninitialized stack. The stack on x86 must be 16-byte aligned according to the
+;; System V ABI standard and de-facto extensions. The compiler will assume the
+;; stack is properly aligned and failure to align the stack will result in
+;; undefined behavior.
+
+section .rodata
+global gdt:data (gdt.end-gdt) hidden
+gdt:
+gdt_null:	dq 0 						; Set 8 bytes to zero for the Null descriptor
 gdt_kcode:	dq 58434644969848831
 gdt_kdata: 	dq 58425848876826623
 gdt_ucode:	dq 58540198086115327
@@ -56,160 +73,145 @@ gdtr:
 
 
 
-;
-;
-The linker script specifies _start as the entry point to the kernel and the;
-;
-bootloader will jump to this position once the kernel has been loaded.It;
-;
-doesn't make sense to return from this function as the bootloader is gone. section.boot extern HIGHER_HALF global _start : function _start : mov ecx,
-	initial_page_dir sub ecx, HIGHER_HALF mov cr3, ecx mov dword[ecx + 4 * 1023], 0 mov dword[ecx + 4 * 1023], ecx or dword[ecx + 4 * 1023], 11b
+;; The linker script specifies _start as the entry point to the kernel and the
+;; bootloader will jump to this position once the kernel has been loaded. It
+;; doesn't make sense to return from this function as the bootloader is gone.
+section .boot
+extern	HIGHER_HALF
+global _start:function
+_start:
+	mov	ecx, initial_page_dir
+	sub	ecx, HIGHER_HALF
+	mov 	cr3, ecx
+	mov 	dword [ecx + 4 * 1023], 0
+	mov	dword [ecx + 4 * 1023], ecx
+	or	dword [ecx + 4 * 1023], 11b
 
-	;
-;
-Enabeling PSE to use huge page mov ecx, cr4 or ecx, 0x10 mov cr4,
-	ecx
+	;; Enabeling PSE to use huge page
+	mov 	ecx, cr4
+	or	ecx, 0x10
+	mov	cr4, ecx
 
-		mov ecx,
-	cr0 or ecx, 0x80000000 mov cr0,
-	ecx
+	mov	ecx, cr0
+	or	ecx, 0x80000000
+	mov 	cr0, ecx
 
-			jmp call_kernel
+	jmp	call_kernel
 
-				section.data global initial_page_dir : data(initial_page_dir.end - initial_page_dir) align 4096 initial_page_dir : dd(0 << 22) |
-		10000011b dd(1 << 22) | 10000011b dd(2 << 22) | 10000011b dd(3 << 22) | 10000011b times 768 - 4 dd 0 dd(0 << 22) | 10000011b dd(1 << 22) |
-		10000011b dd(2 << 22) | 10000011b dd(3 << 22) | 10000011b times 256 - 4 dd 0 .end :
 
-	;
-;
--- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -;
-;
-Program stack 16MiB;
-;
--- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -section.bss align 16 stack_bottom
-	: resb 16384 *
-	8 stack_top :
+section .data
+global initial_page_dir:data (initial_page_dir.end - initial_page_dir)
+align 4096
+initial_page_dir:
+	dd	(0 << 22) | 10000011b
+	dd	(1 << 22) | 10000011b
+	dd	(2 << 22) | 10000011b
+	dd	(3 << 22) | 10000011b
+	times	768-4 dd 0
+	dd	(0 << 22) | 10000011b
+	dd	(1 << 22) | 10000011b
+	dd	(2 << 22) | 10000011b
+	dd	(3 << 22) | 10000011b
+	times	256-4 dd 0
+.end:
 
-	section.text call_kernel :;
-;
-The bootloader has loaded us into 32 - bit protected mode on a x86;
-;
-machine.Interrupts are disabled.Paging is disabled.The processor;
-;
-state is as defined in the multiboot standard.The kernel has full;
-;
-control of the CPU.The kernel can only make use of hardware features;
-;
-and any code it provides as part of itself.There's no printf ;
-;
-function, unless the kernel provides its own<stdio.h> header and a;
-;
-printf implementation.There are no security restrictions, no;
-;
-safeguards, no debugging mechanisms, only what the kernel provides;
-;
-itself.It has absolute and complete power over the;
-;
-machine.
+;; -----------------------------------------------------------------------------
+;; Program stack 16MiB
+;; -----------------------------------------------------------------------------
+section .bss
+align 16
+stack_bottom:
+	resb 16384 * 8
+stack_top:
 
-	;
-;
-To set up a stack, we set the esp register to point to the top of the;
-;
-stack(as it grows downwards on x86 systems).This is necessarily done;
-;
-in assembly as languages such as C cannot function without a stack.
 
-	mov esp,
-	stack_top mov ebp,
-	stack_top
+section .text
+call_kernel:
+	;; The bootloader has loaded us into 32-bit protected mode on a x86
+	;; machine. Interrupts are disabled. Paging is disabled. The processor
+	;; state is as defined in the multiboot standard. The kernel has full
+	;; control of the CPU. The kernel can only make use of hardware features
+	;; and any code it provides as part of itself. There's no printf
+	;; function, unless the kernel provides its own <stdio.h> header and a
+	;; printf implementation. There are no security restrictions, no
+	;; safeguards, no debugging mechanisms, only what the kernel provides
+	;; itself. It has absolute and complete power over the
+	;; machine.
 
-		push ebx push eax
+	;; To set up a stack, we set the esp register to point to the top of the
+	;; stack (as it grows downwards on x86 systems). This is necessarily done
+	;; in assembly as languages such as C cannot function without a stack.
 
-			mov eax,
-	cr0 and ax, 0xFFFB;
-clear coprocessor emulation CR0.EM or ax, 0x2;
-set coprocessor monitoring CR0.MP mov cr0, eax mov eax, cr4 or ax, 3 << 9;
-set CR4.OSFXSR and CR4.OSXMMEXCPT at the same time mov cr4, eax
+	mov 	esp, stack_top
+	mov 	ebp, stack_top
 
-	;
-;
-This is a good place to initialize crucial processor state before the;
-;
-high - level kernel is entered.It's best to minimize the early ;
-;
-environment where crucial features are offline.Note that the;
-;
-processor is not fully initialized yet : Features such as floating;
-;
-point instructions and instruction set extensions are not initialized;
-;
-yet.The GDT should be loaded here.Paging should be enabled here.;
-;
-C++ features such as global constructors and exceptions will require;
-;
-runtime support to work as well.
+	push	ebx
+	push 	eax
 
-	lgdt[gdtr] call reloadSegments
 
-	;
-;
-call _init
+	mov 	eax, cr0
+	and 	ax, 0xFFFB	; clear coprocessor emulation CR0.EM
+	or 	ax, 0x2		; set coprocessor monitoring  CR0.MP
+	mov 	cr0, eax
+	mov 	eax, cr4
+	or 	ax, 3 << 9 ; set CR4.OSFXSR and CR4.OSXMMEXCPT at the same time
+	mov 	cr4, eax
 
-	;
-;
-Enter the high - level kernel.The ABI requires the stack is 16 - byte;
-;
-aligned at the time of the call instruction(which afterwards pushes;; the return pointer of size 4 bytes).The stack was originally 16 - byte;
-;
-aligned above and we've pushed a multiple of 16 bytes to the ;
-;
-stack since(pushed 0 bytes so far), so the alignment has thus been;
-;
-preserved and the call is well defined.
+	;; This is a good place to initialize crucial processor state before the
+	;; high-level kernel is entered. It's best to minimize the early
+	;; environment where crucial features are offline. Note that the
+	;; processor is not fully initialized yet: Features such as floating
+	;; point instructions and instruction set extensions are not initialized
+	;; yet. The GDT should be loaded here. Paging should be enabled here.
+	;; C++ features such as global constructors and exceptions will require
+	;; runtime support to work as well.
 
-	call kernel_main
+	lgdt  	[gdtr]
+	call 	reloadSegments
 
-	;
-;
-If the system has nothing more to do, put the computer into an;
-;
-infinite loop.To do that :;
-; 1) Disable interrupts with cli (clear interrupt enable in eflags).
-	;
-;
-They are already disabled by the bootloader, so this is not needed.;
-;
-Mind that you might later enable interrupts and return from;
-;
-kernel_main(which is sort of nonsensical to do).;
-; 2) Wait for the next interrupt to arrive with hlt (halt instruction).
-	;
-;
-Since they are disabled, this will lock up the computer.;
-; 3) Jump to the hlt instruction if it ever wakes up due to a
-	;
-;
-non - maskable interrupt occurring or due to system management mode.
+	;; call _init
 
-	;
-;
-cli.inf_loop : hlt jmp.inf_loop
+	;; Enter the high-level kernel. The ABI requires the stack is 16-byte
+	;; aligned at the time of the call instruction (which afterwards pushes
+	;; the return pointer of size 4 bytes). The stack was originally 16-byte
+	;; aligned above and we've pushed a multiple of 16 bytes to the
+	;; stack since (pushed 0 bytes so far), so the alignment has thus been
+	;; preserved and the call is well defined.
 
-		       setGdt : mov ax,
-	[esp + 4] mov[gdtr], ax mov eax, [esp + 8] mov[gdtr + 2], eax LGDT[gdtr] ret
+	call 	kernel_main
 
-	;
-;
-;
-Funtion to reload the segment reg after chaning the Global descriptor tables reloadSegments :;
-;
-Reload CS register containing code selector : jmp 0x08 :.reload_CS; 0x08 is a stand-in for your code segment
+	;; If the system has nothing more to do, put the computer into an
+	;; infinite loop. To do that:
+	;; 1) Disable interrupts with cli (clear interrupt enable in eflags).
+	;;    They are already disabled by the bootloader, so this is not needed.
+	;;    Mind that you might later enable interrupts and return from
+	;;    kernel_main (which is sort of nonsensical to do).
+	;; 2) Wait for the next interrupt to arrive with hlt (halt instruction).
+	;;    Since they are disabled, this will lock up the computer.
+	;; 3) Jump to the hlt instruction if it ever wakes up due to a
+	;;    non-maskable interrupt occurring or due to system management mode.
+
+	;; cli
+.inf_loop:
+	hlt
+	jmp 	.inf_loop
+
+setGdt:
+	mov	ax, [esp + 4]
+	mov	[gdtr], ax
+	mov 	eax, [esp + 8]
+	mov 	[gdtr + 2], eax
+	LGDT	[gdtr]
+	ret
+
+;;; Funtion to reload the segment reg after chaning the Global descriptor tables
+reloadSegments:
+	;; Reload CS register containing code selector:
+	jmp   	0x08:.reload_CS ; 0x08 is a stand-in for your code segment
 
 .reload_CS:
-	;
-;
-Reload data segment registers : mov ax, 0x10; 0x10 is a stand-in for your data segment
+	;; Reload data segment registers:
+	mov	ax, 0x10 ; 0x10 is a stand-in for your data segment
 	mov	ds, ax
 	mov	es, ax
 	mov	fs, ax
@@ -217,8 +219,5 @@ Reload data segment registers : mov ax, 0x10; 0x10 is a stand-in for your data s
 	mov	ss, ax
 	ret
 
-;
-;
-Set the size of the _start symbol to the current location '.' minus its start.;
-;
-This is useful when debugging or when you implement call tracing.
+;; Set the size of the _start symbol to the current location '.' minus its start.
+;; This is useful when debugging or when you implement call tracing.
