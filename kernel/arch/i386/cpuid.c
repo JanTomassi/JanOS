@@ -13,3 +13,9 @@ inline struct feature_info cpuid_get_feature_info()
 	__asm__ volatile("mov $1, %%eax\n cpuid\n mov %%edx, %k0" : "=a"(res) : : "memory");
 	return res;
 }
+
+inline uint32_t cpuid_get_logical_processor_count(){
+	uint32_t res;
+	__asm__ volatile("mov $1, %%eax\n cpuid\n mov %%ebx, %k0" : "=a"(res) :  : "memory");
+	return (res >> 16) & 0xFF;
+}

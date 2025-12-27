@@ -1,4 +1,5 @@
 #pragma once
+#include <stdbool.h>
 #include <stdint.h>
 
 struct ext_feature_info {
@@ -166,3 +167,4 @@ struct feature_info {
 
 struct ext_feature_info cpuid_get_ext_feature_info();
 struct feature_info cpuid_get_feature_info();
+uint32_t cpuid_get_logical_processor_count();

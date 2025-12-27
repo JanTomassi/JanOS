@@ -1,0 +1,4 @@
+#pragma once
+
+#define SMP_TRAMPOLINE_BASE 0x8000
+#define SMP_TRAMPOLINE_DATA_BASE 0x7000

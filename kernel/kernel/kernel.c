@@ -8,6 +8,8 @@
 #include <kernel/phy_mem.h>
 #include <kernel/vir_mem.h>
 #include <kernel/allocator.h>
+#include <kernel/smp.h>
+#include <kernel/scheduler.h>
 
 #include <kernel/interrupt.h>
 
@@ -26,6 +28,8 @@ static void pit_tick(void)
 {
 	++GLOBAL_TICK;
 }
+
+static void scheduler_debug_dump(void);
 
 void section_divisor(char *section_name)
 {
@@ -299,6 +303,17 @@ void kernel_main(unsigned int magic, unsigned long addr)
 	gpa_alloc.free(mem2);
 	kprintf("mem2 freed\n");
 
+	section_divisor("Platform support:\n");
+	kprintf("Architecture locked to i386/pc platform.\n");
+	smp_init();
+	size_t cpu_count = smp_get_cpu_count();
+	scheduler_init(cpu_count);
+	for (size_t cpu = 0; cpu < cpu_count; cpu++)
+		scheduler_add_task("idle", 0, cpu);
+	scheduler_add_task("bootstrap", 10, 0);
+	smp_bootstrap_aps();
+	scheduler_debug_dump();
+
 	storage_init();
 	const struct storage_driver *storage = storage_get_driver();
 
@@ -337,4 +352,17 @@ void kernel_main(unsigned int magic, unsigned long addr)
 	/* 				(uint8_t)tick; // RED */
 	/* 		} */
 	/* 	} */
+}
+
+static void scheduler_debug_dump(void)
+{
+	for (size_t cpu = 0; cpu < scheduler_cpu_count(); cpu++) {
+		struct sched_task task;
+		if (scheduler_peek_next(cpu, &task))
+			kprintf("CPU %u next task '%s' (priority %u)\n",
+				(uint32_t)cpu, task.name, task.priority);
+		else
+			kprintf("CPU %u has no task in queue.\n",
+				(uint32_t)cpu);
+	}
 }

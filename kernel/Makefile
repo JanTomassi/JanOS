@@ -32,7 +32,8 @@ $(KERNEL_ARCH_OBJS) \
 kernel/kernel.o \
 kernel/display.o \
 kernel/mem_allocs.o \
-kernel/allocator.o
+kernel/allocator.o \
+kernel/scheduler.o
 
 OBJS=\
 $(KERNEL_OBJS) \

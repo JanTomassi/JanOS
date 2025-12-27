@@ -72,28 +72,29 @@ JanOS.iso: build
 
 qemu_debug: JanOS.iso
 	qemu-system-${ARCH} -s -S -audiodev pa,id=speaker \
-	-m 1G \
-	-drive file=JanOS.iso,format=raw \
-	-drive file=harry_potter.raw,format=raw
+		-m 1G \
+		-machine pc -cpu qemu32 -smp 4 \
+		-drive file=JanOS.iso,format=raw \
+		-drive file=harry_potter.raw,format=raw
 
 qemu_sata: JanOS.iso
 	qemu-system-${ARCH} -audiodev pa,id=speaker \
-	-m 1G \
-	-machine pcspk-audiodev=speaker \
-	-drive id=os_file,file=JanOS.iso,format=raw,if=none \
-	-drive id=test_disk,file=harry_potter.raw,format=raw,if=none \
-	-device ahci,id=ahci \
-	-device ide-hd,drive=os_file,bus=ahci.0 \
-	-device ide-hd,drive=test_disk,bus=ahci.1
+		-m 1G \
+		-machine pc,pcspk-audiodev=speaker -cpu qemu32 -smp 4 \
+		-drive id=os_file,file=JanOS.iso,format=raw,if=none \
+		-drive id=test_disk,file=harry_potter.raw,format=raw,if=none \
+		-device ahci,id=ahci \
+		-device ide-hd,drive=os_file,bus=ahci.0 \
+		-device ide-hd,drive=test_disk,bus=ahci.1
 
 qemu: JanOS.iso
 	qemu-system-${ARCH} \
-	-m 1G \
-	-machine pc -cpu qemu64 \
-	-drive id=os_file,file=JanOS.iso,format=raw,if=none \
-	-drive id=test_disk,file=harry_potter.raw,format=raw,if=none \
-	-device ahci,id=ahci \
-	-device ide-hd,drive=os_file,bus=ahci.0 \
-	-device ide-hd,drive=test_disk,bus=ahci.1
+		-m 1G \
+		-machine pc -cpu qemu32 -smp 4 \
+		-drive id=os_file,file=JanOS.iso,format=raw,if=none \
+		-drive id=test_disk,file=harry_potter.raw,format=raw,if=none \
+		-device ahci,id=ahci \
+		-device ide-hd,drive=os_file,bus=ahci.0 \
+		-device ide-hd,drive=test_disk,bus=ahci.1
 
 .PHONY: build clean headers qemu qemu_debug
