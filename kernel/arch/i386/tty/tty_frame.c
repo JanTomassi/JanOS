@@ -11,8 +11,7 @@ static size_t tty_height;
 static uint32_t tty_color;
 static uint32_t tty_background;
 
-display_t tty_frame_initialize(size_t buffer_addr, size_t pitch, size_t width,
-			       size_t height, uint8_t bit_per_pixel)
+display_t tty_frame_initialize(size_t buffer_addr, size_t pitch, size_t width, size_t height, uint8_t bit_per_pixel)
 {
 	tty_buffer = (uint8_t *)buffer_addr;
 

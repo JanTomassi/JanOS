@@ -36,15 +36,12 @@ void section_divisor(char *section_name)
 		"-------------------------------------\n");
 }
 
-void setup_phy_mem(const struct multiboot_tag_mmap *mmap_tag,
-		   const struct multiboot_tag_elf_sections *elf_tag)
+void setup_phy_mem(const struct multiboot_tag_mmap *mmap_tag, const struct multiboot_tag_elf_sections *elf_tag)
 {
 	phy_mem_reset();
 
-	for (const struct multiboot_mmap_entry *mmap = mmap_tag->entries;
-	     (multiboot_uint8_t *) mmap
-	     < (multiboot_uint8_t *) mmap_tag + mmap_tag->size;
-	     mmap = (multiboot_memory_map_t *)((unsigned long) mmap + mmap_tag->entry_size)){
+	for (const struct multiboot_mmap_entry *mmap = mmap_tag->entries; (multiboot_uint8_t *)mmap < (multiboot_uint8_t *)mmap_tag + mmap_tag->size;
+	     mmap = (multiboot_memory_map_t *)((unsigned long)mmap + mmap_tag->entry_size)) {
 		if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE) {
 			phy_mem_add_region(mmap->addr, mmap->len);
 		}
@@ -71,11 +68,9 @@ void phy_memory_test()
 	fatptr_t alloc2 = phy_mem_alloc(4096 * 1);
 	kprintf("Step 2 alloc one block without freeing: %x\n", alloc2.ptr);
 
-	kprintf("Step 3 are they equal: %s\n",
-		alloc.ptr == alloc2.ptr ? "true" : "false");
+	kprintf("Step 3 are they equal: %s\n", alloc.ptr == alloc2.ptr ? "true" : "false");
 
-	section_divisor(
-		"2. Physical memory allocation test:\nTesting if reuse work:\n");
+	section_divisor("2. Physical memory allocation test:\nTesting if reuse work:\n");
 
 	fatptr_t alloc3 = phy_mem_alloc(4096 * 1);
 	kprintf("Step 1 alloc one block then free it: %x\n", alloc3.ptr);
@@ -85,8 +80,7 @@ void phy_memory_test()
 	kprintf("Step 2 alloc one block then free it: %x\n", alloc4.ptr);
 	phy_mem_free(alloc4);
 
-	kprintf("Step 3 are they equal: %s\n",
-		alloc3.ptr == alloc4.ptr ? "true" : "false");
+	kprintf("Step 3 are they equal: %s\n", alloc3.ptr == alloc4.ptr ? "true" : "false");
 
 	phy_mem_free(alloc2);
 	phy_mem_free(alloc);
@@ -94,10 +88,9 @@ void phy_memory_test()
 
 void kernel_main(unsigned int magic, unsigned long addr)
 {
-
 	display_t serial_dpy = init_serial();
 	uint8_t serial_dpy_reg = DISPLAY_MAX_DISPS;
-	if (serial_dpy.putc != nullptr || serial_dpy.puts != nullptr){
+	if (serial_dpy.putc != nullptr || serial_dpy.puts != nullptr) {
 		serial_dpy_reg = display_register(serial_dpy);
 		display_setcurrent(serial_dpy_reg);
 	}
@@ -110,108 +103,85 @@ void kernel_main(unsigned int magic, unsigned long addr)
 		panic("invalid magic number!\n");
 	}
 
-	if (addr & 7){
+	if (addr & 7) {
 		kprintf("Unaligned mbi: %x\n", addr);
 		return;
 	}
 
-	size_t size = *(unsigned *) addr;
+	size_t size = *(unsigned *)addr;
 	kprintf("Announced mbi size %x\n", size);
 
 	struct multiboot_tag_mmap *mmap_tag = nullptr;
 	struct multiboot_tag_elf_sections *elf_sec_tag = nullptr;
 
-	for (struct multiboot_tag *tag = (struct multiboot_tag *) (addr + 8);
-	     tag->type != MULTIBOOT_TAG_TYPE_END;
-	     tag = (struct multiboot_tag *) ((multiboot_uint8_t *) tag
-					     + ((tag->size + 7) & ~7))){
+	for (struct multiboot_tag *tag = (struct multiboot_tag *)(addr + 8); tag->type != MULTIBOOT_TAG_TYPE_END;
+	     tag = (struct multiboot_tag *)((multiboot_uint8_t *)tag + ((tag->size + 7) & ~7))) {
 		kprintf("Tag %d, Size %x\n", tag->type, tag->size);
-		switch (tag->type){
+		switch (tag->type) {
 		case MULTIBOOT_TAG_TYPE_CMDLINE:
-			kprintf("Command line = %s\n",
-				((struct multiboot_tag_string *) tag)->string);
+			kprintf("Command line = %s\n", ((struct multiboot_tag_string *)tag)->string);
 			break;
 		case MULTIBOOT_TAG_TYPE_BOOT_LOADER_NAME:
-			kprintf("Boot loader name = %s\n",
-				((struct multiboot_tag_string *) tag)->string);
+			kprintf("Boot loader name = %s\n", ((struct multiboot_tag_string *)tag)->string);
 			break;
 		case MULTIBOOT_TAG_TYPE_MODULE:
-			kprintf("Module at %x-%x. Command line %s\n",
-				((struct multiboot_tag_module *) tag)->mod_start,
-				((struct multiboot_tag_module *) tag)->mod_end,
-				((struct multiboot_tag_module *) tag)->cmdline);
+			kprintf("Module at %x-%x. Command line %s\n", ((struct multiboot_tag_module *)tag)->mod_start,
+				((struct multiboot_tag_module *)tag)->mod_end, ((struct multiboot_tag_module *)tag)->cmdline);
 			break;
 		case MULTIBOOT_TAG_TYPE_BASIC_MEMINFO:
-			kprintf("mem_lower = %uKB, mem_upper = %uKB\n",
-				((struct multiboot_tag_basic_meminfo *) tag)->mem_lower,
-				((struct multiboot_tag_basic_meminfo *) tag)->mem_upper);
+			kprintf("mem_lower = %uKB, mem_upper = %uKB\n", ((struct multiboot_tag_basic_meminfo *)tag)->mem_lower,
+				((struct multiboot_tag_basic_meminfo *)tag)->mem_upper);
 			break;
 		case MULTIBOOT_TAG_TYPE_BOOTDEV:
-			kprintf("Boot device %x,%u,%u\n",
-				((struct multiboot_tag_bootdev *) tag)->biosdev,
-				((struct multiboot_tag_bootdev *) tag)->slice,
-				((struct multiboot_tag_bootdev *) tag)->part);
+			kprintf("Boot device %x,%u,%u\n", ((struct multiboot_tag_bootdev *)tag)->biosdev, ((struct multiboot_tag_bootdev *)tag)->slice,
+				((struct multiboot_tag_bootdev *)tag)->part);
 			break;
 		case MULTIBOOT_TAG_TYPE_MMAP: {
 			mmap_tag = (struct multiboot_tag_mmap *)tag;
 			multiboot_memory_map_t *mmap;
 			kprintf("mmap\n");
-			for (mmap = mmap_tag->entries;
-			     (multiboot_uint8_t *) mmap
-			     < (multiboot_uint8_t *) tag + tag->size;
-			     mmap = (multiboot_memory_map_t *)((unsigned long) mmap + mmap_tag->entry_size))
+			for (mmap = mmap_tag->entries; (multiboot_uint8_t *)mmap < (multiboot_uint8_t *)tag + tag->size;
+			     mmap = (multiboot_memory_map_t *)((unsigned long)mmap + mmap_tag->entry_size))
 				kprintf(" base_addr = %x%x,"
 					" length = %x%x, type = %x\n",
-					(unsigned) (mmap->addr >> 32),
-					(unsigned) (mmap->addr & 0xffffffff),
-					(unsigned) (mmap->len >> 32),
-					(unsigned) (mmap->len & 0xffffffff),
-					(unsigned) mmap->type);
-		}
-			break;
+					(unsigned)(mmap->addr >> 32), (unsigned)(mmap->addr & 0xffffffff), (unsigned)(mmap->len >> 32),
+					(unsigned)(mmap->len & 0xffffffff), (unsigned)mmap->type);
+		} break;
 		case MULTIBOOT_TAG_TYPE_ELF_SECTIONS: {
 			elf_sec_tag = (struct multiboot_tag_elf_sections *)tag;
 			const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)elf_sec_tag->sections;
-			const char *elf_sec_str = (char*)(elf_sec[elf_sec_tag->shndx].sh_addr);
+			const char *elf_sec_str = (char *)(elf_sec[elf_sec_tag->shndx].sh_addr);
 			for (size_t i = 0; i < elf_sec_tag->num; i++)
-				kprintf("Section (%s): [Address: %x, Size: %x]\n",
-					&elf_sec_str[elf_sec[i].sh_name], elf_sec[i].sh_addr,
-					elf_sec[i].sh_size);
-		}
-			break;
+				kprintf("Section (%s): [Address: %x, Size: %x]\n", &elf_sec_str[elf_sec[i].sh_name], elf_sec[i].sh_addr, elf_sec[i].sh_size);
+		} break;
 		case MULTIBOOT_TAG_TYPE_FRAMEBUFFER: {
 			multiboot_uint32_t color;
 			unsigned i;
-			struct multiboot_tag_framebuffer *tagfb
-				= (struct multiboot_tag_framebuffer *) tag;
-			void *fb = (void *) (unsigned long) tagfb->common.framebuffer_addr;
+			struct multiboot_tag_framebuffer *tagfb = (struct multiboot_tag_framebuffer *)tag;
+			void *fb = (void *)(unsigned long)tagfb->common.framebuffer_addr;
 
-			switch (tagfb->common.framebuffer_type){
-			case MULTIBOOT_FRAMEBUFFER_TYPE_INDEXED:{
+			switch (tagfb->common.framebuffer_type) {
+			case MULTIBOOT_FRAMEBUFFER_TYPE_INDEXED: {
 				unsigned best_distance, distance;
 				struct multiboot_color *palette;
 
 				palette = tagfb->framebuffer_palette;
 
 				color = 0;
-				best_distance = 4*256*256;
+				best_distance = 4 * 256 * 256;
 
-				for (i = 0; i < tagfb->framebuffer_palette_num_colors; i++){
-					distance = (0xff - palette[i].blue)
-						   * (0xff - palette[i].blue)
-						   + palette[i].red * palette[i].red
-						   + palette[i].green * palette[i].green;
-					if (distance < best_distance){
+				for (i = 0; i < tagfb->framebuffer_palette_num_colors; i++) {
+					distance = (0xff - palette[i].blue) * (0xff - palette[i].blue) + palette[i].red * palette[i].red +
+						   palette[i].green * palette[i].green;
+					if (distance < best_distance) {
 						color = i;
 						best_distance = distance;
 					}
 				}
-			}
-				break;
+			} break;
 
 			case MULTIBOOT_FRAMEBUFFER_TYPE_RGB:
-				color = ((1 << tagfb->framebuffer_blue_mask_size) - 1)
-					<< tagfb->framebuffer_blue_field_position;
+				color = ((1 << tagfb->framebuffer_blue_mask_size) - 1) << tagfb->framebuffer_blue_field_position;
 				break;
 
 			case MULTIBOOT_FRAMEBUFFER_TYPE_EGA_TEXT:
@@ -330,8 +300,8 @@ void kernel_main(unsigned int magic, unsigned long addr)
 	kprintf("    - hdb: %s type\n", ata_pio_debug_devtype(ata_pio_detect_devtype(0)));
 
 	kprintf("Content of hdb\n\n");
-	for (size_t i = 0; i < (430*1024) / 512; i++){
-		char test_array[512] = {0};
+	for (size_t i = 0; i < (430 * 1024) / 512; i++) {
+		char test_array[512] = { 0 };
 		ata_pio_28_read(i, 1, test_array);
 		kprintf("%s", test_array);
 	}

@@ -1,7 +1,6 @@
 #include <string.h>
 
-void *memcpy(void *__restrict destptr, const void *__restrict srcptr,
-	     size_t size)
+void *memcpy(void *__restrict destptr, const void *__restrict srcptr, size_t size)
 {
 	unsigned char *dest = (unsigned char *)destptr;
 	unsigned char *src = (unsigned char *)srcptr;

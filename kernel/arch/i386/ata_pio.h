@@ -12,7 +12,6 @@ char *ata_pio_debug_devtype(enum ATADEV dev_type);
 
 uint32_t ata_pio_detect_devtype(uint8_t slavebit);
 
-bool ata_pio_28_read(uint32_t lba_addr, int16_t sector_count, char* dest);
+bool ata_pio_28_read(uint32_t lba_addr, int16_t sector_count, char *dest);
 
-void ide_initialize(unsigned int BAR0, unsigned int BAR1, unsigned int BAR2,
-		    unsigned int BAR3, unsigned int BAR4);
+void ide_initialize(unsigned int BAR0, unsigned int BAR1, unsigned int BAR2, unsigned int BAR3, unsigned int BAR4);

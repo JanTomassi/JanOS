@@ -38,9 +38,9 @@ DEFINE_IRQ(33)
 {
 	uint8_t scan_code;
 
-	__asm__("mov    $0,    %0;" /* zeroing scan_code */
+	__asm__("mov    $0,    %0;"   /* zeroing scan_code */
 		"inb 	$0x60, %%al;" /* reading input from keyboard */
-		"mov    %%al,  %0" /* coping keyboard input to scan_code */
+		"mov    %%al,  %0"    /* coping keyboard input to scan_code */
 		: "=g"(scan_code)
 		:
 		: "%al");
@@ -50,9 +50,7 @@ DEFINE_IRQ(33)
 	if (!event.pressed)
 		return;
 	else if (event.key_code < KEY_CODE_LAST_PRINTABLE)
-		kprintf("%s", keysym[event.key_code][mod_key.left_shift ||
-						     mod_key.right_shift ||
-						     mod_key.caplock]);
+		kprintf("%s", keysym[event.key_code][mod_key.left_shift || mod_key.right_shift || mod_key.caplock]);
 	else if (event.key_code == KEY_CODE_SPACE)
 		kprintf(" ");
 	else if (event.key_code == KEY_CODE_ENTER)

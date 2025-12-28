@@ -4,9 +4,8 @@
 #include <list.h>
 
 #define BLOCK_SIZE (KIBI(4ULL))
-#define ALLOC_BITMAP \
-	(GIBI(4ULL) / BLOCK_SIZE / BIT(sizeof(uint32_t))) // (0x8000)
-static_assert(ALLOC_BITMAP == 0x8000); // Limit to x86_32 max addressable memory
+#define ALLOC_BITMAP (GIBI(4ULL) / BLOCK_SIZE / BIT(sizeof(uint32_t))) // (0x8000)
+static_assert(ALLOC_BITMAP == 0x8000);				       // Limit to x86_32 max addressable memory
 
 /**
  * Memory book keeping will be keept using a linked list of block all
@@ -18,8 +17,7 @@ struct booking_block {
 	fatptr_t allocs[BLOCK_SIZE / sizeof(fatptr_t) - 1];
 	struct list_head list;
 };
-static_assert(sizeof(struct booking_block) == BLOCK_SIZE,
-	      "Booking block is not equal to a block, this is not allowed");
+static_assert(sizeof(struct booking_block) == BLOCK_SIZE, "Booking block is not equal to a block, this is not allowed");
 
 static uint32_t allocation_bitmap[ALLOC_BITMAP] = { 0 };
 static struct booking_block base_booking_block;
@@ -38,8 +36,7 @@ void phy_mem_reset()
 	list_add(&(base_booking_block.list), &booking_block_list);
 };
 
-__attribute__((hot)) static void phy_mem_set_region(size_t addr, size_t len,
-						    bool set)
+__attribute__((hot)) static void phy_mem_set_region(size_t addr, size_t len, bool set)
 {
 	const size_t page_offset = addr / 4096;
 	const size_t num_pages = (len / 4096) + 1;
@@ -118,16 +115,12 @@ __attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc(size_t size
 	list_for_each(&booking_block_list) {
 		bool found_spot = false;
 
-		struct booking_block *cur_block =
-			list_entry(it, struct booking_block, list);
+		struct booking_block *cur_block = list_entry(it, struct booking_block, list);
 
 		for (size_t i = 0; i < BOOKING_COUNT; i++) {
 			if (cur_block->allocs[i].ptr == nullptr) {
-				cur_block->allocs[i].ptr =
-					(void *)(start_point * BLOCK_SIZE);
-				cur_block->allocs[i].len =
-					end_point * BLOCK_SIZE -
-					start_point * BLOCK_SIZE;
+				cur_block->allocs[i].ptr = (void *)(start_point * BLOCK_SIZE);
+				cur_block->allocs[i].len = end_point * BLOCK_SIZE - start_point * BLOCK_SIZE;
 
 				found_spot = true;
 				break;
@@ -137,20 +130,16 @@ __attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc(size_t size
 			break;
 	}
 
-	return (fatptr_t){ .ptr = (void *)(start_point * BLOCK_SIZE),
-			   .len = req_size };
+	return (fatptr_t){ .ptr = (void *)(start_point * BLOCK_SIZE), .len = req_size };
 }
 
 __attribute__((hot)) void phy_mem_free(fatptr_t addr_ptr)
 {
 	list_for_each(&booking_block_list) {
-		struct booking_block *cur_block =
-			list_entry(it, struct booking_block, list);
+		struct booking_block *cur_block = list_entry(it, struct booking_block, list);
 		for (size_t i = 0; i < BOOKING_COUNT; i++) {
 			if (cur_block->allocs[i].ptr == addr_ptr.ptr) {
-				phy_mem_add_region(
-					(size_t)cur_block->allocs[i].ptr,
-					cur_block->allocs[i].len);
+				phy_mem_add_region((size_t)cur_block->allocs[i].ptr, cur_block->allocs[i].len);
 
 				cur_block->allocs[i].ptr = nullptr;
 				cur_block->allocs[i].len = 0;
