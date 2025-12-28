@@ -133,6 +133,64 @@ __attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc(size_t size
 	return (fatptr_t){ .ptr = (void *)(start_point * BLOCK_SIZE), .len = req_size };
 }
 
+fatptr_t phy_mem_alloc_range(size_t size, size_t max_addr)
+{
+	const size_t req_size = size + (size % BLOCK_SIZE);
+	const size_t req_block = req_size / BLOCK_SIZE;
+	const size_t max_block = max_addr / BLOCK_SIZE;
+	size_t start_point = 0;
+	size_t end_point = start_point;
+
+	if (phy_mem_get_free_blocks() < req_block)
+		return (fatptr_t){ .ptr = 0, .len = 0 };
+
+	for (size_t i = 0; i < ALLOC_BITMAP * 32 && (start_point + req_block) <= max_block; i++) {
+		const uint32_t block = i / 32;
+		const uint32_t block_bit = i % 32;
+		const uint32_t bit_mask = 1 << block_bit;
+
+		if ((allocation_bitmap[block] & bit_mask) == 0) {
+			end_point++;
+			if (end_point - start_point >= req_block)
+				break;
+		} else {
+			start_point = i + 1;
+			end_point = i + 1;
+		}
+	}
+
+	if ((start_point + req_block) > max_block)
+		return (fatptr_t){ .ptr = 0, .len = 0 };
+
+	for (size_t i = start_point; i < end_point; i++) {
+		const uint32_t block = i / 32;
+		const uint32_t block_bit = i % 32;
+		const uint32_t bit_mask = 1 << block_bit;
+
+		allocation_bitmap[block] |= bit_mask;
+	}
+
+	list_for_each(&booking_block_list) {
+		bool found_spot = false;
+
+		struct booking_block *cur_block = list_entry(it, struct booking_block, list);
+
+		for (size_t i = 0; i < BOOKING_COUNT; i++) {
+			if (cur_block->allocs[i].ptr == nullptr) {
+				cur_block->allocs[i].ptr = (void *)(start_point * BLOCK_SIZE);
+				cur_block->allocs[i].len = end_point * BLOCK_SIZE - start_point * BLOCK_SIZE;
+
+				found_spot = true;
+				break;
+			}
+		}
+		if (found_spot)
+			break;
+	}
+
+	return (fatptr_t){ .ptr = (void *)(start_point * BLOCK_SIZE), .len = req_size };
+}
+
 __attribute__((hot)) void phy_mem_free(fatptr_t addr_ptr)
 {
 	list_for_each(&booking_block_list) {

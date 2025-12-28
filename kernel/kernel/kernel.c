@@ -10,6 +10,7 @@
 #include <kernel/allocator.h>
 
 #include <kernel/interrupt.h>
+#include <kernel/smp.h>
 
 #include <string.h>
 #include "../arch/i386/ata_pio.h"
@@ -113,6 +114,8 @@ void kernel_main(unsigned int magic, unsigned long addr)
 
 	struct multiboot_tag_mmap *mmap_tag = nullptr;
 	struct multiboot_tag_elf_sections *elf_sec_tag = nullptr;
+	struct multiboot_tag_old_acpi *acpi_old = nullptr;
+	struct multiboot_tag_new_acpi *acpi_new = nullptr;
 
 	for (struct multiboot_tag *tag = (struct multiboot_tag *)(addr + 8); tag->type != MULTIBOOT_TAG_TYPE_END;
 	     tag = (struct multiboot_tag *)((multiboot_uint8_t *)tag + ((tag->size + 7) & ~7))) {
@@ -220,6 +223,12 @@ void kernel_main(unsigned int magic, unsigned long addr)
 			/* 	} */
 			/* } */
 			break;
+		case MULTIBOOT_TAG_TYPE_ACPI_OLD:
+			acpi_old = (struct multiboot_tag_old_acpi *)tag;
+			break;
+		case MULTIBOOT_TAG_TYPE_ACPI_NEW:
+			acpi_new = (struct multiboot_tag_new_acpi *)tag;
+			break;
 		}
 		}
 	}
@@ -270,6 +279,9 @@ void kernel_main(unsigned int magic, unsigned long addr)
 	section_divisor("Init kernel memory allocator:\n");
 
 	init_kmalloc();
+
+	section_divisor("SMP init:\n");
+	smp_init(acpi_old, acpi_new);
 
 	allocator_t gpa_alloc = get_gpa_allocator();
 

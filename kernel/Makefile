@@ -6,6 +6,7 @@ CFLAGS?=-O2 -g
 CPPFLAGS?=
 LDFLAGS?=
 LIBS?=
+AS=nasm
 
 DESTDIR?=
 PREFIX?=/usr/local
@@ -53,6 +54,9 @@ JanOS.kernel: $(OBJS) $(ARCHDIR)/linker.ld
 
 .S.o:
 	$(CC) -MD -c $< -o $@ $(CFLAGS) $(CPPFLAGS)
+
+.s.o:
+	$(AS) -f elf32 $< -o $@
 
 clean:
 	rm -f JanOS.kernel

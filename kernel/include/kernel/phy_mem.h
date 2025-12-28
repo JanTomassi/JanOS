@@ -49,3 +49,4 @@ size_t phy_mem_get_free_blocks();
 
 void phy_mem_free(fatptr_t addr_ptr);
 __attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc(size_t len);
+fatptr_t phy_mem_alloc_range(size_t len, size_t max_addr);
