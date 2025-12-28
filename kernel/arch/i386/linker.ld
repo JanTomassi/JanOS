@@ -38,6 +38,13 @@ SECTIONS
 
 	. += HIGHER_HALF;
 
+	/* Keep the 16-bit AP trampoline in its own small section so 16-bit
+	   relocations stay within range. */
+	.ap_trampoline . : ALIGN(16)
+	{
+		KEEP(*(.ap_trampoline))
+	} AT> rom
+
 	/* Code. */
 	.text . : ALIGN(4096)
 	{

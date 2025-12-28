@@ -1,5 +1,5 @@
 .code16
-.section .text
+.section .ap_trampoline, "ax", @progbits
 .global ap_trampoline
 .global ap_trampoline_end
 .global ap_trampoline_data
