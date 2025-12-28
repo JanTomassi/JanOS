@@ -67,8 +67,9 @@ JanOS.iso: build
 
 
 qemu_debug: JanOS.iso
-	qemu-system-${ARCH} -s -S -audiodev pa,id=speaker \
+	qemu-system-${ARCH} -s -S \
 	-m 1G \
+	-machine pc -cpu qemu64 \
 	-drive file=JanOS.iso,format=raw \
 	-drive file=harry_potter.raw,format=raw
 
@@ -86,10 +87,7 @@ qemu: JanOS.iso
 	qemu-system-${ARCH} \
 	-m 1G \
 	-machine pc -cpu qemu64 \
-	-drive id=os_file,file=JanOS.iso,format=raw,if=none \
-	-drive id=test_disk,file=harry_potter.raw,format=raw,if=none \
-	-device ahci,id=ahci \
-	-device ide-hd,drive=os_file,bus=ahci.0 \
-	-device ide-hd,drive=test_disk,bus=ahci.1
+	-drive file=JanOS.iso,format=raw \
+	-drive file=harry_potter.raw,format=raw
 
 .PHONY: build clean headers qemu qemu_debug
