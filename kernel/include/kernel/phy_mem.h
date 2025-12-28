@@ -15,15 +15,13 @@ struct __attribute__((packed)) phy_mem_8pages_state {
 	phy_mem_is_used _6 : 1;
 	phy_mem_is_used _7 : 1;
 };
-_Static_assert(sizeof(struct phy_mem_8pages_state) == 1,
-	       "Physical memory 8 pages struct is not 1 byte in size");
+_Static_assert(sizeof(struct phy_mem_8pages_state) == 1, "Physical memory 8 pages struct is not 1 byte in size");
 
 struct __attribute__((packed)) phy_mem_16pages_state {
 	struct phy_mem_8pages_state _0;
 	struct phy_mem_8pages_state _1;
 };
-_Static_assert(sizeof(struct phy_mem_16pages_state) == 2,
-	       "Physical memory 16 pages struct is not 2 byte in size");
+_Static_assert(sizeof(struct phy_mem_16pages_state) == 2, "Physical memory 16 pages struct is not 2 byte in size");
 
 struct __attribute__((packed)) phy_mem_32pages_state {
 	struct phy_mem_8pages_state _0;
@@ -31,8 +29,7 @@ struct __attribute__((packed)) phy_mem_32pages_state {
 	struct phy_mem_8pages_state _2;
 	struct phy_mem_8pages_state _3;
 };
-_Static_assert(sizeof(struct phy_mem_32pages_state) == 4,
-	       "Physical memory 32 pages struct is not 4 byte in size");
+_Static_assert(sizeof(struct phy_mem_32pages_state) == 4, "Physical memory 32 pages struct is not 4 byte in size");
 
 /** Set all memory as unused
  **/

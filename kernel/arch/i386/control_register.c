@@ -18,9 +18,8 @@ static void debug_CR0_reg()
 {
 	struct CR0_reg CR0 = get_CR0_reg();
 
-	kprintf("CR0:\n[PE: %u, MP: %u, EM: %u, TS: %u, ET: %u, NE: %u, WP: %u, AM: %u, NW: %u, CD: %u, PG: %u]\n",
-		CR0.PE, CR0.MP, CR0.EM, CR0.TS, CR0.ET, CR0.NE, CR0.WP, CR0.AM,
-		CR0.NW, CR0.CD, CR0.PG);
+	kprintf("CR0:\n[PE: %u, MP: %u, EM: %u, TS: %u, ET: %u, NE: %u, WP: %u, AM: %u, NW: %u, CD: %u, PG: %u]\n", CR0.PE, CR0.MP, CR0.EM, CR0.TS, CR0.ET,
+		CR0.NE, CR0.WP, CR0.AM, CR0.NW, CR0.CD, CR0.PG);
 }
 
 bool set_CR0_reg(enum CR0_REG flag, bool val)
@@ -114,11 +113,8 @@ static void debug_CR4_reg()
 		", UMIP: %u, LA57: %u, VMXE: %u, SMXE: %u, FSGSBASE: %u"
 		", PCIDE: %u, OSXSAVE: %u, KL: %u, SMEP: %u, SMAP: %u"
 		", PKE: %u, CET: %u, PKS: %u, UINTR: %u]\n",
-		CR4.VME, CR4.PVI, CR4.TSD, CR4.DE, CR4.PSE, CR4.PAE, CR4.MCE,
-		CR4.PGE, CR4.PCE, CR4.OSFXSR, CR4.OSXMMEXCPT, CR4.UMIP,
-		CR4.LA57, CR4.VMXE, CR4.SMXE, CR4.FSGSBASE, CR4.PCIDE,
-		CR4.OSXSAVE, CR4.KL, CR4.SMEP, CR4.SMAP, CR4.PKE, CR4.CET,
-		CR4.PKS, CR4.UINTR);
+		CR4.VME, CR4.PVI, CR4.TSD, CR4.DE, CR4.PSE, CR4.PAE, CR4.MCE, CR4.PGE, CR4.PCE, CR4.OSFXSR, CR4.OSXMMEXCPT, CR4.UMIP, CR4.LA57, CR4.VMXE,
+		CR4.SMXE, CR4.FSGSBASE, CR4.PCIDE, CR4.OSXSAVE, CR4.KL, CR4.SMEP, CR4.SMAP, CR4.PKE, CR4.CET, CR4.PKS, CR4.UINTR);
 }
 
 bool set_CR4_reg(enum CR4_REG flag, bool val)

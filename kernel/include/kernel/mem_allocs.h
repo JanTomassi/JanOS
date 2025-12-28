@@ -38,8 +38,7 @@ mem_malloc_tag_t *mem_coalesce_tag(mem_malloc_tag_t *);
 void mem_unregister_tag(mem_malloc_tag_t *);
 
 // Insert phy_mem_tag sorted by ptr in the chain
-void mem_insert_phy_mem_tag(mem_phy_mem_tag_t *tag, struct list_head *chain,
-			    bool sort);
+void mem_insert_phy_mem_tag(mem_phy_mem_tag_t *tag, struct list_head *chain, bool sort);
 // Give the phy_mem_tag back to free_phy_tags_list
 void mem_give_phy_mem_tag(mem_phy_mem_tag_t *);
 // Get the phy_mem_tag from free_phy_tags_list
