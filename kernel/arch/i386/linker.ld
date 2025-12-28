@@ -6,7 +6,7 @@ HIGHER_HALF = 0xC0000000;
 
 MEMORY
 {
-	rom (rx) : ORIGIN = 2M,				LENGTH = 1M
+	rom (rx) : ORIGIN = 16K,			LENGTH = 1M
 	ram (rw) : ORIGIN = ORIGIN(rom)+LENGTH(rom), 	LENGTH = 1M
 
     	hk_rom (rx) : ORIGIN = HIGHER_HALF+ORIGIN(rom),	       LENGTH = 1M
@@ -36,14 +36,14 @@ SECTIONS
 		*(.boot)
 	} AT> rom
 
-	. += HIGHER_HALF;
-
 	/* Keep the 16-bit AP trampoline in its own small section so 16-bit
 	   relocations stay within range. */
 	.ap_trampoline . : ALIGN(16)
 	{
 		KEEP(*(.ap_trampoline))
 	} AT> rom
+
+	. += HIGHER_HALF;
 
 	/* Code. */
 	.text . : ALIGN(4096)
