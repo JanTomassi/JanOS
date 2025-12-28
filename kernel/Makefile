@@ -2,7 +2,7 @@ ROOT_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
 include ../make.config
 
-CFLAGS?=-O2 -g
+CFLAGS?=-O0 -g
 CPPFLAGS?=
 LDFLAGS?=
 LIBS?=

@@ -52,7 +52,7 @@ static const struct acpi_sdt_header *acpi_find_table_rsdt(const struct acpi_sdt_
 	if (!rsdt)
 		return nullptr;
 
-	rsdt = mmio_map((uintptr_t)rsdt, rsdt->length);
+	rsdt = mmio_map((uintptr_t)get_phy_addr(rsdt), rsdt->length);
 	if (!acpi_checksum_valid(rsdt, rsdt->length))
 		return nullptr;
 

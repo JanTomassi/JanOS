@@ -281,7 +281,7 @@ void kernel_main(unsigned int magic, unsigned long addr)
 	init_kmalloc();
 
 	section_divisor("SMP init:\n");
-	smp_init(acpi_old, acpi_new);
+	/* smp_init(acpi_old, acpi_new); */
 
 	allocator_t gpa_alloc = get_gpa_allocator();
 

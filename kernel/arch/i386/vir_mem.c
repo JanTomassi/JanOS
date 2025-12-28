@@ -16,7 +16,7 @@ static void invalidate(void *addr)
 	__asm__ volatile("invlpg (%0)" : : "r"((size_t)addr) : "memory");
 }
 
-void *get_phy_addr(void *vir_addr)
+void *get_phy_addr(const void *vir_addr)
 {
 	size_t pd_idx = (size_t)vir_addr >> 22;
 	size_t pt_idx = (size_t)vir_addr >> 12 & 0x03FF;
@@ -37,7 +37,7 @@ void *get_phy_addr(void *vir_addr)
 	return (void *)((pt[pt_idx] & VMM_ENTRY_LOCATION_4K_BITS) + ((size_t)vir_addr & 0xFFF));
 }
 
-void *get_vir_addr(void *phy_addr)
+void *get_vir_addr(const void *phy_addr)
 {
 	size_t *pd = (size_t *)page_directory_addr;
 
