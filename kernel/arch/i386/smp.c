@@ -197,6 +197,7 @@ static bool smp_copy_trampoline_from_elf(const struct multiboot_tag_elf_sections
 
 	map_page(tramp_mem.ptr, tramp_vir_mem->ptr, tramp_vir_mem->flags);
 	memcpy(tramp_vir_mem->ptr + tramp_offset, tramp_sec_vm, tramp_section.size);
+	smp_trampoline_base = (uintptr_t)(tramp_vir_mem->ptr + tramp_offset);
 
 	return true;
 }

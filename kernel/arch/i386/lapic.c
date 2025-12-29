@@ -1,4 +1,5 @@
 #include <kernel/display.h>
+#include <kernel/mmio.h>
 #include <kernel/smp.h>
 
 #include "./port.h"
@@ -37,7 +38,8 @@ static inline void lapic_write(uint32_t reg, uint32_t value)
 
 void lapic_set_base(uint32_t base)
 {
-	lapic_base = (volatile uint32_t *)(uintptr_t)base;
+	void *mapped = mmio_map_range(base, PAGE_SIZE, MMIO_RW_FLAGS | VMM_ENTRY_CACHE_DISABLE_BIT);
+	lapic_base = (volatile uint32_t *)mapped;
 }
 
 uint8_t lapic_get_id(void)
