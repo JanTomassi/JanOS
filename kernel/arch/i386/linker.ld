@@ -2,11 +2,11 @@
    designated as the entry point. */
 ENTRY(_start)
 
-HIGHER_HALF = 0xC0000000;
+	HIGHER_HALF = 0xC0000000;
 
 MEMORY
 {
-	rom (rx) : ORIGIN = 16K,			LENGTH = 1M
+	rom (rx) : ORIGIN = 2M,				LENGTH = 1M
 	ram (rw) : ORIGIN = ORIGIN(rom)+LENGTH(rom), 	LENGTH = 1M
 
     	hk_rom (rx) : ORIGIN = HIGHER_HALF+ORIGIN(rom),	       LENGTH = 1M
@@ -37,7 +37,8 @@ SECTIONS
 	} AT> rom
 
 	/* Keep the 16-bit AP trampoline in its own small section so 16-bit
-	   relocations stay within range. */
+	   relocations stay within range. Place it before the higher-half
+	   offset so its VMA stays low. */
 	.ap_trampoline . : ALIGN(16)
 	{
 		KEEP(*(.ap_trampoline))

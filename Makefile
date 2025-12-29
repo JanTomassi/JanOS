@@ -68,6 +68,7 @@ JanOS.iso: build
 
 qemu_debug: JanOS.iso
 	qemu-system-${ARCH} -s -S -audiodev pa,id=speaker \
+	-smp 2 \
 	-m 1G \
 	-drive file=JanOS.iso,format=raw \
 	-drive file=harry_potter.raw,format=raw

@@ -7,7 +7,6 @@
 #include <stdint.h>
 
 #define SMP_MAX_CPUS 16
-#define SMP_TRAMPOLINE_BASE 0x7000
 #define SMP_TRAMPOLINE_ALIGN 0x1000
 
 struct smp_cpu {
@@ -24,5 +23,5 @@ struct smp_enumeration_result {
 	bool lapic_overridden;
 };
 
-void smp_init(const struct multiboot_tag_old_acpi *old_rsdp, const struct multiboot_tag_new_acpi *new_rsdp);
-
+void smp_init(const struct multiboot_tag_old_acpi *old_rsdp, const struct multiboot_tag_new_acpi *new_rsdp,
+	      const struct multiboot_tag_elf_sections *elf_tag);

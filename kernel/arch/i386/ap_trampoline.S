@@ -1,12 +1,12 @@
 .code16
 .section .ap_trampoline, "ax", @progbits
+.balign 16
 .global ap_trampoline
 .global ap_trampoline_end
 .global ap_trampoline_data
 
-/* NOTE: keep TRAMPOLINE_BASE in sync with SMP_TRAMPOLINE_BASE */
-.set TRAMPOLINE_BASE, 0x7000
-
+.global ap_trampoline_data_offset
+.global ap_trampoline_size
 ap_trampoline:
 	cli
 	xor	%ax, %ax
@@ -14,13 +14,25 @@ ap_trampoline:
 	mov	%ax, %es
 	mov	%ax, %ss
 
-	lgdt	ap_gdtr_phys
+	/* Compute physical base from SIPI vector: base = CS << 4 */
+	mov	%cs, %ax
+	shll	$4, %eax			/* eax = runtime base */
+
+	/* Build GDTR at runtime using the computed base. */
+	leal	ap_gdtr_runtime - ap_trampoline(%eax), %ebx
+	movw	$(ap_gdt_end - ap_gdt - 1), (%ebx)	/* limit */
+	leal	ap_gdt - ap_trampoline(%eax), %ecx
+	movl	%ecx, 2(%ebx)				/* base */
+	lgdt	(%ebx)
 
 	mov	%cr0, %eax
 	or	$0x1, %eax
 	mov	%eax, %cr0
 
-	ljmp	$0x08, $ap_trampoline_pmode
+	/* Far jump with 32-bit offset (66 ea ........) */
+	.byte 0x66, 0xea
+	.long ap_trampoline_pmode
+	.word 0x08
 
 .code32
 ap_trampoline_pmode:
@@ -31,15 +43,22 @@ ap_trampoline_pmode:
 	mov	%ax, %fs
 	mov	%ax, %gs
 
-	movl	ap_trampoline_data_phys, %eax
-	movl	0(%eax), %ecx		/* page directory */
-	mov	%ecx, %cr3
+		/* Recover runtime base from EIP: base = (here - offset_to_start) */
+		call	1f
+1:		popl	%eax
+		subl	$(1f - ap_trampoline), %eax
+
+		leal	ap_trampoline_data - ap_trampoline(%eax), %eax
+
+		movl	0(%eax), %ecx		/* page directory */
+		mov	%ecx, %cr3
 
 	mov	%cr0, %ecx
 	or	$0x80000000, %ecx
 	mov	%ecx, %cr0
 
-	movl	ap_trampoline_data_phys, %eax
+	// mov	ap_trampoline_base_ptr, %eax
+	add	$ap_trampoline_data, %eax
 	mov	4(%eax), %esp		/* stack pointer */
 
 	mov	8(%eax), %eax		/* entry */
@@ -57,13 +76,9 @@ ap_gdt:
 ap_gdt_end:
 
 .align 4
-ap_gdtr_phys:
-	.word ap_gdt_end - ap_gdt - 1
-	.long TRAMPOLINE_BASE + (ap_gdt - ap_trampoline)
-
-.align 4
-ap_trampoline_data_phys:
-	.long TRAMPOLINE_BASE + (ap_trampoline_data - ap_trampoline)
+ap_gdtr_runtime:
+	.word 0		/* limit, patched at runtime */
+	.long 0		/* base, patched at runtime */
 
 .align 4
 ap_trampoline_data:
@@ -74,10 +89,8 @@ ap_trampoline_data:
 ap_trampoline_end:
 
 /* Keep helpful symbols for C side */
-.global ap_trampoline_size
 ap_trampoline_size:
 	.long ap_trampoline_end - ap_trampoline
 
-.global ap_trampoline_data_offset
 ap_trampoline_data_offset:
 	.long ap_trampoline_data - ap_trampoline

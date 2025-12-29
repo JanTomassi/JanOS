@@ -5,6 +5,7 @@
 #include <kernel/display.h>
 #include <kernel/elf32.h>
 
+#include <kernel/mmio.h>
 #include <kernel/phy_mem.h>
 #include <kernel/vir_mem.h>
 #include <kernel/allocator.h>
@@ -276,12 +277,19 @@ void kernel_main(unsigned int magic, unsigned long addr)
 	section_divisor("Virtual memory init:\n");
 	init_vir_mem(elf_sec_tag);
 
+	// AFTER VIRTUAL MEMORY INIT
+
+	elf_sec_tag = mmio_map((uintptr_t)elf_sec_tag, sizeof(Elf32_Shdr));
+	Elf32_Shdr *elf_sec = (const Elf32_Shdr *)elf_sec_tag->sections;
+	uintptr_t section_strs = (uintptr_t)mmio_map((uintptr_t)elf_sec[elf_sec_tag->shndx].sh_addr, elf_sec[elf_sec_tag->shndx].sh_size);
+	elf_sec[elf_sec_tag->shndx].sh_addr = section_strs;
+
 	section_divisor("Init kernel memory allocator:\n");
 
 	init_kmalloc();
 
 	section_divisor("SMP init:\n");
-	/* smp_init(acpi_old, acpi_new); */
+	smp_init(acpi_old, acpi_new, elf_sec_tag);
 
 	allocator_t gpa_alloc = get_gpa_allocator();
 

@@ -1,18 +1,19 @@
+#include <string.h>
 #include <kernel/acpi.h>
 #include <kernel/allocator.h>
 #include <kernel/display.h>
+#include <kernel/elf32.h>
+#include <kernel/mmio.h>
 #include <kernel/phy_mem.h>
 #include <kernel/smp.h>
 #include <kernel/vir_mem.h>
 
-/* #include <sys/types.h> */
 #include <stddef.h>
 #include "./control_register.h"
 #include "./lapic.h"
 #include "./port.h"
 
 #include <kernel/interrupt.h>
-#include <string.h>
 
 extern void pic_disable(void);
 
@@ -26,8 +27,6 @@ extern uint8_t ap_trampoline_data[];
 extern uint32_t ap_trampoline_size;
 extern uint32_t ap_trampoline_data_offset;
 
-void smp_ap_entry(void);
-
 MODULE("SMP");
 
 struct smp_trampoline_data {
@@ -38,10 +37,43 @@ struct smp_trampoline_data {
 
 static struct smp_enumeration_result smp_state;
 static volatile uint32_t ap_ready[SMP_MAX_CPUS] = { 0 };
+static uintptr_t smp_trampoline_base = 0;
 
 static uint32_t virt_to_phys(uint32_t virt)
 {
 	return virt - (uint32_t)(size_t)&HIGHER_HALF;
+}
+
+void smp_ap_entry(void);
+
+struct smp_elf_section {
+	const void *addr;
+	size_t size;
+	size_t name_offset;
+};
+
+static bool smp_find_elf_section(const struct multiboot_tag_elf_sections *elf_tag, const char *wanted,
+				 struct smp_elf_section *out)
+{
+	if (!elf_tag || !wanted || !out)
+		return false;
+
+	const Elf32_Shdr *sections = (const Elf32_Shdr *)elf_tag->sections;
+	const char *section_names = (const char *)(sections[elf_tag->shndx].sh_addr);
+
+	for (size_t i = 0; i < elf_tag->num; i++) {
+		const char *name = &section_names[sections[i].sh_name];
+		if (strcmp(name, wanted) == 0) {
+			*out = (struct smp_elf_section){
+				.addr = (const void *)(size_t)sections[i].sh_addr,
+				.size = sections[i].sh_size,
+				.name_offset = sections[i].sh_name,
+			};
+			return true;
+		}
+	}
+
+	return false;
 }
 
 static size_t smp_find_cpu_index(uint8_t lapic_id)
@@ -139,19 +171,40 @@ static void smp_enumerate(const struct acpi_madt *madt)
 		lapic_set_base(smp_state.lapic_address);
 }
 
-static void smp_prepare_trampoline(void)
+static bool smp_copy_trampoline_from_elf(const struct multiboot_tag_elf_sections *elf_tag)
 {
-	const uint32_t tramp_size = round_up_to_page(ap_trampoline_size);
-	memcpy((void *)SMP_TRAMPOLINE_BASE, ap_trampoline, ap_trampoline_size);
+	struct smp_elf_section tramp_section;
+	if (!smp_find_elf_section(elf_tag, ".ap_trampoline", &tramp_section)) {
+		mprint(".ap_trampoline section not found in ELF headers\n");
+		return false;
+	}
 
-	/* Reserve the low memory window for the trampoline */
-	phy_mem_rm_region(SMP_TRAMPOLINE_BASE, tramp_size);
+	const uint32_t tramp_offset = (long)tramp_section.addr & (PAGE_SIZE-1);
+	const uint32_t tramp_size = round_up_to_page(tramp_section.size);
+	const char *tramp_sec_vm = mmio_map((uintptr_t)tramp_section.addr, tramp_section.size);
+
+	fatptr_t tramp_mem = phy_mem_alloc_range(tramp_size, 0x100000);
+	if (!tramp_mem.ptr) {
+		mprint("failed to allocate low memory for trampoline\n");
+		return false;
+	}
+
+	struct vmm_entry *tramp_vir_mem = vir_mem_alloc(tramp_mem.len, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
+	if (!tramp_vir_mem->ptr) {
+		mprint("failed to allocate virtual memory for trampoline\n");
+		return false;
+	}
+
+	map_page(tramp_mem.ptr, tramp_vir_mem->ptr, tramp_vir_mem->flags);
+	memcpy(tramp_vir_mem->ptr + tramp_offset, tramp_sec_vm, tramp_section.size);
+
+	return true;
 }
 
 static void smp_write_trampoline_data(uint32_t stack_top, uint32_t entry)
 {
 	const uint32_t data_off = ap_trampoline_data_offset;
-	struct smp_trampoline_data *data = (struct smp_trampoline_data *)(SMP_TRAMPOLINE_BASE + data_off);
+	struct smp_trampoline_data *data = (struct smp_trampoline_data *)(smp_trampoline_base + data_off);
 
 	data->page_directory = virt_to_phys((uint32_t)(size_t)initial_page_dir);
 	data->stack_top = stack_top;
@@ -171,7 +224,7 @@ static bool smp_boot_cpu(struct smp_cpu *cpu, uint32_t stack_top)
 
 	smp_write_trampoline_data(stack_top, (uint32_t)(size_t)&smp_ap_entry);
 
-	const uint8_t vector = (SMP_TRAMPOLINE_BASE >> 12) & 0xFF;
+	const uint8_t vector = (smp_trampoline_base >> 12) & 0xFF;
 
 	lapic_send_init(cpu->lapic_id);
 	smp_delay();
@@ -197,14 +250,13 @@ static void smp_boot_aps(void)
 {
 	for (size_t i = 0; i < smp_state.cpu_count; i++) {
 		struct smp_cpu *cpu = &smp_state.cpus[i];
-		if (cpu->bsp || !cpu->present){
+		if (cpu->bsp || !cpu->present)
 			continue;
-		}
 
 		fatptr_t stack = mem_gpa_alloc(4096 * 2);
 		uint32_t stack_top = (uint32_t)(size_t)stack.ptr + stack.len - 16;
 
-		if (!smp_boot_cpu(cpu, stack_top)){
+		if (!smp_boot_cpu(cpu, stack_top)) {
 			mprint("SMP: failed to start CPU %u\n", cpu->lapic_id);
 		}
 		else{
@@ -213,7 +265,8 @@ static void smp_boot_aps(void)
 	}
 }
 
-void smp_init(const struct multiboot_tag_old_acpi *old_rsdp, const struct multiboot_tag_new_acpi *new_rsdp)
+void smp_init(const struct multiboot_tag_old_acpi *old_rsdp, const struct multiboot_tag_new_acpi *new_rsdp,
+	      const struct multiboot_tag_elf_sections *elf_tag)
 {
 	memset(&smp_state, 0, sizeof(smp_state));
 	memset((void *)ap_ready, 0, sizeof(ap_ready));
@@ -230,7 +283,10 @@ void smp_init(const struct multiboot_tag_old_acpi *old_rsdp, const struct multib
 		return;
 	}
 
-	smp_prepare_trampoline();
+	if (!smp_copy_trampoline_from_elf(elf_tag)) {
+		mprint("SMP: failed to copy AP trampoline, SMP disabled\n");
+		return;
+	}
 	smp_enumerate(madt);
 	pic_disable();
 
