@@ -119,14 +119,26 @@ static inline void print_elf_sector(Elf32_Shdr *elf_sec, char *elf_sec_str, size
 #endif
 }
 
-static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag)
+static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm_entry *preserved_entries, size_t preserved_entry_count)
 {
 	LIST_HEAD(vmm_used_list);
-	struct vmm_entry usable_entry[32] = { 0 };
+	struct vmm_entry usable_entry[64] = { 0 };
+	const size_t usable_capacity = sizeof(usable_entry) / sizeof(usable_entry[0]);
 	size_t used_entris = 0;
 
 	const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)elf_tag->sections;
 	const char *elf_sec_str = (char *)elf_sec[elf_tag->shndx].sh_addr;
+	size_t required_entries = preserved_entry_count;
+
+	for (size_t i = 0; i < elf_tag->num; i++) {
+		if ((elf_sec[i].sh_flags & 0x2) == 0 || elf_sec[i].sh_addr < &HIGHER_HALF)
+			continue;
+
+		required_entries++;
+	}
+
+	if (required_entries > usable_capacity)
+		panic("Not enough space to register kernel sections and preserved ranges\n");
 
 	for (size_t i = 0; i < elf_tag->num; i++) {
 		if ((elf_sec[i].sh_flags & 0x2) == 0) {
@@ -153,6 +165,14 @@ static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag)
 		};
 		RESET_LIST_ITEM(&entry.list);
 
+		usable_entry[used_entris] = entry;
+		list_add(&usable_entry[used_entris].list, &vmm_used_list);
+		used_entris++;
+	}
+
+	for (size_t i = 0; i < preserved_entry_count && used_entris < usable_capacity; i++) {
+		struct vmm_entry entry = preserved_entries[i];
+		RESET_LIST_ITEM(&entry.list);
 		usable_entry[used_entris] = entry;
 		list_add(&usable_entry[used_entris].list, &vmm_used_list);
 		used_entris++;
@@ -414,9 +434,10 @@ static void init_vir_manager(struct list_head *vmm_init_list)
 	}
 }
 
-void init_vir_mem(const struct multiboot_tag_elf_sections *elf_tag)
+void init_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm_entry *preserved_entries, size_t preserved_entry_count)
 {
 	struct vmm_entry init_vmm_entry[PAGE_SIZE / sizeof(struct vmm_entry)] = { 0 };
+	const size_t init_vmm_capacity = sizeof(init_vmm_entry) / sizeof(init_vmm_entry[0]);
 	size_t init_vmm_entris_used = 0;
 	LIST_HEAD(vmm_free_list);
 
@@ -479,6 +500,55 @@ void init_vir_mem(const struct multiboot_tag_elf_sections *elf_tag)
 			RESET_LIST_ITEM(&right_entry.list);
 
 			if (left_entry.size > 0) {
+				if (init_vmm_entris_used >= init_vmm_capacity)
+					panic("Not enough space to track preserved left split\n");
+				init_vmm_entry[init_vmm_entris_used] = left_entry;
+				list_add(&init_vmm_entry[init_vmm_entris_used].list, cur->list.prev);
+				init_vmm_entris_used++;
+			}
+			if (right_entry.size > 0) {
+				if (init_vmm_entris_used >= init_vmm_capacity)
+					panic("Not enough space to track preserved right split\n");
+				init_vmm_entry[init_vmm_entris_used] = right_entry;
+				list_add(&init_vmm_entry[init_vmm_entris_used].list, &cur->list);
+				init_vmm_entris_used++;
+			}
+			list_rm(&cur->list);
+		}
+	}
+
+	for (size_t i = 0; i < preserved_entry_count; i++) {
+		if (init_vmm_entris_used >= init_vmm_capacity)
+			panic("Not enough space to reserve preserved virtual ranges\n");
+
+		void *range_s = preserved_entries[i].ptr;
+		void *range_e = preserved_entries[i].ptr + preserved_entries[i].size;
+
+		list_for_each(&vmm_free_list) {
+			struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
+
+			void *cur_s = cur->ptr;
+			void *cur_e = cur->ptr + cur->size;
+
+			if (range_s > cur_e || cur_s > range_e)
+				continue;
+
+			void *inter_s = (void *)round_down_to_page((size_t)cur_s > (size_t)range_s ? (size_t)cur_s : (size_t)range_s);
+			void *inter_e = (void *)round_up_to_page((size_t)cur_e < (size_t)range_e ? (size_t)cur_e : (size_t)range_e);
+
+			struct vmm_entry left_entry = {
+				.ptr = cur_s,
+				.size = inter_s - cur_s,
+			};
+			RESET_LIST_ITEM(&left_entry.list);
+
+			struct vmm_entry right_entry = {
+				.ptr = inter_e,
+				.size = cur_e - inter_e,
+			};
+			RESET_LIST_ITEM(&right_entry.list);
+
+			if (left_entry.size > 0) {
 				init_vmm_entry[init_vmm_entris_used] = left_entry;
 				list_add(&init_vmm_entry[init_vmm_entris_used].list, cur->list.prev);
 				init_vmm_entris_used++;
@@ -488,10 +558,11 @@ void init_vir_mem(const struct multiboot_tag_elf_sections *elf_tag)
 				list_add(&init_vmm_entry[init_vmm_entris_used].list, &cur->list);
 				init_vmm_entris_used++;
 			}
+
 			list_rm(&cur->list);
 		}
 	}
 
-	recreate_vir_mem(elf_tag);
+	recreate_vir_mem(elf_tag, preserved_entries, preserved_entry_count);
 	init_vir_manager(&vmm_free_list);
 }

@@ -64,7 +64,7 @@ void phy_memory_test()
 	phy_mem_free(alloc);
 }
 
-void kernel_main(unsigned int magic, unsigned long addr)
+void kernel_main(unsigned int magic, unsigned long mbi_addr)
 {
 	display_t serial_dpy = init_serial();
 	uint8_t serial_dpy_reg = DISPLAY_MAX_DISPS;
@@ -81,18 +81,21 @@ void kernel_main(unsigned int magic, unsigned long addr)
 		panic("invalid magic number!\n");
 	}
 
-	if (addr & 7) {
-		kprintf("Unaligned mbi: %x\n", addr);
+	if (mbi_addr & 7) {
+		kprintf("Unaligned mbi: %x\n", mbi_addr);
 		return;
 	}
 
-	size_t size = *(unsigned *)addr;
-	kprintf("Announced mbi size %x\n", size);
+	size_t mbi_size = *(unsigned *)mbi_addr;
+	kprintf("Announced mbi size %x\n", mbi_size);
 
 	struct multiboot_tag_mmap *mmap_tag = nullptr;
 	struct multiboot_tag_elf_sections *elf_sec_tag = nullptr;
+	struct vmm_entry preserved_entries[1] = { 0 };
+	size_t preserved_entry_count = 0;
+	size_t kernel_end_addr = round_up_to_page((size_t)&HIGHER_HALF);
 
-	for (struct multiboot_tag *tag = (struct multiboot_tag *)(addr + 8); tag->type != MULTIBOOT_TAG_TYPE_END;
+	for (struct multiboot_tag *tag = (struct multiboot_tag *)(mbi_addr + 8); tag->type != MULTIBOOT_TAG_TYPE_END;
 	     tag = (struct multiboot_tag *)((multiboot_uint8_t *)tag + ((tag->size + 7) & ~7))) {
 		kprintf("Tag %d, Size %x\n", tag->type, tag->size);
 		switch (tag->type) {
@@ -129,8 +132,15 @@ void kernel_main(unsigned int magic, unsigned long addr)
 			elf_sec_tag = (struct multiboot_tag_elf_sections *)tag;
 			const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)elf_sec_tag->sections;
 			const char *elf_sec_str = (char *)(elf_sec[elf_sec_tag->shndx].sh_addr);
-			for (size_t i = 0; i < elf_sec_tag->num; i++)
+			for (size_t i = 0; i < elf_sec_tag->num; i++) {
 				kprintf("Section (%s): [Address: %x, Size: %x]\n", &elf_sec_str[elf_sec[i].sh_name], elf_sec[i].sh_addr, elf_sec[i].sh_size);
+				if ((elf_sec[i].sh_flags & 0x2) == 0 || elf_sec[i].sh_addr < (size_t)&HIGHER_HALF)
+					continue;
+
+				size_t section_end = round_up_to_page(elf_sec[i].sh_addr + elf_sec[i].sh_size);
+				if (section_end > kernel_end_addr)
+					kernel_end_addr = section_end;
+			}
 		} break;
 		case MULTIBOOT_TAG_TYPE_FRAMEBUFFER: {
 			multiboot_uint32_t color;
@@ -220,6 +230,35 @@ void kernel_main(unsigned int magic, unsigned long addr)
 	phy_mem_init(mmap_tag, elf_sec_tag);
 	phy_memory_test();
 
+	const size_t mbi_alloc_size = round_up_to_page(mbi_size);
+	fatptr_t mbi_buffer = phy_mem_alloc(mbi_alloc_size);
+	if (mbi_buffer.ptr == nullptr)
+		panic("Failed to allocate space for multiboot info copy\n");
+
+	struct vmm_entry mbi_virt = {
+		.ptr = (void *)kernel_end_addr,
+		.size = mbi_buffer.len,
+		.flags = VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT,
+	};
+	map_pages(&mbi_buffer, &mbi_virt);
+
+	memcpy(mbi_virt.ptr, (void *)mbi_addr, mbi_size);
+	memset((uint8_t *)mbi_virt.ptr + mbi_size, 0, mbi_virt.size - mbi_size);
+
+	const unsigned long relocated_addr = (unsigned long)mbi_virt.ptr;
+	if (mmap_tag != nullptr) {
+		const size_t offset = (size_t)((unsigned long)mmap_tag - mbi_addr);
+		mmap_tag = (struct multiboot_tag_mmap *)(relocated_addr + offset);
+	}
+
+	if (elf_sec_tag != nullptr) {
+		const size_t offset = (size_t)((unsigned long)elf_sec_tag - mbi_addr);
+		elf_sec_tag = (struct multiboot_tag_elf_sections *)(relocated_addr + offset);
+	}
+
+	if (preserved_entry_count < sizeof(preserved_entries) / sizeof(preserved_entries[0]))
+		preserved_entries[preserved_entry_count++] = mbi_virt;
+
 	/* size_t framebuffer_width = mbd->framebuffer_width; */
 	/* size_t framebuffer_height = mbd->framebuffer_height; */
 	/* size_t framebuffer_pitch = mbd->framebuffer_pitch; */
@@ -243,7 +282,7 @@ void kernel_main(unsigned int magic, unsigned long addr)
 	/* kprintf("    - PHY.len: %d\n", framebuffer_phy.len); */
 
 	section_divisor("Virtual memory init:\n");
-	init_vir_mem(elf_sec_tag);
+	init_vir_mem(elf_sec_tag, preserved_entries, preserved_entry_count);
 
 	section_divisor("Init kernel memory allocator:\n");
 
