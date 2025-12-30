@@ -36,28 +36,6 @@ void section_divisor(char *section_name)
 		"-------------------------------------\n");
 }
 
-void setup_phy_mem(const struct multiboot_tag_mmap *mmap_tag, const struct multiboot_tag_elf_sections *elf_tag)
-{
-	phy_mem_reset();
-
-	for (const struct multiboot_mmap_entry *mmap = mmap_tag->entries; (multiboot_uint8_t *)mmap < (multiboot_uint8_t *)mmap_tag + mmap_tag->size;
-	     mmap = (multiboot_memory_map_t *)((unsigned long)mmap + mmap_tag->entry_size)) {
-		if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE) {
-			phy_mem_add_region(mmap->addr, mmap->len);
-		}
-	}
-
-	const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)elf_tag->sections;
-	for (size_t i = 0; i < elf_tag->num; i++)
-		phy_mem_rm_region(elf_sec[i].sh_addr, elf_sec[i].sh_size);
-
-	section_divisor("Physical memory allocator:\n");
-
-	kprintf("   - Number of blocks: %x\n", phy_mem_get_tot_blocks());
-	kprintf("   - Number of used blocks: %x\n", phy_mem_get_used_blocks());
-	kprintf("   - Number of free blocks: %x\n", phy_mem_get_free_blocks());
-}
-
 void phy_memory_test()
 {
 	section_divisor("1. Physical memory allocation test:\nTesting if they will overlap:\n");
@@ -239,7 +217,7 @@ void kernel_main(unsigned int magic, unsigned long addr)
 	idt_init();
 	kprintf("IDT initialized\n");
 
-	setup_phy_mem(mmap_tag, elf_sec_tag);
+	phy_mem_init(mmap_tag, elf_sec_tag);
 	phy_memory_test();
 
 	/* size_t framebuffer_width = mbd->framebuffer_width; */

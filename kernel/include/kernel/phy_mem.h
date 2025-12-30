@@ -2,6 +2,8 @@
 
 #include <stddef.h>
 #include <stdlib.h>
+#include <kernel/multiboot.h>
+#include <kernel/elf32.h>
 
 typedef bool phy_mem_is_used;
 
@@ -49,3 +51,5 @@ size_t phy_mem_get_free_blocks();
 
 void phy_mem_free(fatptr_t addr_ptr);
 __attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc(size_t len);
+
+void phy_mem_init(const struct multiboot_tag_mmap *mmap_tag, const struct multiboot_tag_elf_sections *elf_tag);
