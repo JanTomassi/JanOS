@@ -72,3 +72,5 @@ static inline struct list_head *list_pop(struct list_head *head)
 	(list_is_first(&(ptr)->list_member, head) ? list_last_entry(head, typeof(*(ptr)), list_member) : list_prev_entry(ptr, list_member))
 
 #define list_for_each(head) for (struct list_head *it = (head)->next; it != (head); it = it->next)
+
+#define list_rev_for_each(head) for (struct list_head *it = (head)->prev; it != (head); it = it->prev)
