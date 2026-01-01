@@ -299,10 +299,10 @@ __attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc(size_t size
 	if (bitmap_free_blocks() < req_block)
 		return (fatptr_t){ .ptr = 0, .len = 0 };
 
-	list_for_each(&bitmap_chunk_list) {
+	list_rev_for_each(&bitmap_chunk_list) {
 		struct bitmap_chunk *chunk = list_entry(it, struct bitmap_chunk, list);
-		for (size_t i = 0; i < chunk->capacity; i++) {
-			const size_t block_idx = chunk->base_block + i;
+		for (size_t i = chunk->capacity; i > 0 ; i--) {
+			const size_t block_idx = chunk->base_block + (i - 1);
 
 			if (!bitmap_block_used(chunk, block_idx)) {
 				if (run == 0)
