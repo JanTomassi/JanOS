@@ -4,6 +4,7 @@
 #include "../i386/lapic.h"
 #include <kernel/allocator.h>
 #include <kernel/display.h>
+#include <kernel/phy_mem.h>
 #include <kernel/spinlock.h>
 #include <kernel/vir_mem.h>
 #include <kernel/interrupt.h>
@@ -11,12 +12,12 @@
 #include <string.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 MODULE("SMP");
 
 #define MAX_CPUS 16
 #define AP_STACK_SIZE (16 * 1024)
-#define AP_TRAMPOLINE_DEST 0x7000
 
 #define IPI_DELIVERY_MODE_INIT 0x5
 #define IPI_DELIVERY_MODE_STARTUP 0x6
@@ -73,6 +74,9 @@ extern uint8_t ap_trampoline_stack_buf_top;
 extern void ap_start(void);
 void ap_main(void);
 void *smp_get_stack_top(uint8_t apic_id);
+
+static uintptr_t ap_trampoline_phys_base = 0;
+static struct vmm_entry *ap_trampoline_virt = nullptr;
 
 static void record_idtr(void)
 {
@@ -203,19 +207,19 @@ static void setup_ap_trampoline(void)
 	const size_t trampoline_size = (&ap_trampoline_end) - (&ap_trampoline_start);
 	const size_t trampoline_pages = round_up_to_page(trampoline_size);
 
-	fatptr_t phys = {
-		.ptr = (void *)AP_TRAMPOLINE_DEST,
-		.len = trampoline_pages,
-	};
-	struct vmm_entry virt = {
-		.ptr = (void *)AP_TRAMPOLINE_DEST,
-		.size = trampoline_pages,
-		.flags = VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT,
-	};
+	fatptr_t phys = phy_mem_alloc_below(trampoline_pages, MIBI(1));
+	if (phys.ptr == nullptr)
+		panic("Failed to allocate physical memory for AP trampoline\n");
 
-	map_pages(&phys, &virt);
-	memset(virt.ptr, 0, virt.size);
-	memcpy(virt.ptr, &ap_trampoline_start, trampoline_size);
+	ap_trampoline_virt = vir_mem_alloc(trampoline_pages, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
+	if (ap_trampoline_virt == nullptr)
+		panic("Failed to allocate virtual memory for AP trampoline\n");
+
+	map_pages(&phys, ap_trampoline_virt);
+	memset(ap_trampoline_virt->ptr, 0, ap_trampoline_virt->size);
+	memcpy(ap_trampoline_virt->ptr, &ap_trampoline_start, trampoline_size);
+
+	ap_trampoline_phys_base = (uintptr_t)phys.ptr;
 
 	const size_t cr3_off = (size_t)((uintptr_t)&ap_trampoline_cr3 - (uintptr_t)&ap_trampoline_start);
 	const size_t entry_off = (size_t)((uintptr_t)&ap_trampoline_entry - (uintptr_t)&ap_trampoline_start);
@@ -223,18 +227,18 @@ static void setup_ap_trampoline(void)
 	const size_t idt_ptr_off = (size_t)((uintptr_t)&ap_trampoline_idt_ptr - (uintptr_t)&ap_trampoline_start);
 	const size_t stack_top_off = (size_t)((uintptr_t)&ap_trampoline_stack_buf_top - (uintptr_t)&ap_trampoline_start);
 
-	uint32_t *trampoline_cr3 = (uint32_t *)((uint8_t *)virt.ptr + cr3_off);
-	uint32_t *trampoline_entry = (uint32_t *)((uint8_t *)virt.ptr + entry_off);
-	uint32_t *trampoline_stack = (uint32_t *)((uint8_t *)virt.ptr + stack_ptr_off);
-	struct idtr_desc *trampoline_idtr = (struct idtr_desc *)((uint8_t *)virt.ptr + idt_ptr_off);
+	uint32_t *trampoline_cr3 = (uint32_t *)((uint8_t *)ap_trampoline_virt->ptr + cr3_off);
+	uint32_t *trampoline_entry = (uint32_t *)((uint8_t *)ap_trampoline_virt->ptr + entry_off);
+	uint32_t *trampoline_stack = (uint32_t *)((uint8_t *)ap_trampoline_virt->ptr + stack_ptr_off);
+	struct idtr_desc *trampoline_idtr = (struct idtr_desc *)((uint8_t *)ap_trampoline_virt->ptr + idt_ptr_off);
 
 	*trampoline_cr3 = (uint32_t)get_CR3_reg();
 	*trampoline_entry = (uint32_t)&ap_start;
-	*trampoline_stack = AP_TRAMPOLINE_DEST + stack_top_off - 4;
+	*trampoline_stack = ap_trampoline_phys_base + stack_top_off - 4;
 
 	*trampoline_idtr = bsp_idtr;
 
-	mprint("AP trampoline copied to %x (size %u)\n", AP_TRAMPOLINE_DEST, (unsigned)trampoline_pages);
+	mprint("AP trampoline copied to %x (size %u)\n", (unsigned)ap_trampoline_phys_base, (unsigned)trampoline_pages);
 }
 
 static void build_stacks(void)
@@ -251,7 +255,7 @@ static void build_stacks(void)
 
 static void start_aps(void)
 {
-	const uint8_t trampoline_vector = AP_TRAMPOLINE_DEST >> 12;
+	const uint8_t trampoline_vector = ap_trampoline_phys_base >> 12;
 
 	for (size_t i = 0; i < cpu_count; i++) {
 		if (cpus[i].apic_id == lapic_get_id())

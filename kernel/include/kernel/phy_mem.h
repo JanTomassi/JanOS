@@ -51,5 +51,6 @@ size_t phy_mem_get_free_blocks();
 
 void phy_mem_free(fatptr_t addr_ptr);
 __attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc(size_t len);
+__attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc_below(size_t len, size_t max_addr);
 
 void phy_mem_init(const struct multiboot_tag_mmap *mmap_tag, const struct multiboot_tag_elf_sections *elf_tag);
