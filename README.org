@@ -13,6 +13,19 @@ for physical and virtual page allocation but is only 4KiB no 4MiB page
 and the implementation of kmalloc(memory allocator) can only handle
 allocation of [1, 4096] byte
 
+** Slab allocator
+The kernel now exposes a small slab allocator for fixed-size objects.
+Caches can be created with ~slab_create(name, obj_size, alignment,
+ctor, dtor)~ and are initialized from ~init_slab_allocator()~ during
+boot. Allocations use ~slab_alloc_obj(cache)~ / ~slab_free_obj(cache,
+fatptr)~ and return a ~fatptr_t~ pointing to the object with
+~len = obj_size~. A general-purpose allocator wrapper is available via
+~get_slab_allocator()~, which uses slab-backed allocations for objects
+up to a page and falls back to the general page allocator for larger
+requests. ~get_gpa_allocator()~ returns the original GPA allocator.
+Double-free and cross-cache frees are checked and logged alongside
+alignment issues.
+
 ** Future Feature
 - [ ] Basic user space
   - [ ] Context switching
