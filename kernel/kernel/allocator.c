@@ -14,15 +14,17 @@ static malloc_tag_t *gpa_allocs = nullptr;
 
 MODULE("Allocator");
 
-static void gpa_make_new_space(malloc_tag_t *tag, size_t req)
+static void gpa_populate_tag_pages(malloc_tag_t *tag, size_t alloc_size, size_t used_size)
 {
-	size_t req_align = round_up_to_page(req);
-
-	struct vmm_entry *vir_mem = vir_mem_alloc(req_align, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
+	/*
+	 * Expect alloc_size to be page aligned and tag to be freshly allocated.
+	 * used_size represents the logical consumption within the mapped region.
+	 */
+	struct vmm_entry *vir_mem = vir_mem_alloc(alloc_size, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
 
 	mem_set_ptr_tag(tag, vir_mem->ptr);
 	mem_set_size_tag(tag, vir_mem->size);
-	mem_set_used_tag(tag, req);
+	mem_set_used_tag(tag, used_size);
 	mem_set_vmm_tag(tag, vir_mem);
 	struct list_head *tag_chain = mem_get_chain_tag(tag);
 
@@ -44,6 +46,13 @@ static void gpa_make_new_space(malloc_tag_t *tag, size_t req)
 
 		mem_insert_phy_mem_tag(phy_tag, tag_chain, false);
 	}
+}
+
+static void gpa_make_new_space(malloc_tag_t *tag, size_t req)
+{
+	size_t req_align = round_up_to_page(req);
+
+	gpa_populate_tag_pages(tag, req_align, req);
 }
 
 static malloc_tag_t *gpa_use_space(malloc_tag_t *tag, size_t req)
@@ -89,69 +98,55 @@ static malloc_tag_t *gpa_use_space(malloc_tag_t *tag, size_t req)
 
 static void gpa_init(malloc_tag_t *mem)
 {
-	struct vmm_entry *vir_mem = vir_mem_alloc(PAGE_SIZE, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
-
-	mem_set_ptr_tag(mem, vir_mem->ptr);
-	mem_set_size_tag(mem, vir_mem->size);
-	mem_set_used_tag(mem, PAGE_SIZE);
-	mem_set_vmm_tag(mem, vir_mem);
-	struct list_head *tag_chain = mem_get_chain_tag(mem);
-
-	for (void *vir_ptr = mem_get_ptr_tag(mem); vir_ptr < mem_get_ptr_tag(mem) + mem_get_size_tag(mem); vir_ptr += PAGE_SIZE) {
-		fatptr_t phy_mem = phy_mem_alloc(PAGE_SIZE);
-		struct vmm_entry vir_info = {
-			.ptr = vir_ptr,
-			.size = PAGE_SIZE,
-			.flags = vir_mem->flags,
-		};
-		RESET_LIST_ITEM(&vir_info.list);
-
-		map_pages(&phy_mem, &vir_info);
-		memset(vir_info.ptr, 0, vir_info.size);
-
-		phy_mem_tag_t *phy_tag = mem_get_phy_mem_tag();
-		mem_set_fatptr_phy_mem(phy_tag, phy_mem);
-		mem_set_refcnt_phy_mem(phy_tag, 1);
-
-		mem_insert_phy_mem_tag(phy_tag, tag_chain, false);
-	}
+	gpa_populate_tag_pages(mem, PAGE_SIZE, PAGE_SIZE);
 }
 
 static void gpa_set_alloc(malloc_tag_t *ptr, const malloc_tag_t *loc)
 {
 	const size_t num_elm = PAGE_SIZE / sizeof(malloc_tag_t *);
-	const malloc_tag_t **array_ptr = mem_get_ptr_tag(loc);
+	const size_t next_idx = num_elm - 1;
+	const malloc_tag_t *current = loc;
 
-	for (size_t i = 0; i < num_elm - 1; i++) {
-		if (array_ptr[i] == nullptr) {
-			array_ptr[i] = ptr;
-			return;
+	while (current != nullptr) {
+		malloc_tag_t **array_ptr = mem_get_ptr_tag(current);
+
+		for (size_t i = 0; i < next_idx; i++) {
+			if (array_ptr[i] == nullptr) {
+				array_ptr[i] = ptr;
+				return;
+			}
 		}
-	}
 
-	if (array_ptr[num_elm - 1] != nullptr)
-		gpa_set_alloc(ptr, array_ptr[num_elm - 2]);
-	if (array_ptr[num_elm - 1] == nullptr) {
-		array_ptr[num_elm - 1] = mem_get_tag();
-		gpa_init(array_ptr[num_elm - 1]);
-		mem_register_tag(array_ptr[num_elm - 1]);
+		malloc_tag_t *next_page = array_ptr[next_idx];
+		if (next_page == nullptr) {
+			next_page = mem_get_tag();
+			gpa_init(next_page);
+			mem_register_tag(next_page);
+			array_ptr[next_idx] = next_page;
+		}
+
+		current = next_page;
 	}
 }
 
 static malloc_tag_t **gpa_get_alloc(void *ptr, const malloc_tag_t *loc)
 {
 	const size_t num_elm = PAGE_SIZE / sizeof(malloc_tag_t *);
-	malloc_tag_t **array_ptr = mem_get_ptr_tag(loc);
+	const size_t next_idx = num_elm - 1;
+	const malloc_tag_t *current = loc;
 
-	for (size_t i = 0; i < sizeof(malloc_tag_t *); i++) {
-		if (mem_get_ptr_tag(array_ptr[i]) == ptr)
-			return &array_ptr[i];
+	while (current != nullptr) {
+		malloc_tag_t **array_ptr = mem_get_ptr_tag(current);
+
+		for (size_t i = 0; i < next_idx; i++) {
+			if (array_ptr[i] != nullptr && mem_get_ptr_tag(array_ptr[i]) == ptr)
+				return &array_ptr[i];
+		}
+
+		current = array_ptr[next_idx];
 	}
 
-	if (array_ptr[num_elm - 2] != nullptr)
-		gpa_get_alloc(ptr, array_ptr[num_elm - 1]);
-	else
-		return nullptr;
+	return nullptr;
 }
 
 fatptr_t mem_gpa_alloc(size_t req)
