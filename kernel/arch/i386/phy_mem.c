@@ -358,6 +358,83 @@ slot_found:
 	return (fatptr_t){ .ptr = (void *)(start_block * BLOCK_SIZE), .len = req_size };
 }
 
+__attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc_below(size_t size, size_t max_addr)
+{
+	const size_t req_block = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+	const size_t req_size = req_block * BLOCK_SIZE;
+	const size_t max_block = max_addr / BLOCK_SIZE;
+	size_t start_block = 0;
+	bool found = false;
+	size_t run = 0;
+
+	if (req_block == 0 || max_block == 0 || req_block > max_block)
+		return (fatptr_t){ .ptr = 0, .len = 0 };
+	if (bitmap_free_blocks() < req_block)
+		return (fatptr_t){ .ptr = 0, .len = 0 };
+
+	list_for_each(&bitmap_chunk_list) {
+		struct bitmap_chunk *chunk = list_entry(it, struct bitmap_chunk, list);
+		for (size_t i = 0; i < chunk->capacity; i++) {
+			const size_t block_idx = chunk->base_block + i;
+
+			if (block_idx + req_block > max_block)
+				goto end_search;
+
+			if (!bitmap_block_used(chunk, block_idx)) {
+				if (run == 0)
+					start_block = block_idx;
+
+				run += 1;
+
+				if (run >= req_block) {
+					found = true;
+					goto found_blocks;
+				}
+			} else {
+				run = 0;
+			}
+		}
+	}
+
+end_search:
+	if (!found)
+		return (fatptr_t){ .ptr = 0, .len = 0 };
+
+found_blocks:
+	struct booking_block *target_block = nullptr;
+	size_t slot_idx = 0;
+
+	list_for_each(&booking_block_list) {
+		struct booking_block *cur_block = list_entry(it, struct booking_block, list);
+		for (size_t i = 0; i < BOOKING_COUNT; i++) {
+			if (cur_block->allocs[i].ptr == nullptr) {
+				target_block = cur_block;
+				slot_idx = i;
+				goto slot_found;
+			}
+		}
+	}
+
+	target_block = alloc_booking_block();
+	slot_idx = 0;
+
+slot_found:
+	if (target_block == nullptr)
+		return (fatptr_t){ .ptr = 0, .len = 0 };
+
+	target_block->allocs[slot_idx].ptr = (void *)(start_block * BLOCK_SIZE);
+	target_block->allocs[slot_idx].len = req_size;
+
+	for (size_t i = 0; i < req_block; i++) {
+		const size_t block_idx = start_block + i;
+		struct bitmap_chunk *chunk = find_chunk(block_idx);
+		if (chunk != nullptr)
+			bitmap_set_block(chunk, block_idx, true);
+	}
+
+	return (fatptr_t){ .ptr = (void *)(start_block * BLOCK_SIZE), .len = req_size };
+}
+
 __attribute__((hot)) void phy_mem_free(fatptr_t addr_ptr)
 {
 	list_for_each(&booking_block_list) {
