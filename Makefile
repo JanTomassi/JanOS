@@ -44,6 +44,7 @@ JanOS.iso: build
 
 qemu_debug: JanOS.iso
 	qemu-system-${ARCH} -s -S \
+	-smp 2 \
 	-m 1G \
 	-machine pc -cpu qemu64 \
 	-drive file=JanOS.iso,format=raw \
