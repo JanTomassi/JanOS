@@ -268,6 +268,7 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	section_divisor("Init kernel memory allocator:\n");
 
 	init_kmalloc();
+	init_slab_allocator();
 
 	allocator_t gpa_alloc = get_gpa_allocator();
 	gpa_test(gpa_alloc);
