@@ -15,6 +15,7 @@
 #include "../arch/i386/ata_pio.h"
 #include "../arch/i386/control_register.h"
 #include "../arch/i386/cpuid.h"
+#include "../arch/i386/smp.h"
 
 extern void idt_init(void);
 extern void PIC_remap(int offset1, int offset2);
@@ -269,6 +270,9 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 
 	init_kmalloc();
 	init_slab_allocator();
+
+	section_divisor("SMP init:\n");
+	smp_init((struct multiboot_tag *)mbi_virt.ptr);
 
 	allocator_t gpa_alloc = get_gpa_allocator();
 	gpa_test(gpa_alloc);
