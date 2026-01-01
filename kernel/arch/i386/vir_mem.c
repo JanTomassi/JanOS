@@ -249,7 +249,7 @@ LIST_HEAD(vmm_used_list);
 LIST_HEAD(vmm_tags_list);
 
 #ifdef DEBUG
-static void debug_vmm_list(void)
+static void debug_vmm_lists(void)
 {
 	size_t i = 0;
 	mprint("debug_vmm_list | vmm_free_list:\n");
@@ -273,6 +273,15 @@ static void debug_vmm_list(void)
 	mprint("    %u unused vmm_tags\n", i);
 }
 #endif
+
+static void debug_vmm_list(struct list_head *v){
+	mprint("debug_vmm_list:\n");
+	size_t i = 0;
+	list_for_each(v) {
+		struct vmm_entry *tag = list_entry(it, struct vmm_entry, list);
+		mprint("    %u) ptr: %x | size: %x | flags: %x\n", i++, tag->ptr, tag->size, tag->flags);
+	}
+}
 
 static struct list_head *vir_mem_find_prev_used_chunk(struct vmm_entry *to_alloc)
 {
@@ -319,7 +328,7 @@ struct vmm_entry *vir_mem_alloc(size_t req_size, uint8_t flags)
 	list_add(&tag->list, vir_mem_find_prev_used_chunk(tag)->prev);
 
 #ifdef DEBUG
-	debug_vmm_list();
+	debug_vmm_lists();
 #endif
 
 	return tag;
@@ -371,7 +380,7 @@ void vir_mem_free(void *ptr)
 	}
 
 #ifdef DEBUG
-	debug_vmm_list();
+	debug_vmm_lists();
 #endif
 }
 
@@ -481,7 +490,7 @@ void init_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, const struct
 			void *elf_s = (void *)elf_sec[i].sh_addr;
 			void *elf_e = (void *)elf_sec[i].sh_addr + elf_sec[i].sh_size;
 
-			if (elf_s > cur_e || cur_s > elf_e)
+			if (elf_s > cur_e || cur_s >= elf_e)
 				continue;
 
 			void *range_s = (void *)round_down_to_page((size_t)cur_s > (size_t)elf_s ? (size_t)cur_s : (size_t)elf_s);
@@ -521,29 +530,29 @@ void init_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, const struct
 		if (init_vmm_entris_used >= init_vmm_capacity)
 			panic("Not enough space to reserve preserved virtual ranges\n");
 
-		void *range_s = preserved_entries[i].ptr;
-		void *range_e = preserved_entries[i].ptr + preserved_entries[i].size;
+		uintptr_t range_s = (uintptr_t)preserved_entries[i].ptr;
+		uintptr_t range_e = (uintptr_t)preserved_entries[i].ptr + preserved_entries[i].size;
 
 		list_for_each(&vmm_free_list) {
 			struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
 
-			void *cur_s = cur->ptr;
-			void *cur_e = cur->ptr + cur->size;
+			uintptr_t cur_s = (uintptr_t)cur->ptr;
+			uintptr_t cur_e = (uintptr_t)cur->ptr + cur->size;
 
-			if (range_s > cur_e || cur_s > range_e)
+			if (range_s > cur_e || cur_s >= range_e)
 				continue;
 
-			void *inter_s = (void *)round_down_to_page((size_t)cur_s > (size_t)range_s ? (size_t)cur_s : (size_t)range_s);
-			void *inter_e = (void *)round_up_to_page((size_t)cur_e < (size_t)range_e ? (size_t)cur_e : (size_t)range_e);
+			uintptr_t inter_s = round_down_to_page((uintptr_t)(cur_s > range_s ? cur_s : range_s));
+			uintptr_t inter_e = round_up_to_page((uintptr_t)(cur_e < range_e ? cur_e : range_e));
 
 			struct vmm_entry left_entry = {
-				.ptr = cur_s,
+				.ptr = (void*)cur_s,
 				.size = inter_s - cur_s,
 			};
 			RESET_LIST_ITEM(&left_entry.list);
 
 			struct vmm_entry right_entry = {
-				.ptr = inter_e,
+				.ptr = (void*)inter_e,
 				.size = cur_e - inter_e,
 			};
 			RESET_LIST_ITEM(&right_entry.list);

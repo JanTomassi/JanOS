@@ -3,6 +3,7 @@
 #include <kernel/vir_mem.h>
 #include <kernel/phy_mem.h>
 #include <kernel/display.h>
+#include <string.h>
 
 typedef mem_malloc_tag_t malloc_tag_t;
 typedef mem_phy_mem_link_t phy_mem_link_t;
@@ -35,6 +36,7 @@ static void gpa_make_new_space(malloc_tag_t *tag, size_t req)
 		RESET_LIST_ITEM(&vir_info.list);
 
 		map_pages(&phy_mem, &vir_info);
+		memset(vir_info.ptr, 0, vir_info.size);
 
 		phy_mem_tag_t *phy_tag = mem_get_phy_mem_tag();
 		mem_set_fatptr_phy_mem(phy_tag, phy_mem);
@@ -105,6 +107,7 @@ static void gpa_init(malloc_tag_t *mem)
 		RESET_LIST_ITEM(&vir_info.list);
 
 		map_pages(&phy_mem, &vir_info);
+		memset(vir_info.ptr, 0, vir_info.size);
 
 		phy_mem_tag_t *phy_tag = mem_get_phy_mem_tag();
 		mem_set_fatptr_phy_mem(phy_tag, phy_mem);

@@ -181,7 +181,7 @@ struct mbi_info get_mbi_info(uintptr_t mbi_addr, size_t mbi_size, uintptr_t kern
 		}break;
 		}
 	}
-
+	return res;
 }
 
 void kernel_main(unsigned int magic, unsigned long mbi_addr)
@@ -277,9 +277,12 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	kprintf("    - hdb: %s type\n", ata_pio_debug_devtype(ata_pio_detect_devtype(0)));
 
 	kprintf("Content of hdb\n\n");
+	fatptr_t hdb_t = gpa_alloc.alloc(513);
+	char *hdb_v = hdb_t.ptr;
+	memset(hdb_v, 0, 513);
 	for (size_t i = 0; i < (430 * 1024) / 512; i++) {
-		char test_array[512] = { 0 };
-		ata_pio_28_read(i, 1, test_array);
-		kprintf("%s", test_array);
+		ata_pio_28_read(i, 1, hdb_v);
+		kprintf("%s", hdb_v);
 	}
+	gpa_alloc.free(hdb_t);
 }
