@@ -211,7 +211,8 @@ phy_mem_link_t *mem_get_phy_mem_link();
 // Get the phy mem tag from a list of phy_mem_link
 phy_mem_tag_t *mem_get_phy_tag_from_link(struct list_head *link)
 {
-	return list_entry(link, phy_mem_link_t, list)->phy_mem;
+	phy_mem_link_t *pml = list_entry(link, phy_mem_link_t, list);
+	return pml->phy_mem;
 }
 
 // New allocated malloc_tag will be added to free_tags_list

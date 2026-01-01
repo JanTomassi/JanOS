@@ -147,32 +147,50 @@ static bool parse_madt(void *phys_addr)
 	return registered;
 }
 
-static void parse_apic_ids(struct multiboot_tag *mbi)
+static bool parse_acpi_tag(struct multiboot_tag *acpi_tag)
+{
+	if (acpi_tag == nullptr)
+		return false;
+
+	switch (acpi_tag->type) {
+	case MULTIBOOT_TAG_TYPE_ACPI_OLD:
+	case MULTIBOOT_TAG_TYPE_ACPI_NEW: {
+		struct rsdp_descriptor *rsdp = (struct rsdp_descriptor *)(((struct multiboot_tag_new_acpi *)acpi_tag)->rsdp);
+		void *rsdt_phys = (void *)(uintptr_t)rsdp->rsdt_address;
+		map_physical_range(rsdt_phys, PAGE_SIZE,
+				   VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT);
+
+		struct acpi_sdt_header *rsdt = (struct acpi_sdt_header *)rsdt_phys;
+		map_physical_range(rsdt_phys, rsdt->length,
+				   VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT);
+
+		size_t entry_count = (rsdt->length - sizeof(struct acpi_sdt_header)) / sizeof(uint32_t);
+		uint32_t *entries = (uint32_t *)((uint8_t *)rsdt + sizeof(struct acpi_sdt_header));
+		for (size_t i = 0; i < entry_count; i++) {
+			struct acpi_sdt_header *hdr = (struct acpi_sdt_header *)(uintptr_t)entries[i];
+			map_physical_range(hdr, PAGE_SIZE,
+					   VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT);
+			if (memcmp(hdr->signature, "APIC", 4) == 0) {
+				map_physical_range(hdr, hdr->length,
+						   VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT);
+				if (parse_madt(hdr))
+					return true;
+			}
+		}
+		break;
+	}
+	default:
+		break;
+	}
+
+	return false;
+}
+
+static void parse_apic_ids(struct multiboot_tag *acpi_tag)
 {
 	bool found_cpus = false;
 
-	for (struct multiboot_tag *tag = mbi; tag->type != MULTIBOOT_TAG_TYPE_END;
-	     tag = (struct multiboot_tag *)((multiboot_uint8_t *)tag + ((tag->size + 7) & ~7))) {
-		if (tag->type == MULTIBOOT_TAG_TYPE_ACPI_OLD || tag->type == MULTIBOOT_TAG_TYPE_ACPI_NEW) {
-			struct rsdp_descriptor *rsdp = (struct rsdp_descriptor *)(((struct multiboot_tag_new_acpi *)tag)->rsdp);
-			void *rsdt_phys = (void *)(uintptr_t)rsdp->rsdt_address;
-			map_physical_range(rsdt_phys, PAGE_SIZE, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT);
-
-			struct acpi_sdt_header *rsdt = (struct acpi_sdt_header *)rsdt_phys;
-			map_physical_range(rsdt_phys, rsdt->length, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT);
-
-			size_t entry_count = (rsdt->length - sizeof(struct acpi_sdt_header)) / sizeof(uint32_t);
-			uint32_t *entries = (uint32_t *)((uint8_t *)rsdt + sizeof(struct acpi_sdt_header));
-			for (size_t i = 0; i < entry_count; i++) {
-				struct acpi_sdt_header *hdr = (struct acpi_sdt_header *)(uintptr_t)entries[i];
-				map_physical_range(hdr, PAGE_SIZE, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT);
-				if (memcmp(hdr->signature, "APIC", 4) == 0) {
-					map_physical_range(hdr, hdr->length, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT);
-					found_cpus |= parse_madt(hdr);
-				}
-			}
-		}
-	}
+	found_cpus |= parse_acpi_tag(acpi_tag);
 
 	if (!found_cpus) {
 		kprintf("SMP: falling back to BSP CPUID enumeration only\n");
@@ -216,7 +234,7 @@ static void setup_ap_trampoline(void)
 
 	*trampoline_idtr = bsp_idtr;
 
-	mprint("AP trampoline copied to 0x%x (size %u)\n", AP_TRAMPOLINE_DEST, (unsigned)trampoline_pages);
+	mprint("AP trampoline copied to %x (size %u)\n", AP_TRAMPOLINE_DEST, (unsigned)trampoline_pages);
 }
 
 static void build_stacks(void)
@@ -255,7 +273,7 @@ static void start_aps(void)
 	}
 }
 
-void smp_init(struct multiboot_tag *mbi)
+void smp_init(struct multiboot_tag *acpi_tag)
 {
 	if (!cpuid_has_apic()) {
 		kprintf("APIC not available, skipping SMP init\n");
@@ -263,7 +281,7 @@ void smp_init(struct multiboot_tag *mbi)
 	}
 
 	record_idtr();
-	parse_apic_ids(mbi);
+	parse_apic_ids(acpi_tag);
 	lapic_enable();
 	setup_ap_trampoline();
 	build_stacks();

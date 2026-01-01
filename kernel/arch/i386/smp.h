@@ -11,5 +11,5 @@ struct cpu_info {
 	void *stack_top;
 };
 
-void smp_init(struct multiboot_tag *mbi);
+void smp_init(struct multiboot_tag *acpi_tag);
 struct cpu_info *smp_get_cpus(size_t *count);
