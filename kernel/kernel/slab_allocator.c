@@ -50,6 +50,8 @@ struct slab_cache {
 static struct list_head slab_caches = { .next = &slab_caches, .prev = &slab_caches };
 static bool slab_initialized = false;
 
+static void slab_free_pages(malloc_tag_t *tag);
+
 static size_t align_up(size_t val, size_t align)
 {
 	return (val + (align - 1)) & ~(align - 1);
