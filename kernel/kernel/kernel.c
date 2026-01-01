@@ -93,6 +93,7 @@ void gpa_test(allocator_t gpa_alloc){
 struct mbi_info{
 	struct multiboot_tag_mmap *mmap_tag;
 	struct multiboot_tag_elf_sections *elf_sec_tag;
+	struct multiboot_tag *acpi_tag;
 	uintptr_t kernel_end_addr;
 };
 struct mbi_info get_mbi_info(uintptr_t mbi_addr, size_t mbi_size, uintptr_t kernel_start_addr){
@@ -119,6 +120,10 @@ struct mbi_info get_mbi_info(uintptr_t mbi_addr, size_t mbi_size, uintptr_t kern
 		case MULTIBOOT_TAG_TYPE_BOOTDEV:
 			kprintf("Boot device %x,%u,%u\n", ((struct multiboot_tag_bootdev *)tag)->biosdev, ((struct multiboot_tag_bootdev *)tag)->slice,
 				((struct multiboot_tag_bootdev *)tag)->part);
+			break;
+		case MULTIBOOT_TAG_TYPE_ACPI_OLD:
+		case MULTIBOOT_TAG_TYPE_ACPI_NEW:
+			res.acpi_tag = tag;
 			break;
 		case MULTIBOOT_TAG_TYPE_MMAP: {
 			res.mmap_tag = (struct multiboot_tag_mmap *)tag;
@@ -259,6 +264,10 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 		const size_t offset = (size_t)((unsigned long)mbi_info.elf_sec_tag - mbi_addr);
 		mbi_info.elf_sec_tag = (struct multiboot_tag_elf_sections *)(relocated_addr + offset);
 	}
+	if (mbi_info.acpi_tag != nullptr) {
+		const size_t offset = (size_t)((unsigned long)mbi_info.acpi_tag - mbi_addr);
+		mbi_info.acpi_tag = (struct multiboot_tag *)(relocated_addr + offset);
+	}
 
 	if (preserved_entry_count < sizeof(preserved_entries) / sizeof(preserved_entries[0]))
 		preserved_entries[preserved_entry_count++] = mbi_virt;
@@ -271,11 +280,11 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	init_kmalloc();
 	init_slab_allocator();
 
-	section_divisor("SMP init:\n");
-	smp_init((struct multiboot_tag *)mbi_virt.ptr);
-
 	allocator_t gpa_alloc = get_gpa_allocator();
 	gpa_test(gpa_alloc);
+
+	section_divisor("SMP init:\n");
+	smp_init(mbi_info.acpi_tag);
 
 	section_divisor("ATA PIO Test drives:\n");
 	kprintf("    - hda: %s type \n", ata_pio_debug_devtype(ata_pio_detect_devtype(0)));
