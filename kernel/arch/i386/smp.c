@@ -16,6 +16,8 @@
 
 MODULE("SMP");
 
+#define LAPIC_MMIO_BASE 0xFEE00000
+
 #define MAX_CPUS 16
 #define AP_STACK_SIZE (16 * 1024)
 
@@ -256,25 +258,47 @@ static void build_stacks(void)
 static void start_aps(void)
 {
 	const uint8_t trampoline_vector = ap_trampoline_phys_base >> 12;
-
-	for (size_t i = 0; i < cpu_count; i++) {
-		if (cpus[i].apic_id == lapic_get_id())
-			continue;
-
-		mprint("Sending INIT to APIC %u\n", cpus[i].apic_id);
-		lapic_send_ipi(cpus[i].apic_id, 0, IPI_DELIVERY_MODE_INIT);
-
-		for (volatile int wait = 0; wait < 100000; wait++)
-			;
-
-		mprint("Sending SIPI to APIC %u\n", cpus[i].apic_id);
-		lapic_send_ipi(cpus[i].apic_id, trampoline_vector, IPI_DELIVERY_MODE_STARTUP);
-
-		for (volatile int wait = 0; wait < 100000; wait++)
-			;
-
-		lapic_send_ipi(cpus[i].apic_id, trampoline_vector, IPI_DELIVERY_MODE_STARTUP);
+	// for each Local APIC ID we do...
+	for(size_t i = 0; i < cpu_count; i++) {
+		// do not start BSP, that's already running this code
+		if (cpus[i].online) continue;
+		// send INIT IPI
+		*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x280)) = 0;                                                                          // clear APIC errors
+		*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x310)) = (*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x310))) | (i << 24);             // select AP
+		*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) = (*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) & 0xfff00000) | 0x00C500; // trigger INIT IPI
+		do { __asm__ __volatile__ ("pause" : : : "memory"); }while(*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) & (1 << 12));      // wait for delivery
+		*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x310)) = (*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x310))) | (i << 24);             // select AP
+		*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) = (*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) & 0xfff00000) | 0x008500; // deassert
+		do { __asm__ __volatile__ ("pause" : : : "memory"); }while(*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) & (1 << 12));      // wait for delivery
+		for (volatile int wait = 0; wait < 100000; wait++) ;                                                                           // wait 10 msec
+		// send STARTUP IPI (twice)
+		for(size_t j = 0; j < 2; j++) {
+			*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x280)) = 0;                                                                          // clear APIC errors
+			*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x310)) = (*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x310))) | (i << 24);             // select AP
+			*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) = (*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) & 0xfff0f800) | 0x000601; // trigger STARTUP IPI for 0100:0000
+			for (volatile int wait = 0; wait < 100000; wait++) ;                                                                           // wait 200 usec
+			do { __asm__ __volatile__ ("pause" : : : "memory"); }while(*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) & (1 << 12));      // wait for delivery
+		}
 	}
+
+	/* for (size_t i = 0; i < cpu_count; i++) { */
+	/* 	if (cpus[i].online) */
+	/* 		continue; */
+
+	/* 	mprint("Sending INIT to APIC %u\n", cpus[i].apic_id); */
+	/* 	lapic_send_ipi(cpus[i].apic_id, 0xC000, IPI_DELIVERY_MODE_INIT); */
+
+	/* 	for (volatile int wait = 0; wait < 100000; wait++) */
+	/* 		; */
+
+	/* 	mprint("Sending SIPI to APIC %u\n", cpus[i].apic_id); */
+	/* 	lapic_send_ipi(cpus[i].apic_id, 0x000600 | trampoline_vector, IPI_DELIVERY_MODE_STARTUP); */
+
+	/* 	for (volatile int wait = 0; wait < 100000; wait++) */
+	/* 		; */
+
+	/* 	lapic_send_ipi(cpus[i].apic_id, 0x000600 | trampoline_vector, IPI_DELIVERY_MODE_STARTUP); */
+	/* } */
 }
 
 void smp_init(struct multiboot_tag *acpi_tag)
