@@ -3,30 +3,6 @@ export PROJECTS ::= libc kernel
 
 include make.config
 
-export AR ::= $(shell pwd)/tools/build/bin/i686-elf-ar
-export AS ::= nasm -f elf32
-export CC ::= $(shell pwd)/tools/build/bin/i686-elf-gcc
-
-export PREFIX=/usr
-export EXEC_PREFIX=${PREFIX}
-export BOOTDIR=/boot
-export LIBDIR=${EXEC_PREFIX}/lib32
-export INCLUDEDIR=${PREFIX}/include
-
-# Configure the cross-compiler to use the desired system root.
-export SYSROOT ::= $(shell pwd)/sysroot
-
-export CFLAGS ::= -O0 -g --sysroot=${SYSROOT}
-export CPPFLAGS ::= --sysroot=${SYSROOT}
-
-# Work around that the -elf gcc targets doesn't have a system include directory
-# because it was configured with --without-headers rather than --with-sysroot.
-ifeq ($(findstring elf, ${HOST}), elf)
-export CFLAGS += -isystem=${INCLUDEDIR}
-export CPPFLAGS += -isystem=${INCLUDEDIR}
-endif
-
-
 headers:
 	for PROJECT in ${SYSTEM_HEADER_PROJECTS} ; do \
 	    DESTDIR="${SYSROOT}" ${MAKE} -C $${PROJECT} install-headers ; \
