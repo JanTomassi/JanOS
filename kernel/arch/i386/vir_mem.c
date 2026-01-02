@@ -98,6 +98,65 @@ bool map_pages(fatptr_t *phy_mem, struct vmm_entry *virt_mem)
 	return true;
 }
 
+static bool is_page_table_empty(size_t *pt)
+{
+	for (size_t i = 0; i < 1024; i++) {
+		if (pt[i] & VMM_ENTRY_PRESENT_BIT)
+			return false;
+	}
+
+	return true;
+}
+
+static void unmap_pages(const struct vmm_entry *virt_mem)
+{
+	if (virt_mem->size == 0)
+		return;
+
+	size_t start_addr = (size_t)virt_mem->ptr;
+	size_t end_addr = round_up_to_page(start_addr + virt_mem->size);
+	size_t last_addr = end_addr - 1;
+
+	size_t first_pd_idx = start_addr >> 22;
+	size_t last_pd_idx = last_addr >> 22;
+
+	size_t *pd = (size_t *)page_directory_addr;
+
+	for (size_t pd_idx = first_pd_idx; pd_idx <= last_pd_idx; pd_idx++) {
+		if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0 || (pd[pd_idx] & VMM_ENTRY_PAGE_SIZE_BIT))
+			continue;
+
+		size_t *pt = ((size_t *)0xFFC00000) + (0x400 * pd_idx);
+
+		size_t pt_start = 0;
+		size_t pt_end = 1023;
+
+		if (pd_idx == first_pd_idx)
+			pt_start = (start_addr >> 12) & 0x3FF;
+		if (pd_idx == last_pd_idx)
+			pt_end = (last_addr >> 12) & 0x3FF;
+
+		for (size_t pt_idx = pt_start; pt_idx <= pt_end; pt_idx++) {
+			if ((pt[pt_idx] & VMM_ENTRY_PRESENT_BIT) == 0)
+				continue;
+
+			pt[pt_idx] = 0;
+			invalidate((void *)((pd_idx << 22) | (pt_idx << 12)));
+		}
+
+		if (is_page_table_empty(pt)) {
+			fatptr_t table_frame = {
+				.ptr = (void *)(pd[pd_idx] & VMM_ENTRY_LOCATION_4K_BITS),
+				.len = PAGE_SIZE,
+			};
+
+			pd[pd_idx] = 0;
+			phy_mem_free(table_frame);
+		}
+	}
+}
+
+
 static void invalidate_low_range(void)
 {
 	size_t *pd = (size_t *)page_directory_addr;
