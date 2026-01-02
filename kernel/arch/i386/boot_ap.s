@@ -11,37 +11,13 @@ global ap_trampoline_stack_buf_top
 
 ap_trampoline_start:
 	cli
-
-	mov	ax, cs
-	mov	ds, ax
-	mov	es, ax
-
-	; Determine the linear base of the trampoline using the current CS and IP
-	call	.get_base
-.get_base:
-	pop	bx
-	sub	bx, .get_base - ap_trampoline_start
-	movzx	ebx, bx			; EBX will hold the linear address of ap_trampoline_start
-	mov	ax, ds
-	shl	eax, 4
-	add	ebx, eax
-
-	; Patch the GDT descriptor base field to point at our GDT copy
-	mov	eax, ebx
-	add	eax, ap_trampoline_gdt - ap_trampoline_start
-	mov	[bx + ap_trampoline_gdtr_base - ap_trampoline_start], eax
-	lgdt	[bx + ap_trampoline_gdtr - ap_trampoline_start]
-
-	; Prepare the protected-mode far jump target using the runtime base
-	mov	eax, ebx
-	add	eax, ap_trampoline_protected - ap_trampoline_start
-	mov	[bx + ap_trampoline_pm_ptr - ap_trampoline_start], eax
+	lgdt	[ap_trampoline_gdtr]
 
 	mov	eax, cr0
 	or	eax, 1
 	mov	cr0, eax
 
-	jmp	far [bx + ap_trampoline_pm_ptr - ap_trampoline_start]
+	jmp	0x08:ap_trampoline_protected
 
 [BITS 32]
 ap_trampoline_protected:
@@ -52,19 +28,18 @@ ap_trampoline_protected:
 	mov	gs, ax
 	mov	ss, ax
 
-	lea	esi, [ebx + ap_trampoline_stack - ap_trampoline_start]
-	mov	esp, [esi]
+	mov	esp, [ap_trampoline_stack]
 
-	mov	eax, [ebx + ap_trampoline_cr3 - ap_trampoline_start]
+	mov	eax, [ap_trampoline_cr3]
 	mov	cr3, eax
 
 	mov	eax, cr0
 	or	eax, 0x80000000
 	mov	cr0, eax
 
-	lidt	[ebx + ap_trampoline_idt_ptr - ap_trampoline_start]
+	lidt	[ap_trampoline_idt_ptr]
 
-	call	dword [ebx + ap_trampoline_entry - ap_trampoline_start]
+	call	dword [ap_trampoline_entry]
 
 .halt:
 	hlt
@@ -79,13 +54,9 @@ ap_trampoline_gdt_end:
 
 ap_trampoline_gdtr:
 	dw ap_trampoline_gdt_end - ap_trampoline_gdt - 1
-ap_trampoline_gdtr_base:
-	dd 0
+	dd ap_trampoline_gdt
 
-ap_trampoline_pm_ptr:
-	dd 0
-	dw 0x08
-
+section .data
 align 4
 ap_trampoline_cr3:	dd 0
 ap_trampoline_entry:	dd 0
@@ -94,6 +65,7 @@ ap_trampoline_idt_ptr:
 	dw 0
 	dd 0
 
+section .bss
 align 16
 ap_trampoline_stack_buf:
 	resb 4096
