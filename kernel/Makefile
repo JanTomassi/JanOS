@@ -50,6 +50,9 @@ JanOS.kernel: $(OBJS) $(ARCHDIR)/linker.ld
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=c2x $(CFLAGS) $(CPPFLAGS)
 
+%.o: %.s
+	$(AS) -f elf32 $< -o $@
+
 .S.o:
 	$(CC) -MD -c $< -o $@ $(CFLAGS) $(CPPFLAGS)
 
