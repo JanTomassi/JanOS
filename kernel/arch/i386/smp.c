@@ -65,6 +65,11 @@ struct madt_header {
 	uint8_t entries[];
 } __attribute__((packed));
 
+typedef struct tramp_gdtr {
+	uint16_t size;
+	uint32_t ptr
+} __attribute__((packed)) tramp_gdtr_t;
+
 extern uint8_t ap_trampoline_start;
 extern uint8_t ap_trampoline_end;
 extern uint32_t ap_trampoline_cr3;
@@ -72,6 +77,8 @@ extern uint32_t ap_trampoline_entry;
 extern uint32_t ap_trampoline_stack;
 extern uint16_t ap_trampoline_idt_ptr;
 extern uint8_t ap_trampoline_stack_buf_top;
+extern tramp_gdtr_t ap_trampoline_gdtr;
+extern uint64_t ap_trampoline_gdt;
 
 extern void ap_start(void);
 void ap_main(void);
@@ -228,17 +235,20 @@ static void setup_ap_trampoline(void)
 	const size_t stack_ptr_off = (size_t)((uintptr_t)&ap_trampoline_stack - (uintptr_t)&ap_trampoline_start);
 	const size_t idt_ptr_off = (size_t)((uintptr_t)&ap_trampoline_idt_ptr - (uintptr_t)&ap_trampoline_start);
 	const size_t stack_top_off = (size_t)((uintptr_t)&ap_trampoline_stack_buf_top - (uintptr_t)&ap_trampoline_start);
+	const size_t gdtr_off = (size_t)((uintptr_t)&ap_trampoline_gdtr - (uintptr_t)&ap_trampoline_start);
+	const size_t gdt_off = (size_t)((uintptr_t)&ap_trampoline_gdt - (uintptr_t)&ap_trampoline_start);
 
 	uint32_t *trampoline_cr3 = (uint32_t *)((uint8_t *)ap_trampoline_virt->ptr + cr3_off);
 	uint32_t *trampoline_entry = (uint32_t *)((uint8_t *)ap_trampoline_virt->ptr + entry_off);
 	uint32_t *trampoline_stack = (uint32_t *)((uint8_t *)ap_trampoline_virt->ptr + stack_ptr_off);
 	struct idtr_desc *trampoline_idtr = (struct idtr_desc *)((uint8_t *)ap_trampoline_virt->ptr + idt_ptr_off);
+	tramp_gdtr_t *tramp_gdtr = (tramp_gdtr_t*)(ap_trampoline_virt->ptr + gdtr_off);
 
 	*trampoline_cr3 = (uint32_t)get_CR3_reg();
 	*trampoline_entry = (uint32_t)&ap_start;
 	*trampoline_stack = ap_trampoline_phys_base + stack_top_off - 4;
-
 	*trampoline_idtr = bsp_idtr;
+	tramp_gdtr->ptr = (uintptr_t)(phys.ptr + gdt_off);
 
 	mprint("AP trampoline copied to %x (size %u)\n", (unsigned)ap_trampoline_phys_base, (unsigned)trampoline_pages);
 }
@@ -280,25 +290,6 @@ static void start_aps(void)
 			do { __asm__ __volatile__ ("pause" : : : "memory"); }while(*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) & (1 << 12));      // wait for delivery
 		}
 	}
-
-	/* for (size_t i = 0; i < cpu_count; i++) { */
-	/* 	if (cpus[i].online) */
-	/* 		continue; */
-
-	/* 	mprint("Sending INIT to APIC %u\n", cpus[i].apic_id); */
-	/* 	lapic_send_ipi(cpus[i].apic_id, 0xC000, IPI_DELIVERY_MODE_INIT); */
-
-	/* 	for (volatile int wait = 0; wait < 100000; wait++) */
-	/* 		; */
-
-	/* 	mprint("Sending SIPI to APIC %u\n", cpus[i].apic_id); */
-	/* 	lapic_send_ipi(cpus[i].apic_id, 0x000600 | trampoline_vector, IPI_DELIVERY_MODE_STARTUP); */
-
-	/* 	for (volatile int wait = 0; wait < 100000; wait++) */
-	/* 		; */
-
-	/* 	lapic_send_ipi(cpus[i].apic_id, 0x000600 | trampoline_vector, IPI_DELIVERY_MODE_STARTUP); */
-	/* } */
 }
 
 void smp_init(struct multiboot_tag *acpi_tag)
