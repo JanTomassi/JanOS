@@ -85,6 +85,7 @@ void ap_main(void);
 void *smp_get_stack_top(uint8_t apic_id);
 
 static uintptr_t ap_trampoline_phys_base = 0;
+static size_t ap_trampoline_page_count = 0;
 static struct vmm_entry *ap_trampoline_virt = nullptr;
 
 static void record_idtr(void)
@@ -215,6 +216,7 @@ static void setup_ap_trampoline(void)
 {
 	const size_t trampoline_size = (&ap_trampoline_end) - (&ap_trampoline_start);
 	const size_t trampoline_pages = round_up_to_page(trampoline_size);
+	const size_t trampoline_page_count = trampoline_pages / PAGE_SIZE;
 
 	fatptr_t phys = phy_mem_alloc_below(trampoline_pages, MIBI(1));
 	if (phys.ptr == nullptr)
@@ -229,6 +231,14 @@ static void setup_ap_trampoline(void)
 	memcpy(ap_trampoline_virt->ptr, &ap_trampoline_start, trampoline_size);
 
 	ap_trampoline_phys_base = (uintptr_t)phys.ptr;
+	ap_trampoline_page_count = trampoline_page_count;
+
+	struct vmm_entry identity_entry = {
+		.ptr = (void *)ap_trampoline_phys_base,
+		.size = trampoline_pages,
+		.flags = VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT,
+	};
+	map_pages(&phys, &identity_entry);
 
 	const size_t cr3_off = (size_t)((uintptr_t)&ap_trampoline_cr3 - (uintptr_t)&ap_trampoline_start);
 	const size_t entry_off = (size_t)((uintptr_t)&ap_trampoline_entry - (uintptr_t)&ap_trampoline_start);
@@ -251,6 +261,66 @@ static void setup_ap_trampoline(void)
 	tramp_gdtr->ptr = (uintptr_t)(phys.ptr + gdt_off);
 
 	mprint("AP trampoline copied to %x (size %u)\n", (unsigned)ap_trampoline_phys_base, (unsigned)trampoline_pages);
+}
+
+static void clear_trampoline_identity_map(void)
+{
+	if (ap_trampoline_phys_base == 0 || ap_trampoline_page_count == 0)
+		return;
+
+	size_t *pd = (size_t *)0xFFFFF000;
+	for (size_t page = 0; page < ap_trampoline_page_count; page++) {
+		uintptr_t addr = ap_trampoline_phys_base + page * PAGE_SIZE;
+		size_t pd_idx = addr >> 22;
+		size_t pt_idx = (addr >> 12) & 0x03FF;
+
+		if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0)
+			continue;
+
+		size_t *pt = ((size_t *)0xFFC00000) + (0x400 * pd_idx);
+		if (pt[pt_idx] & VMM_ENTRY_PRESENT_BIT) {
+			pt[pt_idx] = 0;
+			__asm__ volatile("invlpg (%0)" : : "r"(addr) : "memory");
+		}
+	}
+}
+
+static void cleanup_ap_trampoline(void)
+{
+	clear_trampoline_identity_map();
+
+	if (ap_trampoline_virt != nullptr) {
+		const size_t page_count = ap_trampoline_virt->size / PAGE_SIZE;
+		size_t *pd = (size_t *)0xFFFFF000;
+
+		for (size_t page = 0; page < page_count; page++) {
+			uintptr_t virt_addr = (uintptr_t)ap_trampoline_virt->ptr + page * PAGE_SIZE;
+			size_t pd_idx = virt_addr >> 22;
+			size_t pt_idx = (virt_addr >> 12) & 0x03FF;
+
+			if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0)
+				continue;
+
+			size_t *pt = ((size_t *)0xFFC00000) + (0x400 * pd_idx);
+			if (pt[pt_idx] & VMM_ENTRY_PRESENT_BIT) {
+				pt[pt_idx] = 0;
+				__asm__ volatile("invlpg (%0)" : : "r"(virt_addr) : "memory");
+			}
+		}
+
+		vir_mem_free(ap_trampoline_virt->ptr);
+		ap_trampoline_virt = nullptr;
+	}
+
+	if (ap_trampoline_phys_base != 0 && ap_trampoline_page_count != 0) {
+		fatptr_t phys_range = {
+			.ptr = (void *)ap_trampoline_phys_base,
+			.len = ap_trampoline_page_count * PAGE_SIZE,
+		};
+		phy_mem_free(phys_range);
+		ap_trampoline_phys_base = 0;
+		ap_trampoline_page_count = 0;
+	}
 }
 
 static void build_stacks(void)
@@ -327,6 +397,8 @@ void smp_init(struct multiboot_tag *acpi_tag)
 		if (all_online)
 			break;
 	}
+
+	cleanup_ap_trampoline();
 
 	for (size_t i = 0; i < cpu_count; i++)
 		mprint("CPU APIC %u status: %s\n", cpus[i].apic_id, cpus[i].online ? "online" : "offline");
