@@ -16,19 +16,33 @@ global ap_trampoline_gdtr
 
 [BITS 16]
 ap_trampoline_start:
-	jmp short .skip_data
-ap_trampoline_base:	dd 0
-ap_trampoline_start.skip_data:
 	cli
 	cld
 
-	xor     ax, ax
-	mov     ds, ax
-	mov     es, ax
-	mov     ss, ax
+	mov	ax, cs
+	mov	ds, ax
+	mov	ss, ax
+	mov	es, ax
+	mov	sp, (ap_trampoline_stack_buf_top - ap_trampoline_start)
 
-	mov     bx, (0x1000 + ap_trampoline_gdtr - ap_trampoline_start)
-	lgdt    [bx]
+	; Determine the linear base of the trampoline using the current CS and IP
+	call	.get_base
+.get_base:
+	pop	bx
+	sub	bx, .get_base - ap_trampoline_start
+	movzx	ebx, bx	; EBX will hold the linear address of ap_trampoline_start
+	mov	ax, cs
+	shl	ax, 4
+	add	bx, ax
+
+	; Prepare the protected-mode far jump target using the runtime base
+	mov     ax, (ap_trampoline_protected - ap_trampoline_start)
+	add     ax, bx
+	mov	[ap_trampoline_pm_ptr - ap_trampoline_start], ax
+
+	; Patch the GDT descriptor base field to point at our GDT copy
+	mov     ax, (ap_trampoline_gdtr - ap_trampoline_start) ; offset from start to gdtr
+	lgdt    [eax]
 
 	; enter protected mode
 	; (32-bit operands in real mode are fine on 386+)
@@ -36,10 +50,15 @@ ap_trampoline_start.skip_data:
 	or      eax, 1
 	mov     cr0, eax
 
-	jmp     0x08:(0x1000 + ap_trampoline_protected - ap_trampoline_start)
+	jmp	far [ap_trampoline_pm_ptr - ap_trampoline_start]
+
+ap_trampoline_pm_ptr:
+	dw 0x4242
+	dw 0x08
 
 [BITS 32]
-align 64, db 0
+
+align 64, db 0x90		; fill with no-ops
 ap_trampoline_protected:
 	mov     ax, 0x10
 	mov     ds, ax
@@ -48,20 +67,20 @@ ap_trampoline_protected:
 	mov     gs, ax
 	mov     ss, ax
 
-	mov     esp, [(0x1000 + ap_trampoline_stack - ap_trampoline_start)]
+	lea     eax, [ebx + ap_trampoline_stack_buf_top - ap_trampoline_start]
+	mov     esp, eax
 
-	mov     eax, [(0x1000 + ap_trampoline_cr3 - ap_trampoline_start)]
+	mov     eax, [ebx + (ap_trampoline_cr3 - ap_trampoline_start)]
 	mov     cr3, eax
 
 	mov     eax, cr0
-	or      eax, 0x80000000          ; enable paging
+	or      eax, 0x80000000 ; enable paging
 	mov     cr0, eax
-	add 	eax, eax
-	add 	eax, eax
 
-	lidt    [(0x1000 + ap_trampoline_idt_ptr - ap_trampoline_start)]
+	lidt    [ebx + ap_trampoline_idt_ptr - ap_trampoline_start]
 
-	call    dword [(0x1000 + ap_trampoline_entry - ap_trampoline_start)]
+	mov     eax, [ebx + ap_trampoline_entry - ap_trampoline_start]
+	jmp near eax
 
 .halt:
 	hlt
@@ -91,7 +110,7 @@ ap_trampoline_idt_ptr:
 
 align 16, db 0
 ap_trampoline_stack_buf:
-	resb 4096
+	resb 32
 ap_trampoline_stack_buf_top:
 
 ap_trampoline_end:
