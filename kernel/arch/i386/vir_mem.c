@@ -156,7 +156,6 @@ static void unmap_pages(const struct vmm_entry *virt_mem)
 	}
 }
 
-
 static void invalidate_low_range(void)
 {
 	size_t *pd = (size_t *)page_directory_addr;
@@ -428,6 +427,8 @@ void vir_mem_free(void *ptr)
 
 		if (cur->ptr == ptr) {
 			struct vmm_entry *prev_chunk = vir_mem_find_prev_free_chunk(cur);
+
+			unmap_pages(cur);
 
 			list_rm(&cur->list);
 			list_add(&cur->list, &prev_chunk->list);
