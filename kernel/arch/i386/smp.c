@@ -305,24 +305,9 @@ static void start_aps(void)
 	// for each Local APIC ID we do...
 	for(size_t i = 0; i < cpu_count; i++) {
 		// do not start BSP, that's already running this code
-		if (cpus[i].online) continue;
-		// send INIT IPI
-		*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x280)) = 0;                                                                          // clear APIC errors
-		*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x310)) = (*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x310))) | (i << 24);             // select AP
-		*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) = (*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) & 0xfff00000) | 0x00C500; // trigger INIT IPI
-		do { __asm__ __volatile__ ("pause" : : : "memory"); }while(*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) & (1 << 12));      // wait for delivery
-		*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x310)) = (*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x310))) | (i << 24);             // select AP
-		*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) = (*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) & 0xfff00000) | 0x008500; // deassert
-		do { __asm__ __volatile__ ("pause" : : : "memory"); }while(*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) & (1 << 12));      // wait for delivery
-		for (volatile int wait = 0; wait < 100000; wait++) ;                                                                           // wait 10 msec
-		// send STARTUP IPI (twice)
-		for(size_t j = 0; j < 2; j++) {
-			*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x280)) = 0;                                                                          // clear APIC errors
-			*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x310)) = (*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x310))) | (i << 24);             // select AP
-			*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) = (*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) & 0xfff0f800) | 0x000601; // trigger STARTUP IPI for 0100:0000
-			for (volatile int wait = 0; wait < 100000; wait++) ;                                                                           // wait 200 usec
-			do { __asm__ __volatile__ ("pause" : : : "memory"); }while(*((volatile uint32_t*)(LAPIC_MMIO_BASE + 0x300)) & (1 << 12));      // wait for delivery
-		}
+		if (cpus[i].online)
+			continue;
+		lapic_start_ap(i);
 	}
 }
 
