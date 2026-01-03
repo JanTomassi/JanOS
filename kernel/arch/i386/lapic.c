@@ -12,6 +12,7 @@ extern void pic_disable(void);
 #define LAPIC_REG_ID 0x20
 #define LAPIC_REG_EOI 0xB0
 #define LAPIC_REG_SVR 0xF0
+#define LAPIC_REG_ERR_STAT 0x280
 #define LAPIC_REG_ICR_LOW 0x300
 #define LAPIC_REG_ICR_HIGH 0x310
 
