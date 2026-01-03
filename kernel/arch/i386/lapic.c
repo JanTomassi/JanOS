@@ -24,13 +24,12 @@ static volatile uint32_t *lapic_base = nullptr;
 
 static inline uint32_t lapic_read(uint32_t reg)
 {
-	return lapic_base[reg / 4];
+	return *((volatile uint32_t*)((size_t)lapic_base + reg)) = (*((volatile uint32_t*)((size_t)lapic_base + reg)));
 }
 
-static inline void lapic_write(uint32_t reg, uint32_t val)
+static inline void lapic_write(uint32_t reg, uint32_t val, uint32_t mask)
 {
-	lapic_base[reg / 4] = val;
-	(void)lapic_read(LAPIC_REG_ID);
+	*((volatile uint32_t*)((size_t)lapic_base + reg)) = (*((volatile uint32_t*)((size_t)lapic_base + reg)) & ~mask) | val;
 }
 
 static void lapic_map_base(void)
@@ -60,7 +59,7 @@ void lapic_enable(void)
 	pic_disable();
 
 	uint32_t svr = 0xFF | LAPIC_SVR_ENABLE;
-	lapic_write(LAPIC_REG_SVR, svr);
+	lapic_write(LAPIC_REG_SVR, svr, (~0));
 	mprint("LAPIC enabled with SVR=0x%x\n", svr);
 }
 
@@ -69,7 +68,7 @@ void lapic_eoi(void)
 	if (lapic_base == nullptr)
 		return;
 
-	lapic_write(LAPIC_REG_EOI, 0);
+	lapic_write(LAPIC_REG_EOI, 0, (~0));
 }
 
 void lapic_send_ipi(uint8_t apic_id, uint8_t vector, uint8_t delivery_mode)
@@ -77,13 +76,12 @@ void lapic_send_ipi(uint8_t apic_id, uint8_t vector, uint8_t delivery_mode)
 	lapic_map_base();
 
 	const uint32_t dest = ((uint32_t)apic_id) << 24;
-	lapic_write(LAPIC_REG_ICR_HIGH, dest);
+	lapic_write(LAPIC_REG_ICR_HIGH, dest, 0x0f000000);
 
 	uint32_t icr_low = (delivery_mode << 8) | vector;
-	lapic_write(LAPIC_REG_ICR_LOW, icr_low);
+	lapic_write(LAPIC_REG_ICR_LOW, icr_low, (~0));
 
-	while (lapic_read(LAPIC_REG_ICR_LOW) & (1 << 12))
-		;
+	lapic_wait_delivery();
 }
 
 uint8_t lapic_get_id(void)
