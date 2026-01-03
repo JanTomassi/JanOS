@@ -435,7 +435,7 @@ slot_found:
 	return (fatptr_t){ .ptr = (void *)(start_block * BLOCK_SIZE), .len = req_size };
 }
 
-__attribute__((hot)) void phy_mem_free(fatptr_t addr_ptr)
+__attribute__((hot)) void phy_mem_free(const fatptr_t addr_ptr)
 {
 	list_for_each(&booking_block_list) {
 		struct booking_block *cur_block = list_entry(it, struct booking_block, list);

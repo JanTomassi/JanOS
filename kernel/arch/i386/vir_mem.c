@@ -6,6 +6,7 @@
 #include <list.h>
 
 #define page_directory_addr (0xFFFFF000)
+#define page_table_addr (0xFFC00000)
 
 MODULE("Virt Memory Manager");
 
@@ -16,7 +17,7 @@ static void invalidate(void *addr)
 	__asm__ volatile("invlpg (%0)" : : "r"((size_t)addr) : "memory");
 }
 
-void *get_phy_addr(void *vir_addr)
+void *get_phy_addr(const void *vir_addr)
 {
 	size_t pd_idx = (size_t)vir_addr >> 22;
 	size_t pt_idx = (size_t)vir_addr >> 12 & 0x03FF;
@@ -30,14 +31,14 @@ void *get_phy_addr(void *vir_addr)
 	else if ((pd[pd_idx] & VMM_ENTRY_PAGE_SIZE_BIT))
 		return (void *)((pd[pd_idx] & VMM_ENTRY_LOCATION_4M_LOW_BITS) + ((size_t)vir_addr & ~VMM_ENTRY_LOCATION_4M_LOW_BITS));
 
-	size_t *pt = ((size_t *)0xFFC00000) + (0x400 * pd_idx);
+	size_t *pt = ((size_t *)page_table_addr) + (0x400 * pd_idx);
 	if ((pt[pt_idx] & VMM_ENTRY_PRESENT_BIT) == 0)
 		return nullptr;
 
 	return (void *)((pt[pt_idx] & VMM_ENTRY_LOCATION_4K_BITS) + ((size_t)vir_addr & 0xFFF));
 }
 
-void *get_vir_addr(void *phy_addr)
+void *get_vir_addr(const void *phy_addr)
 {
 	size_t *pd = (size_t *)page_directory_addr;
 
@@ -45,7 +46,7 @@ void *get_vir_addr(void *phy_addr)
 		if (!(pd[pd_idx] & VMM_ENTRY_PRESENT_BIT))
 			continue;
 
-		size_t *pt = ((size_t *)0xFFC00000) + (0x400 * pd_idx);
+		size_t *pt = ((size_t *)page_table_addr) + (0x400 * pd_idx);
 		for (size_t pt_idx = 0; pt_idx < 1024; pt_idx++) {
 			if (!(pt[pt_idx] & VMM_ENTRY_PRESENT_BIT) || (pt[pt_idx] & VMM_ENTRY_LOCATION_4K_BITS) != phy_addr)
 				continue;
@@ -57,13 +58,13 @@ void *get_vir_addr(void *phy_addr)
 	return nullptr;
 }
 
-bool map_page(void *phy_addr, void *virt_addr, uint16_t virt_flags)
+void map_page(const void *phy_addr, const void *virt_addr, uint16_t virt_flags)
 {
 	size_t pd_idx = (size_t)virt_addr >> 22;
 	size_t pt_idx = (size_t)virt_addr >> 12 & 0x03FF;
 
-	size_t *pd = (size_t *)0xFFFFF000;
-	size_t *pt = ((size_t *)0xFFC00000) + (0x400 * pd_idx);
+	size_t *pd = (size_t *)page_directory_addr;
+	size_t *pt = ((size_t *)page_table_addr) + (0x400 * pd_idx);
 
 	if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0) {
 		pd[pd_idx] = (size_t)phy_mem_alloc(PAGE_SIZE).ptr;
@@ -74,11 +75,9 @@ bool map_page(void *phy_addr, void *virt_addr, uint16_t virt_flags)
 	pt[pt_idx] = ((size_t)phy_addr) | (virt_flags & 0xFFF);
 
 	invalidate(virt_addr);
-
-	return true;
 }
 
-bool map_pages(fatptr_t *phy_mem, struct vmm_entry *virt_mem)
+void map_pages(const fatptr_t *phy_mem, const struct vmm_entry *virt_mem)
 {
 	if (phy_mem->len != virt_mem->size)
 		panic("Physical and Virtual size not equal:\n"
@@ -95,7 +94,6 @@ bool map_pages(fatptr_t *phy_mem, struct vmm_entry *virt_mem)
 		virt_addr += PAGE_SIZE;
 		phy_addr += PAGE_SIZE;
 	}
-	return true;
 }
 
 static bool is_page_table_empty(size_t *pt)
@@ -108,51 +106,49 @@ static bool is_page_table_empty(size_t *pt)
 	return true;
 }
 
-static void unmap_pages(const struct vmm_entry *virt_mem)
+void unmap_page(const void* phy_mem, const void *virt_addr)
 {
-	if (virt_mem->size == 0)
-		return;
+	if (phy_mem != nullptr)
+		phy_mem_free((fatptr_t){.ptr = phy_mem, .len = PAGE_SIZE});
 
-	size_t start_addr = (size_t)virt_mem->ptr;
-	size_t end_addr = round_up_to_page(start_addr + virt_mem->size);
-	size_t last_addr = end_addr - 1;
-
-	size_t first_pd_idx = start_addr >> 22;
-	size_t last_pd_idx = last_addr >> 22;
+	size_t pd_idx = (size_t)virt_addr >> 22;
+	size_t pt_idx = (size_t)virt_addr >> 12 & 0x03FF;
 
 	size_t *pd = (size_t *)page_directory_addr;
+	size_t *pt = ((size_t *)page_table_addr) + (0x400 * pd_idx);
 
-	for (size_t pd_idx = first_pd_idx; pd_idx <= last_pd_idx; pd_idx++) {
-		if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0 || (pd[pd_idx] & VMM_ENTRY_PAGE_SIZE_BIT))
-			continue;
+	if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0)
+		return;
 
-		size_t *pt = ((size_t *)0xFFC00000) + (0x400 * pd_idx);
+	pt[pt_idx] = 0;
 
-		size_t pt_start = 0;
-		size_t pt_end = 1023;
+	if (is_page_table_empty(pt)) {
+		fatptr_t table_frame = {
+			.ptr = (void *)(pd[pd_idx] & VMM_ENTRY_LOCATION_4K_BITS),
+			.len = PAGE_SIZE,
+		};
 
-		if (pd_idx == first_pd_idx)
-			pt_start = (start_addr >> 12) & 0x3FF;
-		if (pd_idx == last_pd_idx)
-			pt_end = (last_addr >> 12) & 0x3FF;
+		pd[pd_idx] = 0;
+		phy_mem_free(table_frame);
+	}
 
-		for (size_t pt_idx = pt_start; pt_idx <= pt_end; pt_idx++) {
-			if ((pt[pt_idx] & VMM_ENTRY_PRESENT_BIT) == 0)
-				continue;
+	invalidate(virt_addr);
+}
 
-			pt[pt_idx] = 0;
-			invalidate((void *)((pd_idx << 22) | (pt_idx << 12)));
-		}
+void unmap_pages(const fatptr_t *phy_mem, const struct vmm_entry *virt_mem)
+{
+	if (phy_mem != nullptr){
+		phy_mem_free(*phy_mem);
+	}
+	if (virt_mem->size == 0){
+		return;
+	}
 
-		if (is_page_table_empty(pt)) {
-			fatptr_t table_frame = {
-				.ptr = (void *)(pd[pd_idx] & VMM_ENTRY_LOCATION_4K_BITS),
-				.len = PAGE_SIZE,
-			};
+	void *start_addr = virt_mem->ptr;
+	void *end_addr = (void*)round_up_to_page((uintptr_t)start_addr + virt_mem->size);
 
-			pd[pd_idx] = 0;
-			phy_mem_free(table_frame);
-		}
+	for (void *virt_addr = start_addr; virt_addr < end_addr; virt_addr += PAGE_SIZE) {
+		unmap_page(nullptr, virt_addr);
 	}
 }
 
@@ -330,7 +326,6 @@ static void debug_vmm_lists(void)
 	}
 	mprint("    %u unused vmm_tags\n", i);
 }
-#endif
 
 static void debug_vmm_list(struct list_head *v){
 	mprint("debug_vmm_list:\n");
@@ -340,6 +335,7 @@ static void debug_vmm_list(struct list_head *v){
 		mprint("    %u) ptr: %x | size: %x | flags: %x\n", i++, tag->ptr, tag->size, tag->flags);
 	}
 }
+#endif
 
 static struct list_head *vir_mem_find_prev_used_chunk(struct vmm_entry *to_alloc)
 {
@@ -420,15 +416,13 @@ static void vir_mem_free_coalesce(struct vmm_entry *mid)
 	}
 }
 
-void vir_mem_free(void *ptr)
+void vir_mem_free(const void *ptr)
 {
 	list_for_each(&vmm_used_list) {
 		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
 
 		if (cur->ptr == ptr) {
 			struct vmm_entry *prev_chunk = vir_mem_find_prev_free_chunk(cur);
-
-			unmap_pages(cur);
 
 			list_rm(&cur->list);
 			list_add(&cur->list, &prev_chunk->list);
@@ -505,7 +499,7 @@ static void init_vir_manager(struct list_head *vmm_init_list)
 
 void init_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm_entry *preserved_entries, size_t preserved_entry_count)
 {
-	struct vmm_entry init_vmm_entry[PAGE_SIZE / sizeof(struct vmm_entry)] = { 0 };
+	struct vmm_entry init_vmm_entry[16 * sizeof(struct vmm_entry)] = { 0 };
 	const size_t init_vmm_capacity = sizeof(init_vmm_entry) / sizeof(init_vmm_entry[0]);
 	size_t init_vmm_entris_used = 0;
 	LIST_HEAD(vmm_free_list);
