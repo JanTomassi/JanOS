@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
 /**
  * DIVISION ERROR                 | 0          | Fault      | #DE        | No
  * DEBUG                          | 1          | Fault/Trap | #DB        | No
@@ -82,3 +83,5 @@
 void irq_mask(uint8_t irq);
 void irq_unmask(uint8_t irq);
 void irq_ack(uint8_t irq);
+void irq_prepare(uint8_t irq);
+void irq_set_shared(uint8_t irq, bool shared);

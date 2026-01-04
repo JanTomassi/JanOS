@@ -162,3 +162,16 @@ void ioapic_unmask_irq(uint8_t irq)
 {
 	set_mask(irq, false);
 }
+
+bool ioapic_irq_is_level(uint8_t irq)
+{
+	if (ioapic.base == nullptr)
+		return false;
+
+	const struct ioapic_override *override = find_override(irq);
+	uint32_t gsi = override ? override->gsi : (ioapic.gsi_base + irq);
+	uint8_t index = (uint8_t)(gsi - ioapic.gsi_base);
+
+	uint64_t entry = ioapic_read_redir(index);
+	return (entry & IOAPIC_REDIR_FLAG_TRIGGER_LEVEL) != 0;
+}
