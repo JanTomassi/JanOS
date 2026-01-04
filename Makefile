@@ -3,6 +3,15 @@ export PROJECTS ::= libc kernel
 
 include make.config
 
+build: headers
+	if $$(command -v etags &> /dev/null) && $$(command -v find &> /dev/null) ; then \
+	    find ${PROJECTS} -name "*.[chCH]" -print | etags - ; \
+	fi
+
+	for PROJECT in ${PROJECTS}; do \
+	    DESTDIR="${SYSROOT}" ${MAKE} -C $$PROJECT install ; \
+	done
+
 headers:
 	for PROJECT in ${SYSTEM_HEADER_PROJECTS} ; do \
 	    DESTDIR="${SYSROOT}" ${MAKE} -C $${PROJECT} install-headers ; \
@@ -16,17 +25,6 @@ clean:
 
 	rm -f TAGS JanOS.iso
 	rm -rf sysroot isodir
-
-
-build: headers
-	if $$(command -v etags &> /dev/null) && $$(command -v find &> /dev/null) ; then \
-	    find ${PROJECTS} -name "*.[chCH]" -print | etags - ; \
-	fi
-
-	for PROJECT in ${PROJECTS}; do \
-	    DESTDIR="${SYSROOT}" ${MAKE} -C $$PROJECT install ; \
-	done
-
 
 JanOS.iso: build
 	mkdir -p isodir isodir/boot isodir/boot/grub
