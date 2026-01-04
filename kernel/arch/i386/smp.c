@@ -87,6 +87,10 @@ void *smp_get_stack_top(uint8_t apic_id);
 static uintptr_t ap_trampoline_phys_base = 0;
 static size_t ap_trampoline_page_count = 0;
 static struct vmm_entry *ap_trampoline_virt = nullptr;
+static struct madt_ioapic_info ioapic_info = { 0 };
+static struct madt_irq_override irq_overrides[16] = { 0 };
+static size_t irq_override_count = 0;
+static bool ioapic_found = false;
 
 static void record_idtr(void)
 {
@@ -136,6 +140,7 @@ static bool parse_madt(void *phys_addr)
 	struct madt_header *madt = (struct madt_header *)phys_addr;
 
 	map_physical_range(phys_addr, madt->header.length, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT);
+	lapic_set_base(madt->lapic_addr);
 
 	bool registered = false;
 	size_t offset = sizeof(struct madt_header);
@@ -146,13 +151,38 @@ static bool parse_madt(void *phys_addr)
 		if (length < 2)
 			break;
 
-		if (type == 0 && length >= 8) {
-			uint8_t apic_id = entry[3];
-			uint32_t flags = *(uint32_t *)(entry + 4);
-			if (flags & 0x1) {
-				register_cpu(apic_id);
-				registered = true;
+		switch (type) {
+		case 0:
+			if (length >= 8) {
+				uint8_t apic_id = entry[3];
+				uint32_t flags = *(uint32_t *)(entry + 4);
+				if (flags & 0x1) {
+					register_cpu(apic_id);
+					registered = true;
+				}
 			}
+			break;
+		case 1:
+			if (length >= 12 && !ioapic_found) {
+				ioapic_info.ioapic_id = entry[2];
+				ioapic_info.phys_addr = *(uint32_t *)(entry + 4);
+				ioapic_info.gsi_base = *(uint32_t *)(entry + 8);
+				ioapic_found = true;
+				mprint("MADT IOAPIC: id=%u phys=%x gsi_base=%u\n", ioapic_info.ioapic_id,
+				       (unsigned)ioapic_info.phys_addr, ioapic_info.gsi_base);
+			}
+			break;
+		case 2:
+			if (length >= 10 && irq_override_count < sizeof(irq_overrides) / sizeof(irq_overrides[0])) {
+				struct madt_irq_override *ovr = &irq_overrides[irq_override_count++];
+				ovr->source = entry[3];
+				ovr->gsi = *(uint32_t *)(entry + 4);
+				ovr->flags = *(uint16_t *)(entry + 8);
+				mprint("MADT IRQ override: src=%u gsi=%u flags=%x\n", ovr->source, ovr->gsi, ovr->flags);
+			}
+			break;
+		default:
+			break;
 		}
 
 		offset += length;
@@ -401,4 +431,24 @@ void ap_main(void)
 	__asm__ volatile("sti");
 	for (;;)
 		__asm__ volatile("hlt");
+}
+
+bool smp_get_ioapic_info(struct madt_ioapic_info *info)
+{
+	if (!ioapic_found || info == nullptr)
+		return false;
+
+	*info = ioapic_info;
+	return true;
+}
+
+size_t smp_get_irq_overrides(struct madt_irq_override *out, size_t max)
+{
+	if (out == nullptr || max == 0)
+		return 0;
+
+	size_t count = irq_override_count < max ? irq_override_count : max;
+	for (size_t i = 0; i < count; i++)
+		out[i] = irq_overrides[i];
+	return count;
 }

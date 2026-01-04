@@ -47,8 +47,6 @@ void idt_init(void)
 	idtr.base = (uint32_t)&idt[0];
 	idtr.limit = (uint16_t)(sizeof(idt_entry_t) * IDT_MAX_DESCRIPTORS - 1);
 
-	/* init_stub_table(); */
-
 	for (uint16_t vector = 0; vector < (32 + 16); vector++) {
 		idt_set_descriptor(vector, (void *)isr_stub_table[vector], PRESENT | DPL_KERNEL_LEVEL | (vector < 20 ? GATE_TYPE_TRAP : GATE_TYPE_INTERRUPT));
 	}
@@ -58,5 +56,5 @@ void idt_init(void)
 			 "longjmp_after_gdt:"
 			 :
 			 : "m"(idtr)); // load the new IDT
-	__asm__ volatile("sti");       // set the interrupt flag
+	/* __asm__ volatile("sti");       // set the interrupt flag */
 }
