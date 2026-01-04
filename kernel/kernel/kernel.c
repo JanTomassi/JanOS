@@ -15,18 +15,26 @@
 #include "../arch/i386/ata_pio.h"
 #include "../arch/i386/control_register.h"
 #include "../arch/i386/cpuid.h"
+#include "../arch/i386/ioapic.h"
+#include "../arch/i386/lapic.h"
+#include "../arch/i386/pic.h"
 #include "../arch/i386/smp.h"
+#include "../arch/i386/port.h"
 
 extern void idt_init(void);
-extern void PIC_remap(int offset1, int offset2);
-extern void pic_disable(void);
 extern void init_kmalloc(void);
 extern void *HIGHER_HALF;
 
 size_t GLOBAL_TICK = 0;
-DEFINE_IRQ(32)
+DEFINE_IRQ(34)
 {
 	++GLOBAL_TICK;
+}
+
+static void imcr_route_to_apic(void)
+{
+	outb(0x22, 0x70);
+	outb(0x23, 0x01);
 }
 
 void section_divisor(char *section_name)
@@ -223,14 +231,19 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 
 	section_divisor("Initializing programable interrupt controller:\n");
 
-	PIC_remap(0x20, 0x28);
-
-	kprintf("- IRQ Master: start at dec: %u, hex: %x\n"
-		"                end at dec: %u, hex: %x\n",
-		0x20, 0x20, 0x20 + 7, 0x20 + 7);
-	kprintf("- IRQ Slave:  start at dec: %u, hex: %x\n"
-		"                end at dec: %u, hex: %x\n",
-		0x28, 0x28, 0x28 + 7, 0x28 + 7);
+	bool apic_capable = cpuid_has_apic();
+	if (!apic_capable) {
+		PIC_remap(0x20, 0x28);
+		kprintf("- IRQ Master: start at dec: %u, hex: %x\n"
+			"                end at dec: %u, hex: %x\n",
+			0x20, 0x20, 0x20 + 7, 0x20 + 7);
+		kprintf("- IRQ Slave:  start at dec: %u, hex: %x\n"
+			"                end at dec: %u, hex: %x\n",
+			0x28, 0x28, 0x28 + 7, 0x28 + 7);
+	} else {
+		kprintf("APIC detected, routing interrupts via Local APIC/IOAPIC\n");
+		imcr_route_to_apic();
+	}
 
 	section_divisor("Initializing interrupt description table:\n");
 	idt_init();
@@ -286,6 +299,24 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	section_divisor("SMP init:\n");
 	smp_init(mbi_info.acpi_tag);
 
+	struct madt_ioapic_info ioapic_desc = { 0 };
+	struct madt_irq_override overrides[16] = { 0 };
+	size_t override_count = smp_get_irq_overrides(overrides, 16);
+	if (apic_capable && smp_get_ioapic_info(&ioapic_desc)) {
+		struct ioapic_override ioapic_overrides[16] = { 0 };
+		for (size_t i = 0; i < override_count && i < 16; i++) {
+			ioapic_overrides[i].source = overrides[i].source;
+			ioapic_overrides[i].gsi = overrides[i].gsi;
+			ioapic_overrides[i].flags = overrides[i].flags;
+		}
+		ioapic_register_overrides(ioapic_overrides, override_count);
+		ioapic_init(ioapic_desc.phys_addr, ioapic_desc.gsi_base, lapic_get_id());
+		ioapic_configure_legacy_irqs();
+		/* ioapic_unmask_irq(0); */
+		ioapic_unmask_irq(1);
+		pic_disable();
+	}
+
 	section_divisor("ATA PIO Test drives:\n");
 	kprintf("    - hda: %s type \n", ata_pio_debug_devtype(ata_pio_detect_devtype(0)));
 	kprintf("    - hdb: %s type\n", ata_pio_debug_devtype(ata_pio_detect_devtype(0)));
@@ -299,4 +330,5 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 		kprintf("%s", hdb_v);
 	}
 	gpa_alloc.free(hdb_t);
+	__asm__ volatile("sti");       // set the interrupt flag
 }

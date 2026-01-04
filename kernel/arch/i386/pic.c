@@ -1,4 +1,6 @@
+#include <stdint.h>
 #include "port.h"
+#include "pic.h"
 
 #define PIC1 0x20 /* IO base address for master PIC */
 #define PIC2 0xA0 /* IO base address for slave PIC */
@@ -85,4 +87,20 @@ void pic_enable(void)
 {
 	outb(PIC1_DATA, 0x00);
 	outb(PIC2_DATA, 0x00);
+}
+
+void pic_mask_irq(uint8_t irq)
+{
+	uint16_t port = irq < 8 ? PIC1_DATA : PIC2_DATA;
+	uint8_t mask = inb(port);
+	mask |= 1 << (irq % 8);
+	outb(port, mask);
+}
+
+void pic_unmask_irq(uint8_t irq)
+{
+	uint16_t port = irq < 8 ? PIC1_DATA : PIC2_DATA;
+	uint8_t mask = inb(port);
+	mask &= ~(1 << (irq % 8));
+	outb(port, mask);
 }

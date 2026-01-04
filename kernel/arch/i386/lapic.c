@@ -21,6 +21,12 @@ extern void pic_disable(void);
 MODULE("LAPIC");
 
 static volatile uint32_t *lapic_base = nullptr;
+static uintptr_t lapic_phys_base = LAPIC_MMIO_BASE;
+
+void lapic_set_base(uintptr_t phys)
+{
+	lapic_phys_base = phys == 0 ? LAPIC_MMIO_BASE : phys;
+}
 
 static inline uint32_t lapic_read(uint32_t reg)
 {
@@ -38,11 +44,11 @@ static void lapic_map_base(void)
 		return;
 
 	fatptr_t phys = {
-		.ptr = (void *)LAPIC_MMIO_BASE,
+		.ptr = (void *)lapic_phys_base,
 		.len = PAGE_SIZE,
 	};
 	struct vmm_entry virt = {
-		.ptr = (void *)LAPIC_MMIO_BASE,
+		.ptr = (void *)lapic_phys_base,
 		.size = PAGE_SIZE,
 		.flags = VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT,
 	};
@@ -54,9 +60,6 @@ static void lapic_map_base(void)
 void lapic_enable(void)
 {
 	lapic_map_base();
-
-	PIC_remap(0x20, 0x28);
-	pic_disable();
 
 	uint32_t svr = 0xFF | LAPIC_SVR_ENABLE;
 	lapic_write(LAPIC_REG_SVR, svr, (~0));

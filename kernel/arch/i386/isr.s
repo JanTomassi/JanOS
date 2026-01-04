@@ -80,6 +80,7 @@ isr_stub_%+%1:
 %macro isr_irq_master_stub 1
 global isr_%+%1_handler:function weak
 extern isr_%+%1_handler:function strong
+extern irq_ack:function
 
 isr_%+%1_handler:
 	;; printing the default msg
@@ -99,8 +100,9 @@ isr_stub_%+%1:
 
 	call	[ebx + isr_%+%1_handler wrt ..got]
 
-	mov 	al,0x20
-	out 	0x20,al	;; acknowledge the interrupt to the PIC
+	push dword %1
+	call	[ebx + irq_ack wrt ..got]
+	add 	esp, 4
 
 	popa
 	iret
@@ -109,6 +111,7 @@ isr_stub_%+%1:
 %macro isr_irq_slave_stub 1
 global isr_%+%1_handler:function weak
 extern isr_%+%1_handler:function strong
+extern irq_ack:function
 
 isr_%+%1_handler:
 	;; printing the default msg
@@ -128,9 +131,9 @@ isr_stub_%+%1:
 
 	call	[ebx + isr_%+%1_handler wrt ..got]
 
-	mov 	al,0x20
-	out 	0xa0,al
-	out 	0x20,al	;; acknowledge the interrupt to the PIC
+	push dword %1
+	call	[ebx + irq_ack wrt ..got]
+	add 	esp, 4
 
 	popa
 	iret

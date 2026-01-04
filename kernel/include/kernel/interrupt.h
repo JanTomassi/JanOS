@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 /**
  * DIVISION ERROR                 | 0          | Fault      | #DE        | No
  * DEBUG                          | 1          | Fault/Trap | #DB        | No
@@ -77,3 +78,7 @@
 #define IRQ_16 47
 
 #define DEFINE_IRQ(num) void isr_##num##_handler(void)
+
+void irq_mask(uint8_t irq);
+void irq_unmask(uint8_t irq);
+void irq_ack(uint8_t irq);
