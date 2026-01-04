@@ -62,6 +62,7 @@ qemu_sata: JanOS.iso
 
 qemu: JanOS.iso
 	qemu-system-${ARCH} \
+	-smp 2 \
 	-m 1G \
 	-machine pc -cpu qemu64 \
 	-drive file=JanOS.iso,format=raw \
