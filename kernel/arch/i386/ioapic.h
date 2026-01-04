@@ -16,3 +16,4 @@ void ioapic_configure_legacy_irqs(void);
 
 void ioapic_mask_irq(uint8_t irq);
 void ioapic_unmask_irq(uint8_t irq);
+bool ioapic_irq_is_level(uint8_t irq);

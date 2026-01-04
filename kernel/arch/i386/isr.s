@@ -81,6 +81,7 @@ isr_stub_%+%1:
 global isr_%+%1_handler:function weak
 extern isr_%+%1_handler:function strong
 extern irq_ack:function
+extern irq_prepare:function
 
 isr_%+%1_handler:
 	;; printing the default msg
@@ -97,6 +98,10 @@ isr_stub_%+%1:
 	pusha
 
 	get_GOT
+
+	push dword %1
+	call	[ebx + irq_prepare wrt ..got]
+	add 	esp, 4
 
 	call	[ebx + isr_%+%1_handler wrt ..got]
 
@@ -112,6 +117,7 @@ isr_stub_%+%1:
 global isr_%+%1_handler:function weak
 extern isr_%+%1_handler:function strong
 extern irq_ack:function
+extern irq_prepare:function
 
 isr_%+%1_handler:
 	;; printing the default msg
@@ -128,6 +134,10 @@ isr_stub_%+%1:
 	pusha
 
 	get_GOT
+
+	push dword %1
+	call	[ebx + irq_prepare wrt ..got]
+	add 	esp, 4
 
 	call	[ebx + isr_%+%1_handler wrt ..got]
 
