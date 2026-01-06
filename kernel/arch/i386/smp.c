@@ -2,6 +2,7 @@
 
 #include "../i386/cpuid.h"
 #include "../i386/lapic.h"
+#include <kernel/cleanup.h>
 #include <kernel/allocator.h>
 #include <kernel/display.h>
 #include <kernel/phy_mem.h>
@@ -23,6 +24,8 @@ MODULE("SMP");
 
 #define IPI_DELIVERY_MODE_INIT 0x5
 #define IPI_DELIVERY_MODE_STARTUP 0x6
+
+#define NO_CACHE_RW_DEV_VMM_FLAGS (VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT)
 
 struct idtr_desc {
 	uint16_t limit;
@@ -92,6 +95,9 @@ static struct madt_irq_override irq_overrides[16] = { 0 };
 static size_t irq_override_count = 0;
 static bool ioapic_found = false;
 
+static struct madt_header *madt_header = nullptr;
+static struct acpi_sdt_header *rsdp_header = nullptr;
+
 static void record_idtr(void)
 {
 	__asm__ volatile("sidt %0" : "=m"(bsp_idtr) : : "memory");
@@ -134,18 +140,43 @@ static void map_physical_range(void *phys, size_t len, uint16_t flags)
 	map_pages(&phys_range, &virt);
 }
 
+static void unmap_physical_range(void *virt_addr, size_t len){
+	void *base = (void *)round_down_to_page((uintptr_t)virt_addr);
+	const size_t offset = (uintptr_t)virt_addr - (uintptr_t)base;
+	const size_t mapped_len = round_up_to_page(offset + len);
+	struct vmm_entry virt = {
+		.ptr = base,
+		.size = mapped_len,
+		.flags = 0,
+	};
+	unmap_pages(nullptr, &virt);
+}
+
 static bool parse_madt(void *phys_addr)
 {
-	map_physical_range(phys_addr, PAGE_SIZE, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT);
-	struct madt_header *madt = (struct madt_header *)phys_addr;
-
-	map_physical_range(phys_addr, madt->header.length, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT);
-	lapic_set_base(madt->lapic_addr);
-
+	size_t madt_length = 0;
 	bool registered = false;
+	WITH(map_physical_range(phys_addr, PAGE_SIZE, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT),
+	     unmap_physical_range(phys_addr, PAGE_SIZE))
+	{
+		struct madt_header *madt = (struct madt_header *)phys_addr;
+		madt_length = madt->header.length;
+	}
+
+	WITH(map_physical_range(phys_addr, madt_length, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT),
+	     unmap_physical_range(phys_addr, madt_length))
+	{
+		struct madt_header *madt = (struct madt_header *)phys_addr;
+		allocator_t gpa = get_gpa_allocator();
+		fatptr_t copy_madt = gpa.alloc(madt_length);
+		memcpy(copy_madt.ptr, (uint8_t*)madt, madt_length);
+		madt_header = copy_madt.ptr;
+	}
+
+	lapic_set_base(madt_header->lapic_addr);
 	size_t offset = sizeof(struct madt_header);
-	while (offset + 2 <= madt->header.length) {
-		uint8_t *entry = ((uint8_t *)madt) + offset;
+	while (offset + 2 <= madt_header->header.length) {
+		uint8_t *entry = ((uint8_t *)madt_header) + offset;
 		uint8_t type = entry[0];
 		uint8_t length = entry[1];
 		if (length < 2)
@@ -200,25 +231,47 @@ static bool parse_acpi_tag(struct multiboot_tag *acpi_tag)
 	case MULTIBOOT_TAG_TYPE_ACPI_OLD:
 	case MULTIBOOT_TAG_TYPE_ACPI_NEW: {
 		struct rsdp_descriptor *rsdp = (struct rsdp_descriptor *)(((struct multiboot_tag_new_acpi *)acpi_tag)->rsdp);
-		void *rsdt_phys = (void *)(uintptr_t)rsdp->rsdt_address;
-		map_physical_range(rsdt_phys, PAGE_SIZE,
-				   VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT);
+		void *rsdp_phys = (void *)(uintptr_t)rsdp->rsdt_address;
+		size_t rsdp_length = 0;
 
-		struct acpi_sdt_header *rsdt = (struct acpi_sdt_header *)rsdt_phys;
-		map_physical_range(rsdt_phys, rsdt->length,
-				   VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT);
+		WITH(map_physical_range(rsdp_phys, PAGE_SIZE, NO_CACHE_RW_DEV_VMM_FLAGS),
+		     unmap_physical_range(rsdp_phys, PAGE_SIZE))
+		{
+			struct acpi_sdt_header *rsdp = (struct acpi_sdt_header *)rsdp_phys;
+			rsdp_length = rsdp->length;
+		}
 
-		size_t entry_count = (rsdt->length - sizeof(struct acpi_sdt_header)) / sizeof(uint32_t);
-		uint32_t *entries = (uint32_t *)((uint8_t *)rsdt + sizeof(struct acpi_sdt_header));
+		WITH(map_physical_range(rsdp_phys, rsdp_length, NO_CACHE_RW_DEV_VMM_FLAGS),
+		     unmap_physical_range(rsdp_phys, rsdp_length))
+		{
+			struct acpi_sdt_header *rsdp = (struct acpi_sdt_header *)rsdp_phys;
+			allocator_t gpa = get_gpa_allocator();
+			fatptr_t copy_rsdp = gpa.alloc(rsdp_length);
+			memcpy(copy_rsdp.ptr, (uint8_t*)rsdp, rsdp_length);
+			rsdp_header = copy_rsdp.ptr;
+		}
+
+		size_t entry_count = (rsdp_header->length - sizeof(struct acpi_sdt_header)) / sizeof(uint32_t);
+		uint32_t *entries = (uint32_t *)((uint8_t *)rsdp_header + sizeof(struct acpi_sdt_header));
 		for (size_t i = 0; i < entry_count; i++) {
-			struct acpi_sdt_header *hdr = (struct acpi_sdt_header *)(uintptr_t)entries[i];
-			map_physical_range(hdr, PAGE_SIZE,
-					   VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT);
-			if (memcmp(hdr->signature, "APIC", 4) == 0) {
-				map_physical_range(hdr, hdr->length,
-						   VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT);
-				if (parse_madt(hdr))
-					return true;
+			size_t hdr_length = 0;
+			bool is_apic = false;
+			WITH(map_physical_range((void*)entries[i], PAGE_SIZE, NO_CACHE_RW_DEV_VMM_FLAGS),
+			     unmap_physical_range((void*)entries[i], PAGE_SIZE))
+			{
+				struct acpi_sdt_header *hdr = (struct acpi_sdt_header *)entries[i];
+				hdr_length = hdr->length;
+				is_apic = memcmp(hdr->signature, "APIC", 4) == 0;
+			}
+
+			if (is_apic) {
+				WITH(map_physical_range((void*)entries[i], hdr_length, NO_CACHE_RW_DEV_VMM_FLAGS),
+				     unmap_physical_range((void*)entries[i], PAGE_SIZE))
+				{
+					struct acpi_sdt_header *hdr = (struct acpi_sdt_header *)entries[i];
+					if (parse_madt(hdr))
+						return true;
+				}
 			}
 		}
 		break;
