@@ -50,28 +50,31 @@ void phy_memory_test()
 {
 	section_divisor("1. Physical memory allocation test:\nTesting if they will overlap:\n");
 
-	fatptr_t alloc = phy_mem_alloc(4096 * 1);
-	kprintf("Step 1 alloc one block without freeing: %x\n", alloc.ptr);
+	fatptr_t alloc1 = phy_mem_alloc(4096);
+	kprintf("Step 1 alloc one block without freeing: %x\n", alloc1.ptr);
 
-	fatptr_t alloc2 = phy_mem_alloc(4096 * 1);
+	fatptr_t alloc2 = phy_mem_alloc(4096);
 	kprintf("Step 2 alloc one block without freeing: %x\n", alloc2.ptr);
 
-	kprintf("Step 3 are they equal: %s\n", alloc.ptr == alloc2.ptr ? "true" : "false");
+	if(alloc1.ptr == alloc2.ptr)
+		kerror("Physical memory allocator should have used two different block")
+
+	phy_mem_free(alloc2);
+	phy_mem_free(alloc1);
 
 	section_divisor("2. Physical memory allocation test:\nTesting if reuse work:\n");
 
-	fatptr_t alloc3 = phy_mem_alloc(4096 * 1);
+	fatptr_t alloc3 = phy_mem_alloc(4096);
 	kprintf("Step 1 alloc one block then free it: %x\n", alloc3.ptr);
 	phy_mem_free(alloc3);
 
-	fatptr_t alloc4 = phy_mem_alloc(4096 * 1);
+	fatptr_t alloc4 = phy_mem_alloc(4096);
 	kprintf("Step 2 alloc one block then free it: %x\n", alloc4.ptr);
 	phy_mem_free(alloc4);
 
-	kprintf("Step 3 are they equal: %s\n", alloc3.ptr == alloc4.ptr ? "true" : "false");
+	if(alloc3.ptr != alloc4.ptr)
+		kerror("Physical memory allocator should have used the same block")
 
-	phy_mem_free(alloc2);
-	phy_mem_free(alloc);
 }
 
 void gpa_test(allocator_t gpa_alloc){
