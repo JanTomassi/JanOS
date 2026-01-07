@@ -445,7 +445,7 @@ bool mem_remove_tag(malloc_tag_t *tag, struct list_head *list)
 
 static void alloc_phy_mem_tags(void)
 {
-	struct vmm_entry *new_tags_virt = vir_mem_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
+	struct vmm_entry *new_tags_virt = vmm_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
 	size_t new_tags_virt_count = new_tags_virt->size / sizeof(phy_mem_tag_t);
 
 	fatptr_t new_tags_phy = phy_mem_alloc(new_tags_virt->size);
@@ -492,7 +492,7 @@ static void alloc_phy_mem_tags(void)
 
 static void alloc_phy_mem_links(void)
 {
-	struct vmm_entry *new_tags_virt = vir_mem_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
+	struct vmm_entry *new_tags_virt = vmm_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
 	size_t new_tags_virt_count = new_tags_virt->size / sizeof(phy_mem_link_t);
 
 	fatptr_t new_tags_phy = phy_mem_alloc(new_tags_virt->size);
@@ -536,7 +536,7 @@ static void alloc_phy_mem_links(void)
 
 static void alloc_tags(void)
 {
-	struct vmm_entry *new_tags_virt = vir_mem_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
+	struct vmm_entry *new_tags_virt = vmm_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
 	size_t new_tags_virt_count = new_tags_virt->size / sizeof(malloc_tag_t);
 
 	fatptr_t new_tags_phy = phy_mem_alloc(new_tags_virt->size);
@@ -581,7 +581,7 @@ static void alloc_tags(void)
 
 static void init_tags(malloc_tag_t *manager)
 {
-	struct vmm_entry *new_tags_virt = vir_mem_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
+	struct vmm_entry *new_tags_virt = vmm_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
 	size_t new_tags_virt_count = new_tags_virt->size / sizeof(malloc_tag_t);
 
 	fatptr_t new_tags_phy = phy_mem_alloc(new_tags_virt->size);
@@ -617,7 +617,7 @@ static void init_tags(malloc_tag_t *manager)
 
 static void init_phy_mem_links(malloc_tag_t *manager)
 {
-	struct vmm_entry *new_tags_virt = vir_mem_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
+	struct vmm_entry *new_tags_virt = vmm_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
 	size_t new_tags_virt_count = new_tags_virt->size / sizeof(phy_mem_link_t);
 
 	fatptr_t new_tags_phy = phy_mem_alloc(new_tags_virt->size);
@@ -652,7 +652,7 @@ static void init_phy_mem_links(malloc_tag_t *manager)
 
 static void init_phy_mem_tags(malloc_tag_t *manager)
 {
-	struct vmm_entry *new_tags_virt = vir_mem_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
+	struct vmm_entry *new_tags_virt = vmm_alloc(PAGE_SIZE, VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT);
 	size_t new_tags_virt_count = new_tags_virt->size / sizeof(phy_mem_tag_t);
 
 	fatptr_t new_tags_phy = phy_mem_alloc(new_tags_virt->size);

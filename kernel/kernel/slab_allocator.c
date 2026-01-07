@@ -64,7 +64,7 @@ static malloc_tag_t *slab_alloc_pages(size_t req)
 		return nullptr;
 
 	size_t req_align = round_up_to_page(req);
-	struct vmm_entry *vir_mem = vir_mem_alloc(req_align, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
+	struct vmm_entry *vir_mem = vmm_alloc(req_align, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
 	if (vir_mem == nullptr)
 		goto fail_tag;
 
@@ -144,7 +144,7 @@ static void slab_free_pages(malloc_tag_t *tag)
 	bool same_ptr = mem_get_vmm_tag(tag)->ptr == mem_get_ptr_tag(tag);
 
 	if (same_size && same_ptr) {
-		vir_mem_free(mem_get_vmm_tag(tag)->ptr);
+		vmm_free(mem_get_vmm_tag(tag)->ptr);
 	}
 
 	mem_unregister_tag(tag);

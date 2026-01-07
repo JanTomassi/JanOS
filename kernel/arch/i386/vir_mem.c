@@ -2,6 +2,9 @@
 #include <kernel/vir_mem.h>
 #include <kernel/phy_mem.h>
 #include <kernel/display.h>
+#include <kernel/allocator.h>
+#include <stdalign.h>
+#include <stdbool.h>
 #include <string.h>
 #include <list.h>
 
@@ -17,7 +20,7 @@ static void invalidate(void *addr)
 	__asm__ volatile("invlpg (%0)" : : "r"((size_t)addr) : "memory");
 }
 
-void *get_phy_addr(const void *vir_addr)
+void *vmm_phy_addr(const void *vir_addr)
 {
 	size_t pd_idx = (size_t)vir_addr >> 22;
 	size_t pt_idx = (size_t)vir_addr >> 12 & 0x03FF;
@@ -38,7 +41,7 @@ void *get_phy_addr(const void *vir_addr)
 	return (void *)((pt[pt_idx] & VMM_ENTRY_LOCATION_4K_BITS) + ((size_t)vir_addr & 0xFFF));
 }
 
-void *get_vir_addr(const void *phy_addr)
+void *vmm_vir_addr(const void *phy_addr)
 {
 	size_t *pd = (size_t *)page_directory_addr;
 
@@ -275,7 +278,7 @@ static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, c
 				map_pages(&(fatptr_t){ .ptr = (void *)(px[pd_idx] & ~0xfff), .len = PAGE_SIZE }, &tmp_virt);
 			}
 
-			px[pt_idx] = ((size_t)get_phy_addr((void *)virt_addr)) | (cur->flags & 0xFFF);
+			px[pt_idx] = ((size_t)vmm_phy_addr((void *)virt_addr)) | (cur->flags & 0xFFF);
 		}
 	}
 
@@ -300,7 +303,73 @@ static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, c
 
 LIST_HEAD(vmm_free_list);
 LIST_HEAD(vmm_used_list);
-LIST_HEAD(vmm_tags_list);
+
+static slab_cache_t *vmm_entry_cache = nullptr;
+static bool vmm_allocator_initialized = false;
+
+#define EARLY_VMM_ENTRY_CAPACITY (32)
+static uint32_t early_vmm_bitmap = 0;
+static struct vmm_entry early_vmm_entries[EARLY_VMM_ENTRY_CAPACITY * sizeof(struct vmm_entry)] = { 0 };
+
+static bool is_early_vmm_entry(const struct vmm_entry *entry)
+{
+	return entry >= early_vmm_entries && entry < early_vmm_entries + EARLY_VMM_ENTRY_CAPACITY;
+}
+
+static struct vmm_entry *early_vmm_alloc(void){
+	if (vmm_allocator_initialized)
+		kerror("Called early alloc with vmm initialized");
+
+	for (uint16_t bit = 0; bit < EARLY_VMM_ENTRY_CAPACITY; bit++) {
+		uint32_t mask = 1u << bit;
+		if ((early_vmm_bitmap & mask) != 0)
+			continue;
+
+		early_vmm_bitmap |= mask;
+		struct vmm_entry *entry = &early_vmm_entries[bit];
+		*entry = (struct vmm_entry){ 0 };
+		RESET_LIST_ITEM(&entry->list);
+		return entry;
+	}
+
+	return nullptr;
+}
+
+static void early_vmm_free(struct vmm_entry *entry)
+{
+	if (!is_early_vmm_entry(entry)){
+		kerror("Called on a non early entry");
+		return;
+	}
+
+	size_t idx = (size_t)(entry - early_vmm_entries);
+	early_vmm_bitmap &= ~(1u << idx);
+}
+
+static struct vmm_entry *vmm_entry_alloc(void)
+{
+	if (vmm_allocator_initialized) {
+		fatptr_t entry = slab_alloc_obj(vmm_entry_cache);
+		if (entry.ptr == nullptr)
+			return nullptr;
+		return entry.ptr;
+	} else{
+		return early_vmm_alloc();
+	}
+}
+
+static void vmm_entry_free(struct vmm_entry *entry)
+{
+	if (entry == nullptr)
+		return;
+
+	if (vmm_allocator_initialized && !is_early_vmm_entry(entry)) {
+		slab_free_obj(vmm_entry_cache, (fatptr_t){ .ptr = entry, .len = sizeof(*entry) });
+		return;
+	}
+
+	early_vmm_free(entry);
+}
 
 #ifdef DEBUG
 static void debug_vmm_lists(void)
@@ -319,12 +388,6 @@ static void debug_vmm_lists(void)
 		mprint("    %u) ptr: %x | size: %x | flags: %x\n", i++, tag->ptr, tag->size, tag->flags);
 	}
 
-	i = 0;
-	mprint("debug_vmm_list | vmm_tags_list:\n");
-	list_for_each(&vmm_tags_list) {
-		i++;
-	}
-	mprint("    %u unused vmm_tags\n", i);
 }
 
 static void debug_vmm_list(struct list_head *v){
@@ -350,7 +413,7 @@ static struct list_head *vir_mem_find_prev_used_chunk(struct vmm_entry *to_alloc
 	return next_chunk;
 }
 
-struct vmm_entry *vir_mem_alloc(size_t req_size, uint8_t flags)
+struct vmm_entry *vmm_alloc(size_t req_size, uint8_t flags)
 {
 	if (req_size > 0 && req_size & 0xfff)
 		BUG("Virtual Memory allocation must be page aligned: %d", req_size & 0xfff);
@@ -368,7 +431,12 @@ struct vmm_entry *vir_mem_alloc(size_t req_size, uint8_t flags)
 		}
 	}
 
-	struct vmm_entry *tag = list_entry(list_pop(&vmm_tags_list), struct vmm_entry, list);
+	if (free_chunk == nullptr)
+		return nullptr;
+
+	struct vmm_entry *tag = vmm_entry_alloc();
+	if (tag == nullptr)
+		return nullptr;
 
 	*tag = (struct vmm_entry){
 		.ptr = free_chunk->ptr,
@@ -403,20 +471,22 @@ static struct vmm_entry *vir_mem_find_prev_free_chunk(struct vmm_entry *to_free)
 
 static void vir_mem_free_coalesce(struct vmm_entry *mid)
 {
-	struct vmm_entry *prev = list_entry(mid->list.prev, struct vmm_entry, list);
-	struct vmm_entry *next = list_entry(mid->list.next, struct vmm_entry, list);
+	struct vmm_entry *prev = list_is_first(&mid->list, &vmm_free_list) ? nullptr : list_entry(mid->list.prev, struct vmm_entry, list);
+	struct vmm_entry *next = list_is_last(&mid->list, &vmm_free_list) ? nullptr : list_entry(mid->list.next, struct vmm_entry, list);
 
-	if (mid->ptr + mid->size == next->ptr) {
+	if (next != nullptr && mid->ptr + mid->size == next->ptr) {
 		mid->size += next->size;
 		list_rm(&next->list);
+		vmm_entry_free(next);
 	}
-	if (prev->ptr + prev->size == mid->ptr) {
+	if (prev != nullptr && prev->ptr + prev->size == mid->ptr) {
 		prev->size += mid->size;
 		list_rm(&mid->list);
+		vmm_entry_free(mid);
 	}
 }
 
-void vir_mem_free(const void *ptr)
+void vmm_free(const void *ptr)
 {
 	list_for_each(&vmm_used_list) {
 		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
@@ -438,58 +508,96 @@ void vir_mem_free(const void *ptr)
 #endif
 }
 
-static struct vmm_entry init_find_free_chunk(struct list_head *vmm_init_list)
+static void migrate_tags_to_slab(void)
 {
-	struct vmm_entry *free_block = nullptr;
-	list_for_each(vmm_init_list) {
+	if (vmm_allocator_initialized)
+		return;
+
+	if (vmm_entry_cache == nullptr)
+		vmm_entry_cache = slab_create("vmm_entry", sizeof(struct vmm_entry), alignof(struct vmm_entry), nullptr, nullptr);
+
+	if (vmm_entry_cache == nullptr)
+		panic("Failed to create slab cache for vmm entries\n");
+
+	fatptr_t tag_s = slab_alloc_obj(vmm_entry_cache);
+
+	vmm_allocator_initialized = true;
+
+	LIST_HEAD(migrated_free);
+	LIST_HEAD(migrated_used);
+
+	for (struct list_head *it = vmm_free_list.next; it != &vmm_free_list; ) {
 		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
-		if (cur->size >= PAGE_SIZE) {
-			free_block = cur;
-			break;
+		it = it->next;
+		list_rm(&cur->list);
+
+		if (is_early_vmm_entry(cur)) {
+			struct vmm_entry *replacement = vmm_entry_alloc();
+			if (replacement == nullptr)
+				panic("Failed to migrate vmm entry to slab allocator\n");
+
+			*replacement = *cur;
+			RESET_LIST_ITEM(&replacement->list);
+			list_add(&replacement->list, &migrated_free);
+			early_vmm_free(cur);
+		} else {
+			list_add(&cur->list, &migrated_free);
 		}
 	}
 
-	struct vmm_entry tag = (struct vmm_entry){
-		.ptr = free_block->ptr,
-		.size = PAGE_SIZE,
-		.flags = VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT,
-	};
-	RESET_LIST_ITEM(&tag.list);
+	for (struct list_head *it = vmm_used_list.next; it != &vmm_used_list; ) {
+		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
+		it = it->next;
+		list_rm(&cur->list);
 
-	free_block->ptr += PAGE_SIZE;
-	free_block->size -= PAGE_SIZE;
+		if (is_early_vmm_entry(cur)) {
+			struct vmm_entry *replacement = vmm_entry_alloc();
+			if (replacement == nullptr)
+				panic("Failed to migrate vmm entry to slab allocator\n");
 
-	return tag;
+			*replacement = *cur;
+			RESET_LIST_ITEM(&replacement->list);
+			list_add(&replacement->list, &migrated_used);
+			early_vmm_free(cur);
+		} else {
+			list_add(&cur->list, &migrated_used);
+		}
+	}
+
+	slab_free_obj(vmm_entry_cache, tag_s);
+
+	RESET_LIST_ITEM(&vmm_free_list);
+	RESET_LIST_ITEM(&vmm_used_list);
+
+	struct list_head *it = &migrated_free;
+	struct list_head *next = migrated_free.next;
+	while(it != next) {
+		list_mv(it, vmm_free_list.prev);
+		it = next;
+		next = next->next;
+	}
+
+	it = &migrated_used;
+	next = migrated_used.next;
+	while(it != next) {
+		list_mv(it, vmm_used_list.prev);
+		it = next;
+		next = next->next;
+	}
 }
 
 static void init_vir_manager(struct list_head *vmm_init_list)
 {
-	struct vmm_entry tags_chunk = init_find_free_chunk(vmm_init_list);
-
-	fatptr_t phy_tag_mem = phy_mem_alloc(PAGE_SIZE);
-	map_pages(&phy_tag_mem, &tags_chunk);
-
-	for (size_t i = 0; i < tags_chunk.size / sizeof(struct vmm_entry); i++) {
-		struct vmm_entry new_tag = { nullptr };
-		((struct vmm_entry *)tags_chunk.ptr)[i] = new_tag;
-
-		list_add(&((struct vmm_entry *)tags_chunk.ptr)[i].list, vmm_tags_list.prev);
-	}
-
-	// Get one unused tag
-	struct vmm_entry *tag = list_entry(list_pop(&vmm_tags_list), struct vmm_entry, list);
-
-	// Copy the info about the tag chunk
-	*tag = tags_chunk;
-	RESET_LIST_ITEM(&tag->list);
-
-	list_add(&tag->list, &vmm_used_list);
+	RESET_LIST_ITEM(&vmm_free_list);
+	RESET_LIST_ITEM(&vmm_used_list);
 
 	// Add all the virtual memory mapping to the kmalloc known block
 	list_for_each(vmm_init_list) {
 		struct vmm_entry *vmm_cur = list_entry(it, struct vmm_entry, list);
 
-		struct vmm_entry *vmm_tag = list_entry(list_pop(&vmm_tags_list), struct vmm_entry, list);
+		struct vmm_entry *vmm_tag = vmm_entry_alloc();
+		if (vmm_tag == nullptr)
+			panic("Failed to allocate vmm entry from early pool during init\n");
 
 		*vmm_tag = *vmm_cur;
 
@@ -497,12 +605,12 @@ static void init_vir_manager(struct list_head *vmm_init_list)
 	}
 }
 
-void init_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm_entry *preserved_entries, size_t preserved_entry_count)
+void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm_entry *preserved_entries, size_t preserved_entry_count)
 {
 	struct vmm_entry init_vmm_entry[16 * sizeof(struct vmm_entry)] = { 0 };
 	const size_t init_vmm_capacity = sizeof(init_vmm_entry) / sizeof(init_vmm_entry[0]);
 	size_t init_vmm_entris_used = 0;
-	LIST_HEAD(vmm_free_list);
+	LIST_HEAD(init_vmm_free_list);
 
 	struct vmm_entry init_entry = {
 		.ptr = (void *)&HIGHER_HALF,
@@ -512,7 +620,7 @@ void init_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, const struct
 	RESET_LIST_ITEM(&init_entry.list);
 
 	init_vmm_entry[init_vmm_entris_used] = init_entry;
-	list_add(&init_entry.list, &vmm_free_list);
+	list_add(&init_entry.list, &init_vmm_free_list);
 	init_vmm_entris_used++;
 
 	const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)elf_tag->sections;
@@ -530,7 +638,7 @@ void init_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, const struct
 			continue;
 		}
 
-		list_for_each(&vmm_free_list) {
+		list_for_each(&init_vmm_free_list) {
 			struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
 
 			/*
@@ -587,7 +695,7 @@ void init_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, const struct
 		uintptr_t range_s = (uintptr_t)preserved_entries[i].ptr;
 		uintptr_t range_e = (uintptr_t)preserved_entries[i].ptr + preserved_entries[i].size;
 
-		list_for_each(&vmm_free_list) {
+		list_for_each(&init_vmm_free_list) {
 			struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
 
 			uintptr_t cur_s = (uintptr_t)cur->ptr;
@@ -627,5 +735,10 @@ void init_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, const struct
 	}
 
 	recreate_vir_mem(elf_tag, preserved_entries, preserved_entry_count);
-	init_vir_manager(&vmm_free_list);
+	init_vir_manager(&init_vmm_free_list);
+}
+
+void vmm_finish_init(void)
+{
+	migrate_tags_to_slab();
 }

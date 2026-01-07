@@ -289,12 +289,13 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 		preserved_entries[preserved_entry_count++] = mbi_virt;
 
 	section_divisor("Virtual memory init:\n");
-	init_vir_mem(mbi_info.elf_sec_tag, preserved_entries, preserved_entry_count);
+	vmm_init(mbi_info.elf_sec_tag, preserved_entries, preserved_entry_count);
 
 	section_divisor("Init kernel memory allocator:\n");
 
 	init_kmalloc();
 	init_slab_allocator();
+	vmm_finish_init();
 
 	allocator_t gpa_alloc = get_gpa_allocator();
 	gpa_test(gpa_alloc);

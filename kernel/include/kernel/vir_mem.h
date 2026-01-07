@@ -56,14 +56,15 @@ struct vmm_entry {
 	struct list_head list;
 };
 
-void *get_phy_addr(const void *vir_addr);
-void *get_vir_addr(const void *phy_addr);
+void *vmm_phy_addr(const void *vir_addr);
+void *vmm_vir_addr(const void *phy_addr);
 
-void init_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm_entry *preserved_entries, size_t preserved_entry_count);
+void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm_entry *preserved_entries, size_t preserved_entry_count);
+void vmm_finish_init(void);
 void map_pages(const fatptr_t *physaddr, const struct vmm_entry *virt_mem);
 void map_page(const void *phy_addr, const void *virt_addr, const uint16_t virt_flags);
 void unmap_page(const void* phy_mem, const void *virt_addr);
 void unmap_pages(const fatptr_t *phy_mem, const struct vmm_entry *virt_mem);
 
-struct vmm_entry *vir_mem_alloc(size_t req_size, uint8_t flags);
-void vir_mem_free(const void *ptr);
+struct vmm_entry *vmm_alloc(size_t req_size, uint8_t flags);
+void vmm_free(const void *ptr);

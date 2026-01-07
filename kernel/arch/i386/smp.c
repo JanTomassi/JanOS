@@ -305,7 +305,7 @@ static void setup_ap_trampoline(void)
 	if (phys.ptr == nullptr)
 		panic("Failed to allocate physical memory for AP trampoline\n");
 
-	ap_trampoline_virt = vir_mem_alloc(trampoline_pages, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
+	ap_trampoline_virt = vmm_alloc(trampoline_pages, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
 	if (ap_trampoline_virt == nullptr)
 		panic("Failed to allocate virtual memory for AP trampoline\n");
 
