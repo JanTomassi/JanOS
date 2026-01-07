@@ -5,6 +5,9 @@
 #include <kernel/interrupt.h>
 #include <kernel/tty.h>
 
+#include "irq.h"
+#include "ps2.h"
+
 struct active_mod_key {
 	bool caplock : 1;
 	bool left_alt : 1;
@@ -34,8 +37,10 @@ struct key_event {
 static void update_mod_key(struct key_event event);
 static struct key_event scan_code1_to_key_event(uint8_t scan_code);
 
-DEFINE_IRQ(33)
+static void ps2_irq_handler(uint8_t irq_line, void *context)
 {
+	(void)irq_line;
+	(void)context;
 	uint8_t scan_code;
 
 	__asm__("mov    $0,    %0;"   /* zeroing scan_code */
@@ -55,6 +60,11 @@ DEFINE_IRQ(33)
 		kprintf(" ");
 	else if (event.key_code == KEY_CODE_ENTER)
 		kprintf("\n");
+}
+
+void ps2_init(void)
+{
+	irq_register_handler(1, ps2_irq_handler, nullptr);
 }
 
 static void update_mod_key(struct key_event event)
