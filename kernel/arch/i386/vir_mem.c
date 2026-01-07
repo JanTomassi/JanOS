@@ -569,20 +569,17 @@ static void migrate_tags_to_slab(void)
 	RESET_LIST_ITEM(&vmm_free_list);
 	RESET_LIST_ITEM(&vmm_used_list);
 
-	struct list_head *it = &migrated_free;
-	struct list_head *next = migrated_free.next;
-	while(it != next) {
+	struct list_head *it = migrated_free.next;
+	while(&migrated_free != it) {
+		struct vmm_entry *tmp = list_entry(it, struct vmm_entry, list);
 		list_mv(it, vmm_free_list.prev);
-		it = next;
-		next = next->next;
+		it = migrated_free.next;
 	}
 
-	it = &migrated_used;
-	next = migrated_used.next;
-	while(it != next) {
+	it = migrated_used.next;
+	while(&migrated_used != it) {
 		list_mv(it, vmm_used_list.prev);
-		it = next;
-		next = next->next;
+		it = migrated_used.next;
 	}
 }
 
@@ -741,4 +738,7 @@ void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm
 void vmm_finish_init(void)
 {
 	migrate_tags_to_slab();
+#ifdef DEBUG
+	debug_vmm_lists();
+#endif
 }
