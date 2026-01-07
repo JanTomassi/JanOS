@@ -188,7 +188,7 @@ static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, c
 	size_t required_entries = preserved_entry_count;
 
 	for (size_t i = 0; i < elf_tag->num; i++) {
-		if ((elf_sec[i].sh_flags & 0x2) == 0 || elf_sec[i].sh_addr < &HIGHER_HALF)
+		if ((elf_sec[i].sh_flags & ELF_SHF_ALLOC) == 0 || elf_sec[i].sh_addr < &HIGHER_HALF)
 			continue;
 
 		required_entries++;
@@ -198,7 +198,7 @@ static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, c
 		panic("Not enough space to register kernel sections and preserved ranges\n");
 
 	for (size_t i = 0; i < elf_tag->num; i++) {
-		if ((elf_sec[i].sh_flags & 0x2) == 0) {
+		if ((elf_sec[i].sh_flags & ELF_SHF_ALLOC) == 0) {
 #ifdef DEBUG
 			mprint("Section (%s) dosn't allocate memory at runtime\n", &elf_sec_str[elf_sec[i].sh_name]);
 #endif
@@ -218,7 +218,7 @@ static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, c
 		struct vmm_entry entry = {
 			.ptr = (void *)elf_s,
 			.size = elf_e - elf_s,
-			.flags = (elf_sec[i].sh_flags & 0x1) * VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT,
+			.flags = (elf_sec[i].sh_flags & ELF_SHF_WRITE) * VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT,
 		};
 		RESET_LIST_ITEM(&entry.list);
 
@@ -602,6 +602,50 @@ static void init_vir_manager(struct list_head *vmm_init_list)
 	}
 }
 
+static void vmm_init_used_range(void *ptr, size_t size, uint8_t flags)
+{
+	if (size == 0)
+		return;
+
+	struct vmm_entry *tag = vmm_entry_alloc();
+	if (tag == nullptr)
+		panic("Failed to allocate vmm used entry during init\n");
+
+	*tag = (struct vmm_entry){
+		.ptr = ptr,
+		.size = size,
+		.flags = flags,
+	};
+
+	list_add(&tag->list, vir_mem_find_prev_used_chunk(tag)->prev);
+}
+
+static void vmm_init_used_list(const struct multiboot_tag_elf_sections *elf_tag,
+			       const struct vmm_entry *preserved_entries,
+			       size_t preserved_entry_count)
+{
+	if (elf_tag == nullptr)
+		return;
+
+	const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)elf_tag->sections;
+
+	for (size_t i = 0; i < elf_tag->num; i++) {
+		if ((elf_sec[i].sh_flags & ELF_SHF_ALLOC) == 0 || elf_sec[i].sh_addr < &HIGHER_HALF)
+			continue;
+
+		size_t elf_s = elf_sec[i].sh_addr;
+		size_t elf_e = round_up_to_page(elf_sec[i].sh_addr + elf_sec[i].sh_size);
+		uint8_t flags = (elf_sec[i].sh_flags & ELF_SHF_WRITE) * VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT;
+
+		vmm_init_used_range((void *)elf_s, elf_e - elf_s, flags);
+	}
+
+	for (size_t i = 0; i < preserved_entry_count; i++) {
+		struct vmm_entry entry = preserved_entries[i];
+		vmm_init_used_range(entry.ptr, entry.size, entry.flags);
+	}
+}
+
 void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm_entry *preserved_entries, size_t preserved_entry_count)
 {
 	struct vmm_entry init_vmm_entry[16 * sizeof(struct vmm_entry)] = { 0 };
@@ -628,7 +672,7 @@ void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm
 		       elf_sec[i].sh_type, elf_sec[i].sh_flags);
 #endif
 
-		if ((elf_sec[i].sh_flags & 0x2) == 0) {
+		if ((elf_sec[i].sh_flags & ELF_SHF_ALLOC) == 0) {
 #ifdef DEBUG
 			mprint("Section (%s) dosn't allocate memory at runtime\n", &elf_sec_str[elf_sec[i].sh_name]);
 #endif
@@ -735,9 +779,10 @@ void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm
 	init_vir_manager(&init_vmm_free_list);
 }
 
-void vmm_finish_init(void)
+void vmm_finish_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm_entry *preserved_entries, size_t preserved_entry_count)
 {
 	migrate_tags_to_slab();
+	vmm_init_used_list(elf_tag, preserved_entries, preserved_entry_count);
 #ifdef DEBUG
 	debug_vmm_lists();
 #endif
