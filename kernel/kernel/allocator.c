@@ -20,7 +20,7 @@ static void gpa_populate_tag_pages(malloc_tag_t *tag, size_t alloc_size, size_t 
 	 * Expect alloc_size to be page aligned and tag to be freshly allocated.
 	 * used_size represents the logical consumption within the mapped region.
 	 */
-	struct vmm_entry *vir_mem = vir_mem_alloc(alloc_size, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
+	struct vmm_entry *vir_mem = vmm_alloc(alloc_size, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
 
 	mem_set_ptr_tag(tag, vir_mem->ptr);
 	mem_set_size_tag(tag, vir_mem->size);
@@ -220,7 +220,7 @@ void mem_gpa_free(fatptr_t freeing)
 	bool same_ptr = mem_get_vmm_tag(tag_to_free)->ptr == mem_get_ptr_tag(tag_to_free);
 
 	if (same_size && same_ptr) {
-		vir_mem_free(mem_get_vmm_tag(tag_to_free)->ptr);
+		vmm_free(mem_get_vmm_tag(tag_to_free)->ptr);
 	}
 
 	mem_unregister_tag(tag_to_free);

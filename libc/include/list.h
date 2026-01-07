@@ -31,6 +31,18 @@ static inline void list_add(struct list_head *new, struct list_head *head)
 	(new)->next = next;
 }
 
+static inline void list_mv(struct list_head *entry, struct list_head *head){
+	// Separate entry from previus list
+	entry->next->prev = entry->prev;
+	entry->prev->next = entry->next;
+
+	// Set new entry between head and head.next
+	entry->prev = head;
+	entry->next = head->next;
+	head->next->prev = entry;
+	head->next = entry;
+}
+
 static inline void list_rm(struct list_head *head)
 {
 	struct list_head *prev = (head)->prev;
