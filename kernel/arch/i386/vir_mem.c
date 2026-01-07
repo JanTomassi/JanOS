@@ -492,13 +492,8 @@ void vmm_free(const void *ptr)
 		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
 
 		if (cur->ptr == ptr) {
-			struct vmm_entry *prev_chunk = vir_mem_find_prev_free_chunk(cur);
-
-			list_rm(&cur->list);
-			list_add(&cur->list, &prev_chunk->list);
-
+			list_mv(&cur->list, &vir_mem_find_prev_free_chunk(cur)->list);
 			vir_mem_free_coalesce(cur);
-
 			break;
 		}
 	}
