@@ -45,10 +45,8 @@ static inline void list_mv(struct list_head *entry, struct list_head *head){
 
 static inline void list_rm(struct list_head *head)
 {
-	struct list_head *prev = (head)->prev;
-	struct list_head *next = (head)->next;
-	next->prev = prev;
-	prev->next = next;
+	head->prev->next = head->next;
+	head->next->prev = head->prev;
 }
 
 static inline bool list_is_first(struct list_head *ptr, struct list_head *head)
