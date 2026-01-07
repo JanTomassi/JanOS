@@ -42,7 +42,10 @@ alignment issues.
 
 ** Build
 *** Tools
-This tools are need to compile the building environment
+This tools are needed to compile the build environment. ~nasm~ is
+required for assembling the low-level stubs. The cross toolchain
+(~i686-elf-gcc~, ~i686-elf-ld~, etc.) is built by running
+~tools/get_tools.sh~, which installs into ~tools/build/bin~.
 
 - bash
 - make
@@ -51,12 +54,12 @@ This tools are need to compile the building environment
 - tar
 - xz
 
-Enter in the directory tools and execute the bash script get-tools.sh
+Enter in the directory tools and execute the bash script ~get_tools.sh~
 #+begin_src bash
-  cd tools && ./get-tools.sh
+  cd tools && ./get_tools.sh
 #+end_src
-this will download and compile or the tools needed for development
-except for nams
+this will download and compile the tools needed for development except
+for ~nasm~, which should be installed separately.
 
 *** Project
 Running the build.sh script should be enough to build the kernel elf
