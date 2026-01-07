@@ -20,6 +20,16 @@ static void invalidate(void *addr)
 	__asm__ volatile("invlpg (%0)" : : "r"((size_t)addr) : "memory");
 }
 
+uintptr_t round_up_to_page(uintptr_t x)
+{
+	return (x) + (-(x) % PAGE_SIZE);
+}
+uintptr_t round_down_to_page(uintptr_t x)
+{
+	return (x - 0xfff) + (-( x - 0xfff) % 0x1000);
+}
+
+
 void *vmm_phy_addr(const void *vir_addr)
 {
 	size_t pd_idx = (size_t)vir_addr >> 22;

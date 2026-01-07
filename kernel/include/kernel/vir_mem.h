@@ -25,14 +25,8 @@
 #define VMM_ENTRY_LOCATION_4M_HIGHT_BITS (0xff << 13)
 
 #define PAGE_SIZE (4096)
-static uintptr_t round_up_to_page(uintptr_t x)
-{
-	return (x) + (-(x) % PAGE_SIZE);
-}
-static uintptr_t round_down_to_page(uintptr_t x)
-{
-	return (x - 0xfff) + (-( x - 0xfff) % 0x1000);
-}
+uintptr_t round_up_to_page(uintptr_t x);
+uintptr_t round_down_to_page(uintptr_t x);
 
 extern uint32_t initial_page_dir[1024];
 
