@@ -14,7 +14,9 @@ static malloc_tag_t *gpa_allocs = nullptr;
 
 MODULE("Allocator");
 
-static void gpa_populate_tag_pages(malloc_tag_t *tag, size_t alloc_size, size_t used_size)
+// Map physical pages for a newly allocated tag and initialize its phy chain.
+// Assumes alloc_size is page-aligned and tag has no existing mappings.
+static void gpa_map_tag_pages(malloc_tag_t *tag, size_t alloc_size, size_t used_size)
 {
 	/*
 	 * Expect alloc_size to be page aligned and tag to be freshly allocated.
@@ -48,14 +50,18 @@ static void gpa_populate_tag_pages(malloc_tag_t *tag, size_t alloc_size, size_t 
 	}
 }
 
-static void gpa_make_new_space(malloc_tag_t *tag, size_t req)
+// Allocate and map a fresh region for the requested size.
+// Assumes req is a non-zero allocation size.
+static void gpa_alloc_new_region(malloc_tag_t *tag, size_t req)
 {
 	size_t req_align = round_up_to_page(req);
 
-	gpa_populate_tag_pages(tag, req_align, req);
+	gpa_map_tag_pages(tag, req_align, req);
 }
 
-static malloc_tag_t *gpa_use_space(malloc_tag_t *tag, size_t req)
+// Split an existing tag region to satisfy a new allocation.
+// Assumes tag has enough free space for req.
+static malloc_tag_t *gpa_split_tag_region(malloc_tag_t *tag, size_t req)
 {
 	malloc_tag_t *mem = mem_get_tag();
 	void *mem_ptr = mem_get_ptr_tag(tag) + mem_get_used_tag(tag);
@@ -96,12 +102,16 @@ static malloc_tag_t *gpa_use_space(malloc_tag_t *tag, size_t req)
 	return mem;
 }
 
-static void gpa_init(malloc_tag_t *mem)
+// Initialize a GPA allocation tracking page.
+// Assumes mem is a fresh tag and PAGE_SIZE is the tracking page size.
+static void gpa_init_alloc_table(malloc_tag_t *mem)
 {
-	gpa_populate_tag_pages(mem, PAGE_SIZE, PAGE_SIZE);
+	gpa_map_tag_pages(mem, PAGE_SIZE, PAGE_SIZE);
 }
 
-static void gpa_set_alloc(malloc_tag_t *ptr, const malloc_tag_t *loc)
+// Record an allocation in the chained allocation table.
+// Assumes loc points at the head tracking page.
+static void gpa_record_alloc(malloc_tag_t *ptr, const malloc_tag_t *loc)
 {
 	const size_t num_elm = PAGE_SIZE / sizeof(malloc_tag_t *);
 	const size_t next_idx = num_elm - 1;
@@ -120,7 +130,7 @@ static void gpa_set_alloc(malloc_tag_t *ptr, const malloc_tag_t *loc)
 		malloc_tag_t *next_page = array_ptr[next_idx];
 		if (next_page == nullptr) {
 			next_page = mem_get_tag();
-			gpa_init(next_page);
+			gpa_init_alloc_table(next_page);
 			mem_register_tag(next_page);
 			array_ptr[next_idx] = next_page;
 		}
@@ -129,7 +139,9 @@ static void gpa_set_alloc(malloc_tag_t *ptr, const malloc_tag_t *loc)
 	}
 }
 
-static malloc_tag_t **gpa_get_alloc(void *ptr, const malloc_tag_t *loc)
+// Lookup an allocation entry for a given virtual pointer.
+// Assumes loc points at the head tracking page.
+static malloc_tag_t **gpa_lookup_alloc(void *ptr, const malloc_tag_t *loc)
 {
 	const size_t num_elm = PAGE_SIZE / sizeof(malloc_tag_t *);
 	const size_t next_idx = num_elm - 1;
@@ -154,7 +166,7 @@ fatptr_t mem_gpa_alloc(size_t req)
 	if (!gpa_initialized) {
 		gpa_initialized = true;
 		gpa_allocs = mem_get_tag();
-		gpa_init(gpa_allocs);
+		gpa_init_alloc_table(gpa_allocs);
 		mem_register_tag(gpa_allocs);
 	}
 
@@ -162,14 +174,14 @@ fatptr_t mem_gpa_alloc(size_t req)
 
 	if (mem == nullptr) {
 		mem = mem_get_tag();
-		gpa_make_new_space(mem, req);
+		gpa_alloc_new_region(mem, req);
 		mem_register_tag(mem);
 	} else {
-		mem = gpa_use_space(mem, req);
+		mem = gpa_split_tag_region(mem, req);
 		mem_register_tag(mem);
 	}
 
-	gpa_set_alloc(mem, gpa_allocs);
+	gpa_record_alloc(mem, gpa_allocs);
 
 #ifdef DEBUG
 	mem_debug_lists();
@@ -183,7 +195,7 @@ fatptr_t mem_gpa_alloc(size_t req)
 
 void mem_gpa_free(fatptr_t freeing)
 {
-	malloc_tag_t **tag = gpa_get_alloc(freeing.ptr, gpa_allocs);
+	malloc_tag_t **tag = gpa_lookup_alloc(freeing.ptr, gpa_allocs);
 	malloc_tag_t *tag_to_free = mem_coalesce_tag(*tag);
 	void *tag_ptr = mem_get_ptr_tag(tag_to_free);
 

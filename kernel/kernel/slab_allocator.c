@@ -40,6 +40,7 @@ struct slab_cache {
 	size_t objs_per_slab;
 	slab_ctor_t ctor;
 	slab_dtor_t dtor;
+	bool release_empty;
 
 	struct list_head partial;
 	struct list_head full;
@@ -49,8 +50,19 @@ struct slab_cache {
 
 static struct list_head slab_caches = { .next = &slab_caches, .prev = &slab_caches };
 static bool slab_initialized = false;
+static bool tag_caches_ready = false;
+
+static slab_cache_t malloc_tag_cache = { 0 };
+static slab_cache_t phy_mem_tag_cache = { 0 };
+static slab_cache_t phy_mem_link_cache = { 0 };
+
+static struct slab malloc_tag_slab = { 0 };
+static struct slab phy_mem_tag_slab = { 0 };
+static struct slab phy_mem_link_slab = { 0 };
 
 static void slab_free_pages(malloc_tag_t *tag);
+static void slab_init_bootstrap_cache(slab_cache_t *cache, struct slab *slab, const char *name, size_t obj_size, size_t align,
+				      void *buffer, size_t obj_count, bool release_empty);
 
 static size_t align_up(size_t val, size_t align)
 {
@@ -191,6 +203,9 @@ static void slab_release_slab(struct slab *slab)
 	if (slab == nullptr)
 		return;
 
+	if (slab->tag == nullptr)
+		return;
+
 	if (slab->list.next != nullptr && slab->list.prev != nullptr)
 		list_rm(&slab->list);
 	slab_free_pages(slab->tag);
@@ -301,6 +316,7 @@ slab_cache_t *slab_create(const char *name, size_t obj_size, size_t align, slab_
 	cache->objs_per_slab = objs_per_slab;
 	cache->ctor = ctor;
 	cache->dtor = dtor;
+	cache->release_empty = true;
 
 	RESET_LIST_ITEM(&cache->partial);
 	RESET_LIST_ITEM(&cache->full);
@@ -379,7 +395,8 @@ bool slab_free_obj(slab_cache_t *cache, fatptr_t obj)
 
 	if (slab->in_use == 0) {
 		slab_move_to_list(slab, &cache->empty);
-		slab_release_slab(slab);
+		if (cache->release_empty)
+			slab_release_slab(slab);
 		return true;
 	}
 
@@ -418,6 +435,88 @@ void init_slab_allocator(void)
 		return;
 
 	ensure_initialized();
+}
+
+static void slab_init_bootstrap_cache(slab_cache_t *cache, struct slab *slab, const char *name, size_t obj_size, size_t align,
+				      void *buffer, size_t obj_count, bool release_empty)
+{
+	size_t real_align = align == 0 ? sizeof(void *) : align;
+	if (real_align < sizeof(void *))
+		real_align = sizeof(void *);
+
+	size_t aligned_size = align_up(obj_size, real_align);
+	if (aligned_size < sizeof(struct slab_object))
+		aligned_size = sizeof(struct slab_object);
+
+	cache->name = name;
+	cache->obj_size = aligned_size;
+	cache->align = real_align;
+	cache->objs_per_slab = obj_count;
+	cache->ctor = nullptr;
+	cache->dtor = nullptr;
+	cache->release_empty = release_empty;
+
+	RESET_LIST_ITEM(&cache->partial);
+	RESET_LIST_ITEM(&cache->full);
+	RESET_LIST_ITEM(&cache->empty);
+	RESET_LIST_ITEM(&cache->list);
+
+	slab->mem = buffer;
+	slab->len = aligned_size * obj_count;
+	slab->in_use = 0;
+	slab->capacity = obj_count;
+	slab->free_list = nullptr;
+	slab->tag = nullptr;
+	slab->cache = cache;
+	RESET_LIST_ITEM(&slab->list);
+
+	uint8_t *walker = slab->mem;
+	for (size_t i = 0; i < obj_count; i++) {
+		struct slab_object *obj = (struct slab_object *)(walker + (i * aligned_size));
+		obj->next = slab->free_list;
+		slab->free_list = obj;
+	}
+
+	list_add(&slab->list, &cache->empty);
+}
+
+void slab_init_tag_caches(mem_malloc_tag_t *malloc_tags, size_t malloc_tag_count, mem_phy_mem_tag_t *phy_tags, size_t phy_tag_count,
+			  mem_phy_mem_link_t *phy_links, size_t phy_link_count)
+{
+	if (tag_caches_ready)
+		return;
+
+	if (malloc_tags == nullptr || phy_tags == nullptr || phy_links == nullptr)
+		BUG("tag slab buffers must not be null");
+
+	if (malloc_tag_count == 0 || phy_tag_count == 0 || phy_link_count == 0)
+		BUG("tag slab buffers must not be empty");
+
+	slab_initialized = true;
+
+	slab_init_bootstrap_cache(&malloc_tag_cache, &malloc_tag_slab, "malloc_tag", sizeof(malloc_tag_t), _Alignof(malloc_tag_t), malloc_tags,
+				  malloc_tag_count, false);
+	slab_init_bootstrap_cache(&phy_mem_tag_cache, &phy_mem_tag_slab, "phy_mem_tag", sizeof(phy_mem_tag_t), _Alignof(phy_mem_tag_t), phy_tags,
+				  phy_tag_count, false);
+	slab_init_bootstrap_cache(&phy_mem_link_cache, &phy_mem_link_slab, "phy_mem_link", sizeof(mem_phy_mem_link_t), _Alignof(mem_phy_mem_link_t),
+				  phy_links, phy_link_count, false);
+
+	tag_caches_ready = true;
+}
+
+slab_cache_t *slab_get_malloc_tag_cache(void)
+{
+	return tag_caches_ready ? &malloc_tag_cache : nullptr;
+}
+
+slab_cache_t *slab_get_phy_mem_tag_cache(void)
+{
+	return tag_caches_ready ? &phy_mem_tag_cache : nullptr;
+}
+
+slab_cache_t *slab_get_phy_mem_link_cache(void)
+{
+	return tag_caches_ready ? &phy_mem_link_cache : nullptr;
 }
 
 static fatptr_t slab_general_alloc(size_t req)
