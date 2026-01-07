@@ -1,3 +1,5 @@
+#include <stdbool.h>
+
 #include "ahci.h"
 
 #include <kernel/display.h>
@@ -52,6 +54,8 @@ static struct {
 	struct ahci_port_state ports[AHCI_MAX_PORTS];
 	uint8_t irq_line;
 } ahci_state;
+
+bool is_ahci_probed = false;
 
 static void ahci_port_stop(volatile struct hba_port *port)
 {
@@ -166,6 +170,9 @@ bool ahci_probe(void)
 
 void ahci_init(void)
 {
+	if (!is_ahci_probed)
+		ahci_probe();
+
 	if (!ahci_state.present)
 		return;
 
