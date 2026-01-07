@@ -10,6 +10,7 @@
 #include <kernel/allocator.h>
 
 #include <kernel/interrupt.h>
+#include <kernel/storage.h>
 
 #include <string.h>
 #include "../arch/i386/ata_pio.h"
@@ -18,6 +19,8 @@
 #include "../arch/i386/ioapic.h"
 #include "../arch/i386/lapic.h"
 #include "../arch/i386/pic.h"
+#include "../arch/i386/ps2.h"
+#include "../arch/i386/irq.h"
 #include "../arch/i386/smp.h"
 #include "../arch/i386/port.h"
 
@@ -26,8 +29,10 @@ extern void init_kmalloc(void);
 extern void *HIGHER_HALF;
 
 size_t GLOBAL_TICK = 0;
-DEFINE_IRQ(34)
+static void pit_tick_handler(uint8_t irq_line, void *context)
 {
+	(void)irq_line;
+	(void)context;
 	++GLOBAL_TICK;
 }
 
@@ -321,18 +326,23 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 		pic_disable();
 	}
 
+	irq_register_handler(0, pit_tick_handler, nullptr);
+	ps2_init();
+
+	storage_init();
+	__asm__ volatile("sti");       // set the interrupt flag
+
 	section_divisor("ATA PIO Test drives:\n");
-	kprintf("    - hda: %s type \n", ata_pio_debug_devtype(ata_pio_detect_devtype(0)));
-	kprintf("    - hdb: %s type\n", ata_pio_debug_devtype(ata_pio_detect_devtype(0)));
+	kprintf("    - hda: %s type \n", ata_pio_debug_devtype(ata_pio_detect_devtype(0, 0)));
+	kprintf("    - hdb: %s type\n", ata_pio_debug_devtype(ata_pio_detect_devtype(0, 1)));
 
 	kprintf("Content of hdb\n\n");
 	fatptr_t hdb_t = gpa_alloc.alloc(513);
 	char *hdb_v = hdb_t.ptr;
 	memset(hdb_v, 0, 513);
 	for (size_t i = 0; i < (430 * 1024) / 512; i++) {
-		ata_pio_28_read(i, 1, hdb_v);
+		storage_read(i, 1, hdb_v);
 		kprintf("%s", hdb_v);
 	}
 	gpa_alloc.free(hdb_t);
-	__asm__ volatile("sti");       // set the interrupt flag
 }

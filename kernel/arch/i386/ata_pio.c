@@ -60,56 +60,70 @@ enum ATA_DEVICE {
 	ATA_SLAVE = 0x01,
 };
 
+#define ATA_MASTER 0x00
+#define ATA_SLAVE 0x01
+
+enum ata_channel {
+	ATA_PRIMARY = 0,
+	ATA_SECONDARY = 1,
+};
+
+#define ATA_PRIMARY_IO 0x1F0
+#define ATA_PRIMARY_CTRL 0x3F6
+#define ATA_SECONDARY_IO 0x170
+#define ATA_SECONDARY_CTRL 0x376
+
 struct IDEChannelRegisters {
 	unsigned short base;  // I/O Base.
 	unsigned short ctrl;  // Control Base
 	unsigned short bmide; // Bus Master IDE
 	unsigned char nIEN;   // nIEN (No Interrupt);
-} channels[2];
+} channels[2] = {
+	{ .base = ATA_PRIMARY_IO, .ctrl = ATA_PRIMARY_CTRL, .bmide = 0, .nIEN = 0 },
+	{ .base = ATA_SECONDARY_IO, .ctrl = ATA_SECONDARY_CTRL, .bmide = 0, .nIEN = 0 },
+};
 
-#define ATA_MASTER 0x00
-#define ATA_SLAVE 0x01
-
-static const uint16_t base = 0x1F0;
-static const uint16_t dev_ctl = 0x3F6;
-
-static void wait_device()
+static void wait_device(uint8_t channel)
 {
-	inb(dev_ctl); /* wait 400ns for drive select to work */
-	inb(dev_ctl);
-	inb(dev_ctl);
-	inb(dev_ctl);
+	uint16_t ctrl = channels[channel].ctrl;
+	inb(ctrl); /* wait 400ns for drive select to work */
+	inb(ctrl);
+	inb(ctrl);
+	inb(ctrl);
 }
 
-static void soft_reset(uint16_t dev_ctl)
+static void soft_reset(uint8_t channel)
 {
-	wait_device();
+	wait_device(channel);
 
-	outb(dev_ctl, 0x4);
+	outb(channels[channel].ctrl, 0x4);
 
-	wait_device();
+	wait_device(channel);
 
-	outb(dev_ctl, 0x0);
+	outb(channels[channel].ctrl, 0x0);
 
-	wait_device();
+	wait_device(channel);
 }
 
 /* on Primary bus: ctrl->base =0x1F0, ctrl->dev_ctl =0x3F6. REG_CYL_LO=4, REG_CYL_HI=5, REG_DEVSEL=6 */
-uint32_t ata_pio_detect_devtype(uint8_t slavebit)
+uint32_t ata_pio_detect_devtype(uint8_t channel, uint8_t drive)
 {
 	uint8_t REG_CYL_LO = 4;
 	uint8_t REG_CYL_HI = 5;
 	uint8_t REG_DEVSEL = 6;
 
-	soft_reset(dev_ctl); /* waits until master drive is ready again */
-	outb(dev_ctl + 1, slavebit);
-	wait_device();
+	if (channel > ATA_SECONDARY)
+		return ATADEV_UNKNOWN;
 
-	outb(base + REG_DEVSEL, 0xA0 | slavebit << 4);
-	wait_device();
+	soft_reset(channel); /* waits until drive is ready again */
+	outb(channels[channel].ctrl + 1, drive);
+	wait_device(channel);
 
-	unsigned cl = inb(base + REG_CYL_LO); /* get the "signature bytes" */
-	unsigned ch = inb(base + REG_CYL_HI);
+	outb(channels[channel].base + REG_DEVSEL, 0xA0 | drive << 4);
+	wait_device(channel);
+
+	unsigned cl = inb(channels[channel].base + REG_CYL_LO); /* get the "signature bytes" */
+	unsigned ch = inb(channels[channel].base + REG_CYL_HI);
 
 	/* differentiate ATA, ATAPI, SATA and SATAPI */
 	if (cl == 0x14 && ch == 0xEB)
@@ -135,15 +149,19 @@ uint32_t ata_pio_detect_devtype(uint8_t slavebit)
   Transfer 256 16-bit values, a uint16_t at a time, into your buffer from I/O port 0x1F0. (In assembler, REP INSW works well for this.)
   Then loop back to waiting for the next IRQ (or poll again -- see next note) for each successive sector.
 */
-bool ata_pio_28_read(uint32_t lba_addr, int16_t sector_count, char *dest)
+bool ata_pio_28_read(uint8_t channel, uint8_t drive, uint32_t lba_addr, uint16_t sector_count, void *dest)
 {
-	outb(dev_ctl, 2);
+	if (channel > ATA_SECONDARY)
+		return false;
+
+	outb(channels[channel].ctrl, 2);
 
 	if (sector_count >= 256)
 		panic("Trying to read more then 256 sector from ata_pio_28");
 	// soft_reset(dev_ctl); /* waits until master drive is ready again */
 
-	outb(base + 6, 0xF0 | ((lba_addr >> 24) & 0x0f));
+	uint16_t base = channels[channel].base;
+	outb(base + 6, 0xE0 | (drive << 4) | ((lba_addr >> 24) & 0x0f));
 	outb(base + 2, sector_count);
 	outb(base + 3, (uint8_t)lba_addr);
 	outb(base + 4, (uint8_t)(lba_addr >> 8));
@@ -168,11 +186,12 @@ bool ata_pio_28_read(uint32_t lba_addr, int16_t sector_count, char *dest)
 		uint16_t word_to_trans = 256;
 		while (word_to_trans--) {
 			uint16_t data = inw(base);
-			dest[dest_idx++] = (char)data;
-			dest[dest_idx++] = (char)(data >> 8);
+			((uint8_t *)dest)[dest_idx++] = (uint8_t)data;
+			((uint8_t *)dest)[dest_idx++] = (uint8_t)(data >> 8);
 		}
 	}
-	outb(dev_ctl, 0);
+	outb(channels[channel].ctrl, 0);
+	return true;
 }
 
 char *ata_pio_debug_devtype(enum ATADEV dev_type)
@@ -191,4 +210,58 @@ char *ata_pio_debug_devtype(enum ATADEV dev_type)
 	default:
 		return "unknown dev_type";
 	}
+}
+
+bool ata_pio_28_write(uint8_t channel, uint8_t drive, uint32_t lba_addr, uint16_t sector_count, const void *src)
+{
+	if (channel > ATA_SECONDARY)
+		return false;
+
+	outb(channels[channel].ctrl, 2);
+
+	if (sector_count >= 256)
+		panic("Trying to write more then 256 sector from ata_pio_28");
+
+	uint16_t base = channels[channel].base;
+	outb(base + 6, 0xE0 | (drive << 4) | ((lba_addr >> 24) & 0x0f));
+	outb(base + 2, sector_count);
+	outb(base + 3, (uint8_t)lba_addr);
+	outb(base + 4, (uint8_t)(lba_addr >> 8));
+	outb(base + 5, (uint8_t)(lba_addr >> 16));
+	outb(base + 7, 0x30);
+
+	if (sector_count == 0)
+		sector_count = 256;
+
+	size_t src_idx = 0;
+	while (sector_count--) {
+		while (inb(base + 7) & 0x80)
+			;
+		if (inb(base + 7) & 0x21)
+			panic("ERR or DF set, error reg is %x", inb(base + 1));
+
+		uint16_t word_to_trans = 256;
+		while (word_to_trans--) {
+			uint16_t data = ((const uint8_t *)src)[src_idx++];
+			data |= ((uint16_t)((const uint8_t *)src)[src_idx++]) << 8;
+			outw(base, data);
+		}
+	}
+
+	outb(base + 7, ATA_CMD_CACHE_FLUSH);
+	while (inb(base + 7) & ATA_SR_BSY)
+		;
+
+	outb(channels[channel].ctrl, 0);
+	return true;
+}
+
+void ide_initialize(unsigned int BAR0, unsigned int BAR1, unsigned int BAR2, unsigned int BAR3, unsigned int BAR4)
+{
+	channels[ATA_PRIMARY].base = (BAR0 & 0xFFFFFFFC) ? (BAR0 & 0xFFFFFFFC) : ATA_PRIMARY_IO;
+	channels[ATA_PRIMARY].ctrl = (BAR1 & 0xFFFFFFFC) ? (BAR1 & 0xFFFFFFFC) : ATA_PRIMARY_CTRL;
+	channels[ATA_SECONDARY].base = (BAR2 & 0xFFFFFFFC) ? (BAR2 & 0xFFFFFFFC) : ATA_SECONDARY_IO;
+	channels[ATA_SECONDARY].ctrl = (BAR3 & 0xFFFFFFFC) ? (BAR3 & 0xFFFFFFFC) : ATA_SECONDARY_CTRL;
+	channels[ATA_PRIMARY].bmide = (BAR4 & 0xFFFFFFFC);
+	channels[ATA_SECONDARY].bmide = (BAR4 & 0xFFFFFFFC) ? (BAR4 & 0xFFFFFFFC) + 8 : 0;
 }

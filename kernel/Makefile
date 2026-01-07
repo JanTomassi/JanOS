@@ -32,7 +32,8 @@ kernel/display.o \
 kernel/mem_allocs.o \
 kernel/allocator.o \
 kernel/slab_allocator.o \
-kernel/interrupt.o
+kernel/interrupt.o \
+kernel/storage.o
 
 OBJS=\
 $(KERNEL_OBJS) \
