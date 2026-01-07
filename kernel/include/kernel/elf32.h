@@ -2,21 +2,21 @@
 
 #include <stdint.h>
 
-#define SHF_WRITE (0x1)
-#define SHF_ALLOC (0x2)
-#define SHF_EXECINSTR (0x4)
-#define SHF_MERGE (0x10)
-#define SHF_STRINGS (0x20)
-#define SHF_INFO_LINK (0x40)
-#define SHF_LINK_ORDER (0x80)
-#define SHF_OS_NONCONFORMING (0x100)
-#define SHF_GROUP (0x200)
-#define SHF_TLS (0x400)
-#define SHF_MASKOS (0x0ff00000)
-#define SHF_AMD64_LARGE (0x10000000)
-#define SHF_ORDERED (0x40000000)
-#define SHF_EXCLUDE (0x80000000)
-#define SHF_MASKPROC (0xf0000000)
+#define ELF_SHF_WRITE (0x1)
+#define ELF_SHF_ALLOC (0x2)
+#define ELF_SHF_EXECINSTR (0x4)
+#define ELF_SHF_MERGE (0x10)
+#define ELF_SHF_STRINGS (0x20)
+#define ELF_SHF_INFO_LINK (0x40)
+#define ELF_SHF_LINK_ORDER (0x80)
+#define ELF_SHF_OS_NONCONFORMING (0x100)
+#define ELF_SHF_GROUP (0x200)
+#define ELF_SHF_TLS (0x400)
+#define ELF_SHF_MASKOS (0x0ff00000)
+#define ELF_SHF_AMD64_LARGE (0x10000000)
+#define ELF_SHF_ORDERED (0x40000000)
+#define ELF_SHF_EXCLUDE (0x80000000)
+#define ELF_SHF_MASKPROC (0xf0000000)
 
 #define EI_NIDENT 16
 typedef uint32_t Elf32_Addr;  // 4 4 Unsigned program address

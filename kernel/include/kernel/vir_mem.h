@@ -60,7 +60,7 @@ void *vmm_phy_addr(const void *vir_addr);
 void *vmm_vir_addr(const void *phy_addr);
 
 void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm_entry *preserved_entries, size_t preserved_entry_count);
-void vmm_finish_init(void);
+void vmm_finish_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm_entry *preserved_entries, size_t preserved_entry_count);
 void map_pages(const fatptr_t *physaddr, const struct vmm_entry *virt_mem);
 void map_page(const void *phy_addr, const void *virt_addr, const uint16_t virt_flags);
 void unmap_page(const void* phy_mem, const void *virt_addr);
