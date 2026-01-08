@@ -40,18 +40,20 @@ JanOS.iso: build
 	grub-mkrescue -o JanOS.iso isodir
 
 
-qemu_debug: JanOS.iso
-	qemu-system-${ARCH} -s -S \
-	-smp 2 \
+qemu_sata: JanOS.iso
+	qemu-system-${ARCH} \
 	-m 1G \
 	-machine pc -cpu qemu64 \
-	-drive file=JanOS.iso,format=raw \
-	-drive file=harry_potter.raw,format=raw
+	-drive id=os_file,file=JanOS.iso,format=raw,if=none \
+	-drive id=test_disk,file=harry_potter.raw,format=raw,if=none \
+	-device ahci,id=ahci \
+	-device ide-hd,drive=os_file,bus=ahci.0 \
+	-device ide-hd,drive=test_disk,bus=ahci.1
 
-qemu_sata: JanOS.iso
-	qemu-system-${ARCH} -audiodev pa,id=speaker \
+qemu_sata_debug: JanOS.iso
+	qemu-system-${ARCH} -s -S \
 	-m 1G \
-	-machine pcspk-audiodev=speaker \
+	-machine pc -cpu qemu64 \
 	-drive id=os_file,file=JanOS.iso,format=raw,if=none \
 	-drive id=test_disk,file=harry_potter.raw,format=raw,if=none \
 	-device ahci,id=ahci \
@@ -60,6 +62,14 @@ qemu_sata: JanOS.iso
 
 qemu: JanOS.iso
 	qemu-system-${ARCH} \
+	-smp 2 \
+	-m 1G \
+	-machine pc -cpu qemu64 \
+	-drive file=JanOS.iso,format=raw \
+	-drive file=harry_potter.raw,format=raw
+
+qemu_debug: JanOS.iso
+	qemu-system-${ARCH} -s -S \
 	-smp 2 \
 	-m 1G \
 	-machine pc -cpu qemu64 \
