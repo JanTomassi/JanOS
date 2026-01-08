@@ -68,10 +68,10 @@ struct madt_header {
 	uint8_t entries[];
 } __attribute__((packed));
 
-typedef struct tramp_gdtr {
+typedef __attribute__((packed)) struct tramp_gdtr {
 	uint16_t size;
 	uint32_t ptr
-} __attribute__((packed)) tramp_gdtr_t;
+} tramp_gdtr_t;
 
 extern uint8_t ap_trampoline_start;
 extern uint8_t ap_trampoline_end;
@@ -384,12 +384,12 @@ static void build_stacks(void)
 
 static void start_aps(void)
 {
-	const uint8_t trampoline_vector = ap_trampoline_phys_base >> 12;
 	// for each Local APIC ID we do...
 	for(size_t i = 0; i < cpu_count; i++) {
 		// do not start BSP, that's already running this code
 		if (cpus[i].online)
 			continue;
+		// TODO: pass the physical address of the trampoline
 		lapic_start_ap(i);
 	}
 }

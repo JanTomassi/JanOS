@@ -112,7 +112,7 @@ struct mbi_info{
 	struct multiboot_tag *acpi_tag;
 	uintptr_t kernel_end_addr;
 };
-struct mbi_info get_mbi_info(uintptr_t mbi_addr, size_t mbi_size, uintptr_t kernel_start_addr){
+struct mbi_info get_mbi_info(uintptr_t mbi_addr, uintptr_t kernel_start_addr){
 	struct mbi_info res = {.kernel_end_addr = kernel_start_addr};
 
 	for (struct multiboot_tag *tag = (struct multiboot_tag *)(mbi_addr + 8); tag->type != MULTIBOOT_TAG_TYPE_END;
@@ -235,7 +235,7 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	size_t preserved_entry_count = 0;
 	uintptr_t kernel_start_addr = round_up_to_page((uintptr_t)&HIGHER_HALF);
 
-	struct mbi_info mbi_info = get_mbi_info(mbi_addr, mbi_size, kernel_start_addr);
+	struct mbi_info mbi_info = get_mbi_info(mbi_addr, kernel_start_addr);
 
 	section_divisor("Initializing programable interrupt controller:\n");
 
@@ -326,11 +326,10 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 		pic_disable();
 	}
 
-	irq_register_handler(0, pit_tick_handler, nullptr);
-	ps2_init();
+	// irq_register_handler(0, pit_tick_handler, nullptr);
+	// ps2_init();
 
 	storage_init();
-	__asm__ volatile("sti");       // set the interrupt flag
 
 	section_divisor("ATA PIO Test drives:\n");
 	kprintf("    - hda: %s type \n", ata_pio_debug_devtype(ata_pio_detect_devtype(0, 0)));
@@ -345,4 +344,6 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 		kprintf("%s", hdb_v);
 	}
 	gpa_alloc.free(hdb_t);
+
+	__asm__ volatile("sti");       // set the interrupt flag
 }
