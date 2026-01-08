@@ -13,7 +13,11 @@ typedef struct {
 
 #define DISPLAY_MAX_DISPS 4
 
-#define MODULE(name) static char *__MODULE_NAME = name;
+#define MODULE(name) \
+  _Pragma("GCC diagnostic push");                                  \
+  _Pragma("GCC diagnostic ignored \"-Wunused-variable\"");  \
+  static char *__MODULE_NAME = name;                               \
+  _Pragma("GCC diagnostic pop");
 #define mprint(...) __mprintf(__MODULE_NAME, __VA_ARGS__);
 
 #define kerror(...)                                                                                      \

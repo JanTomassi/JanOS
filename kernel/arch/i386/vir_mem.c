@@ -15,7 +15,7 @@ MODULE("Virt Memory Manager");
 
 extern size_t HIGHER_HALF;
 
-static void invalidate(void *addr)
+static void invalidate(const void *addr)
 {
 	__asm__ volatile("invlpg (%0)" : : "r"((size_t)addr) : "memory");
 }
@@ -61,7 +61,7 @@ void *vmm_vir_addr(const void *phy_addr)
 
 		size_t *pt = ((size_t *)page_table_addr) + (0x400 * pd_idx);
 		for (size_t pt_idx = 0; pt_idx < 1024; pt_idx++) {
-			if (!(pt[pt_idx] & VMM_ENTRY_PRESENT_BIT) || (pt[pt_idx] & VMM_ENTRY_LOCATION_4K_BITS) != phy_addr)
+			if (!(pt[pt_idx] & VMM_ENTRY_PRESENT_BIT) || (void *)(pt[pt_idx] & VMM_ENTRY_LOCATION_4K_BITS) != phy_addr)
 				continue;
 
 			return (void *)((pd_idx << 22 | pt_idx << 12) + ((size_t)phy_addr & 0xFFF));
@@ -122,7 +122,7 @@ static bool is_page_table_empty(size_t *pt)
 void unmap_page(const void* phy_mem, const void *virt_addr)
 {
 	if (phy_mem != nullptr)
-		phy_mem_free((fatptr_t){.ptr = phy_mem, .len = PAGE_SIZE});
+		phy_mem_free((const fatptr_t){.ptr = phy_mem, .len = PAGE_SIZE});
 
 	size_t pd_idx = (size_t)virt_addr >> 22;
 	size_t pt_idx = (size_t)virt_addr >> 12 & 0x03FF;
@@ -178,7 +178,7 @@ static void invalidate_low_range(void)
 			 "pop  %eax;");
 }
 
-static inline void print_elf_sector(Elf32_Shdr *elf_sec, char *elf_sec_str, size_t i)
+static inline void print_elf_sector(const Elf32_Shdr *elf_sec, const char *elf_sec_str, const size_t i)
 {
 #ifdef DEBUG
 	mprint("Section (%s): [Address: %x, Size: %x, Type: %x, flags: %x]\n", &elf_sec_str[elf_sec[i].sh_name], elf_sec[i].sh_addr, elf_sec[i].sh_size,
@@ -198,7 +198,7 @@ static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, c
 	size_t required_entries = preserved_entry_count;
 
 	for (size_t i = 0; i < elf_tag->num; i++) {
-		if ((elf_sec[i].sh_flags & ELF_SHF_ALLOC) == 0 || elf_sec[i].sh_addr < &HIGHER_HALF)
+		if ((elf_sec[i].sh_flags & ELF_SHF_ALLOC) == 0 || (void*)elf_sec[i].sh_addr < (void*)&HIGHER_HALF)
 			continue;
 
 		required_entries++;
@@ -213,7 +213,7 @@ static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, c
 			mprint("Section (%s) dosn't allocate memory at runtime\n", &elf_sec_str[elf_sec[i].sh_name]);
 #endif
 			continue;
-		} else if (elf_sec[i].sh_addr < &HIGHER_HALF) {
+		} else if ((void*)elf_sec[i].sh_addr < (void*)&HIGHER_HALF) {
 #ifdef DEBUG
 			mprint("Section (%s) isn't part of the higher half kernel\n", &elf_sec_str[elf_sec[i].sh_name]);
 #endif
@@ -473,7 +473,7 @@ static struct vmm_entry *vir_mem_find_prev_free_chunk(struct vmm_entry *to_free)
 	list_for_each(&vmm_free_list) {
 		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
 
-		if (prev_chunk == nullptr || prev_chunk->ptr > cur->ptr && prev_chunk->ptr < to_free->ptr)
+		if (prev_chunk == nullptr || (prev_chunk->ptr > cur->ptr && prev_chunk->ptr < to_free->ptr))
 			prev_chunk = cur;
 	}
 	return prev_chunk;
@@ -576,7 +576,6 @@ static void migrate_tags_to_slab(void)
 
 	struct list_head *it = migrated_free.next;
 	while(&migrated_free != it) {
-		struct vmm_entry *tmp = list_entry(it, struct vmm_entry, list);
 		list_mv(it, vmm_free_list.prev);
 		it = migrated_free.next;
 	}
@@ -635,7 +634,7 @@ static void vmm_init_used_list(const struct multiboot_tag_elf_sections *elf_tag,
 	const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)elf_tag->sections;
 
 	for (size_t i = 0; i < elf_tag->num; i++) {
-		if ((elf_sec[i].sh_flags & ELF_SHF_ALLOC) == 0 || elf_sec[i].sh_addr < &HIGHER_HALF)
+		if ((elf_sec[i].sh_flags & ELF_SHF_ALLOC) == 0 || (void*)elf_sec[i].sh_addr < (void*)&HIGHER_HALF)
 			continue;
 
 		size_t elf_s = elf_sec[i].sh_addr;

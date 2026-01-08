@@ -99,13 +99,13 @@ isr_stub_%+%1:
 
 	get_GOT
 
-	push dword %1
+	push	dword %1
 	call	[ebx + irq_prepare wrt ..got]
-	add 	esp, 4
+	add	esp, 4
 
 	call	[ebx + isr_%+%1_handler wrt ..got]
 
-	push dword %1
+	push 	dword %1
 	call	[ebx + irq_ack wrt ..got]
 	add 	esp, 4
 

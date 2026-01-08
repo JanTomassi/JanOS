@@ -87,9 +87,6 @@ static malloc_tag_t *gpa_split_tag_region(malloc_tag_t *tag, size_t req)
 		size_t tag_e = (size_t)tag_s + cur_phy.len;
 
 		if ((tag_s <= mem_e) && (mem_s <= tag_e)) {
-			size_t rang_s = mem_s > tag_s ? mem_s : tag_s;
-			size_t rang_e = mem_e < tag_e ? mem_e : tag_e;
-
 			mem_set_refcnt_phy_mem(cur, mem_get_refcnt_phy_mem(cur) + 1);
 			mem_insert_phy_mem_tag(cur, mem_chain, false);
 		}

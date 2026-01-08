@@ -19,7 +19,7 @@ static uint8_t unumber_len(uintmax_t num)
 	uint8_t num_len = 0;
 	if (num == 0)
 		return 1;
-	for (size_t digit = num % 10; num != 0; (num /= 10, digit = num % 10))
+	for ( ; num != 0; num /= 10)
 		num_len++;
 	return num_len;
 }
@@ -41,7 +41,7 @@ static uint8_t hex_len(uintmax_t num)
 	if (num == 0)
 		return 1;
 
-	for (size_t digit = num % 16; num != 0; (num /= 16, digit = num % 16))
+	for ( ; num != 0; num /= 16)
 		num_len++;
 
 	return num_len;
@@ -60,7 +60,7 @@ static size_t unumber_to_str(uintmax_t num, char *str, size_t str_len)
 
 	uint8_t num_len = unumber_len(num);
 
-	if (num_len + 1 > str_len)
+	if ((num_len + 1) > str_len)
 		return (num_len + 1) - str_len;
 
 	str[num_len] = '\0';
@@ -100,13 +100,13 @@ static size_t hex_to_str(uintmax_t num, char *str, size_t str_len)
 
 	uint8_t num_len = hex_len(num);
 
-	if (num_len + 1 > str_len)
+	if ((num_len + 1) > str_len)
 		return (num_len + 1) - str_len;
 
 	str[num_len] = '\0';
 
 	for (size_t digit = num % 16, i = num_len - 1; num != 0; (--i, num /= 16, digit = num % 16)) {
-		if (digit >= 0 && digit <= 9)
+		if (digit <= 9)
 			str[i] = '0' + digit;
 		else if (digit >= 0xA && digit <= 0xF)
 			str[i] = 'A' + (digit - 0xA);

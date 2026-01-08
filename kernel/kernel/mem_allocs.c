@@ -91,6 +91,8 @@ char *get_str_type_struct(type_struct_t type)
 		return "Used";
 	case FREE:
 		return "Free";
+	default:
+		panic("unreachable");
 	}
 }
 
@@ -410,7 +412,7 @@ mem_malloc_tag_t *mem_coalesce_tag(mem_malloc_tag_t *tag)
 
 			list_for_each(&tag->phy_chain) {
 				mem_phy_mem_link_t *phy_link2 = list_entry(it, mem_phy_mem_link_t, list);
-				mem_phy_mem_tag_t *phy_tag2 = phy_link->phy_mem;
+				mem_phy_mem_tag_t *phy_tag2 = phy_link2->phy_mem;
 				if (phy_tag == phy_tag2)
 					goto continue_next;
 			}
@@ -430,7 +432,7 @@ continue_next:
 
 			list_for_each(&prev->phy_chain) {
 				mem_phy_mem_link_t *phy_link2 = list_entry(it, mem_phy_mem_link_t, list);
-				mem_phy_mem_tag_t *phy_tag2 = phy_link->phy_mem;
+				mem_phy_mem_tag_t *phy_tag2 = phy_link2->phy_mem;
 				if (phy_tag == phy_tag2)
 					goto continue_curr;
 			}

@@ -285,7 +285,7 @@ void phy_mem_add_region(size_t addr, size_t len)
 	phy_mem_set_region(addr, len, false);
 }
 
-__attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc(size_t size)
+__attribute__((hot)) fatptr_t phy_mem_alloc(size_t size)
 {
 	const size_t req_block = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 	const size_t req_size = req_block * BLOCK_SIZE;
@@ -358,7 +358,7 @@ slot_found:
 	return (fatptr_t){ .ptr = (void *)(start_block * BLOCK_SIZE), .len = req_size };
 }
 
-__attribute__((hot, malloc(phy_mem_free, 1))) fatptr_t phy_mem_alloc_below(size_t size, size_t max_addr)
+__attribute__((hot)) fatptr_t phy_mem_alloc_below(size_t size, size_t max_addr)
 {
 	const size_t req_block = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 	const size_t req_size = req_block * BLOCK_SIZE;
