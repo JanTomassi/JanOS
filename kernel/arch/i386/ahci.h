@@ -170,5 +170,6 @@ struct fis_reg_h2d {
 
 bool ahci_probe(void);
 void ahci_init(void);
-bool ahci_read28(uint32_t lba_addr, uint16_t sector_count, void *dest);
-bool ahci_write28(uint32_t lba_addr, uint16_t sector_count, const void *src);
+bool ahci_port_is_active(uint8_t port_index);
+bool ahci_read28_port(uint8_t port_index, uint32_t lba_addr, uint16_t sector_count, void *dest);
+bool ahci_write28_port(uint8_t port_index, uint32_t lba_addr, uint16_t sector_count, const void *src);

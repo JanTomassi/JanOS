@@ -225,18 +225,25 @@ void ahci_init(void)
 		irq_register_handler(ahci_state.irq_line, ahci_irq_handler, (void *)ahci_state.hba);
 }
 
-static struct ahci_port_state *ahci_first_port(void)
+static struct ahci_port_state *ahci_get_port(uint8_t port_index)
 {
-	for (uint8_t i = 0; i < AHCI_MAX_PORTS; i++) {
-		if (ahci_state.ports[i].active)
-			return &ahci_state.ports[i];
-	}
-	return nullptr;
+	if (port_index >= AHCI_MAX_PORTS)
+		return nullptr;
+
+	struct ahci_port_state *state = &ahci_state.ports[port_index];
+	if (!state->active)
+		return nullptr;
+
+	return state;
 }
 
-static bool ahci_exec_dma(uint32_t lba_addr, uint16_t sector_count, void *buffer, bool write)
+bool ahci_port_is_active(uint8_t port_index)
 {
-	struct ahci_port_state *state = ahci_first_port();
+	return ahci_get_port(port_index) != nullptr;
+}
+
+static bool ahci_exec_dma(struct ahci_port_state *state, uint32_t lba_addr, uint16_t sector_count, void *buffer, bool write)
+{
 	if (state == nullptr || sector_count == 0)
 		return false;
 
@@ -316,12 +323,12 @@ static bool ahci_exec_dma(uint32_t lba_addr, uint16_t sector_count, void *buffer
 	return ok;
 }
 
-bool ahci_read28(uint32_t lba_addr, uint16_t sector_count, void *dest)
+bool ahci_read28_port(uint8_t port_index, uint32_t lba_addr, uint16_t sector_count, void *dest)
 {
-	return ahci_exec_dma(lba_addr, sector_count, dest, false);
+	return ahci_exec_dma(ahci_get_port(port_index), lba_addr, sector_count, dest, false);
 }
 
-bool ahci_write28(uint32_t lba_addr, uint16_t sector_count, const void *src)
+bool ahci_write28_port(uint8_t port_index, uint32_t lba_addr, uint16_t sector_count, const void *src)
 {
-	return ahci_exec_dma(lba_addr, sector_count, (void *)src, true);
+	return ahci_exec_dma(ahci_get_port(port_index), lba_addr, sector_count, (void *)src, true);
 }

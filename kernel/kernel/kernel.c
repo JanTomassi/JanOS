@@ -339,8 +339,14 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	fatptr_t hdb_t = gpa_alloc.alloc(513);
 	char *hdb_v = hdb_t.ptr;
 	memset(hdb_v, 0, 513);
+	struct storage_device hdb_device;
+	if (!storage_get_device(0, &hdb_device)) {
+		kprintf("No storage device available\n");
+		gpa_alloc.free(hdb_t);
+		return;
+	}
 	for (size_t i = 0; i < (430 * 1024) / 512; i++) {
-		storage_read(i, 1, hdb_v);
+		storage_read_device(&hdb_device, i, 1, hdb_v);
 		kprintf("%s", hdb_v);
 	}
 	gpa_alloc.free(hdb_t);
