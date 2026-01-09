@@ -6,7 +6,7 @@ struct list_head {
 	struct list_head *next, *prev;
 };
 
-#define __same_type(X, Y) __builtin_types_compatible_p(typeof(X), typeof(Y))
+#define __same_type(X, Y) (__builtin_types_compatible_p(typeof(X), typeof(Y)))
 
 #define container_of(ptr, type, member)                                                                                                          \
 	({                                                                                                                                       \
@@ -15,14 +15,13 @@ struct list_head {
 		((type *)(mptr - offsetof(type, member)));                                                                                       \
 	})
 
-#define list_entry(ptr, type, list_member) container_of(ptr, type, list_member)
+#define list_entry(ptr, type, list_member) (container_of(ptr, type, list_member))
 
 #define LIST_HEAD(var_name) struct list_head var_name = { .next = &(var_name), .prev = &(var_name) }
 
 #define RESET_LIST_ITEM(list) ((list)->next = (list), (list)->prev = (list))
 
-static inline void list_add(struct list_head *new, struct list_head *head)
-{
+static inline void list_add(struct list_head *new, struct list_head *head){
 	struct list_head *prev = (head);
 	struct list_head *next = (head)->next;
 	next->prev = (new);
@@ -43,24 +42,20 @@ static inline void list_mv(struct list_head *entry, struct list_head *head){
 	head->next = entry;
 }
 
-static inline void list_rm(struct list_head *head)
-{
+static inline void list_rm(struct list_head *head){
 	head->prev->next = head->next;
 	head->next->prev = head->prev;
 }
 
-static inline bool list_is_first(struct list_head *ptr, struct list_head *head)
-{
+static inline bool list_is_first(struct list_head *ptr, struct list_head *head){
 	return ptr->prev == head;
 }
 
-static inline bool list_is_last(struct list_head *ptr, struct list_head *head)
-{
+static inline bool list_is_last(struct list_head *ptr, struct list_head *head){
 	return ptr->next == head;
 }
 
-static inline struct list_head *list_pop(struct list_head *head)
-{
+static inline struct list_head *list_pop(struct list_head *head){
 	struct list_head *pop = head->prev;
 	return pop != head ? (list_rm(pop), RESET_LIST_ITEM(pop), pop) : nullptr;
 }

@@ -321,19 +321,13 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 		ioapic_register_overrides(ioapic_overrides, override_count);
 		ioapic_init(ioapic_desc.phys_addr, ioapic_desc.gsi_base, lapic_get_id());
 		ioapic_configure_legacy_irqs();
-		/* ioapic_unmask_irq(0); */
-		ioapic_unmask_irq(1);
 		pic_disable();
 	}
 
-	// irq_register_handler(0, pit_tick_handler, nullptr);
-	// ps2_init();
+	irq_register_handler(0, pit_tick_handler, nullptr);
+	ps2_init();
 
 	storage_init();
-
-	section_divisor("ATA PIO Test drives:\n");
-	kprintf("    - hda: %s type \n", ata_pio_debug_devtype(ata_pio_detect_devtype(0, 0)));
-	kprintf("    - hdb: %s type\n", ata_pio_debug_devtype(ata_pio_detect_devtype(0, 1)));
 
 	kprintf("Content of hdb\n\n");
 	fatptr_t hdb_t = gpa_alloc.alloc(513);
