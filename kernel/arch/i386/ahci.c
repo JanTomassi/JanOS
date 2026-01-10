@@ -305,7 +305,7 @@ static bool ahci_exec_dma(struct ahci_port_state *state, uint32_t lba_addr, uint
 	state->irq_fired = false;
 	port->ci |= 1u << slot;
 
-	for (size_t spin = 0; spin < 1000000; spin++) {
+	while (true) {
 		if ((port->ci & (1u << slot)) == 0)
 			break;
 		if (state->irq_fired)
