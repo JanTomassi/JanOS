@@ -27,8 +27,9 @@ LIBS:=$(LIBS) $(KERNEL_ARCH_LIBS)
 
 KERNEL_OBJS=\
 $(KERNEL_ARCH_OBJS) \
-kernel/kernel.o \
 kernel/display.o \
+kernel/fat16.o \
+kernel/kernel.o \
 kernel/mem_allocs.o \
 kernel/allocator.o \
 kernel/slab_allocator.o \
