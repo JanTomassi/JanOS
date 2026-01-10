@@ -35,18 +35,18 @@ struct bitmap_chunk {
 };
 static_assert(sizeof(struct bitmap_chunk) == BLOCK_SIZE, "Bitmap chunk must fit exactly one block");
 
-struct slab_free {
-	struct slab_free *next;
+struct phy_slab_free {
+	struct phy_slab_free *next;
 };
 
-struct slab_page {
+struct phy_slab_page {
 	void *mem;
 	struct list_head list;
 };
 
-struct slab_cache {
+struct phy_slab_cache {
 	size_t obj_size;
-	struct slab_free *free_list;
+	struct phy_slab_free *free_list;
 	struct list_head pages;
 };
 
@@ -54,8 +54,8 @@ struct slab_cache {
 static uint8_t metadata_arena[METADATA_ARENA_SIZE] = { 0 };
 static size_t metadata_offset = 0;
 
-static struct slab_cache bitmap_slab = { 0 };
-static struct slab_cache booking_block_slab = { 0 };
+static struct phy_slab_cache bitmap_slab = { 0 };
+static struct phy_slab_cache booking_block_slab = { 0 };
 static LIST_HEAD(booking_block_list);
 static LIST_HEAD(bitmap_chunk_list);
 
@@ -72,7 +72,7 @@ static void *metadata_alloc(size_t size)
 	return ptr;
 }
 
-static void init_slab_cache(struct slab_cache *cache, size_t obj_size)
+static void init_slab_cache(struct phy_slab_cache *cache, size_t obj_size)
 {
 	cache->obj_size = obj_size;
 	cache->free_list = nullptr;
@@ -80,13 +80,13 @@ static void init_slab_cache(struct slab_cache *cache, size_t obj_size)
 	cache->pages.prev = &cache->pages;
 }
 
-static void slab_add_page(struct slab_cache *cache)
+static void slab_add_page(struct phy_slab_cache *cache)
 {
 	void *page_mem = metadata_alloc(BLOCK_SIZE);
 	if (page_mem == nullptr)
 		return;
 
-	struct slab_page *page = metadata_alloc(sizeof(struct slab_page));
+	struct phy_slab_page *page = metadata_alloc(sizeof(struct phy_slab_page));
 	if (page == nullptr)
 		return;
 
@@ -96,13 +96,13 @@ static void slab_add_page(struct slab_cache *cache)
 
 	const size_t obj_count = BLOCK_SIZE / cache->obj_size;
 	for (size_t i = 0; i < obj_count; i++) {
-		struct slab_free *obj = (struct slab_free *)((uint8_t *)page_mem + (i * cache->obj_size));
+		struct phy_slab_free *obj = (struct phy_slab_free *)((uint8_t *)page_mem + (i * cache->obj_size));
 		obj->next = cache->free_list;
 		cache->free_list = obj;
 	}
 }
 
-static void *slab_alloc(struct slab_cache *cache)
+static void *slab_alloc(struct phy_slab_cache *cache)
 {
 	if (cache->free_list == nullptr)
 		slab_add_page(cache);
@@ -110,14 +110,14 @@ static void *slab_alloc(struct slab_cache *cache)
 	if (cache->free_list == nullptr)
 		return nullptr;
 
-	struct slab_free *res = cache->free_list;
+	struct phy_slab_free *res = cache->free_list;
 	cache->free_list = res->next;
 	return res;
 }
 
-static void slab_free(struct slab_cache *cache, void *ptr)
+static void slab_free(struct phy_slab_cache *cache, void *ptr)
 {
-	struct slab_free *node = ptr;
+	struct phy_slab_free *node = ptr;
 	node->next = cache->free_list;
 	cache->free_list = node;
 }
