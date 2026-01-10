@@ -55,7 +55,7 @@ static bool storage_register_device(struct storage_device device)
 	return true;
 }
 
-void storage_init(void)
+static void storage_init_cache()
 {
 	if (storage_device_cache == nullptr) {
 		storage_device_cache = slab_create("storage_device", sizeof(struct storage_device_entry),
@@ -65,37 +65,29 @@ void storage_init(void)
 			return;
 		}
 	}
+}
 
-	storage_clear_devices();
-
-	if (ahci_probe()) {
-		ahci_init();
-		for (uint8_t port = 0; port < AHCI_MAX_PORTS; port++) {
-			if (!ahci_port_is_active(port))
-				continue;
-
-			struct storage_device device = {
-				.backend = STORAGE_BACKEND_AHCI,
-				.ahci_port = port,
-			};
-			storage_register_device(device);
-		}
-
-		if (storage_devices_count > 0) {
-			mprint("Storage: AHCI enabled (%u drives)\n", storage_devices_count);
-			return;
-		}
-	}
-
-	struct pci_device ide = { 0 };
-	if (!pci_find_storage_device(PCI_SUBCLASS_IDE, &ide)) {
-		mprint("Storage: no IDE controller found\n");
+static void storage_try_ahci_init()
+{
+	if (!ahci_probe()) {
 		return;
 	}
 
-	pci_enable_bus_mastering(&ide);
-	ide_initialize(ide.bar[0], ide.bar[1], ide.bar[2], ide.bar[3], ide.bar[4]);
+	ahci_init();
+	for (uint8_t port = 0; port < AHCI_MAX_PORTS; port++) {
+		if (!ahci_port_is_active(port))
+			continue;
 
+		struct storage_device device = {
+			.backend = STORAGE_BACKEND_AHCI,
+			.ahci_port = port,
+		};
+		storage_register_device(device);
+	}
+}
+
+static void storage_try_register_ide_dev()
+{
 	uint8_t channels[] = { 0, 0, 1, 1 };
 	uint8_t drives[] = { 0, 1, 0, 1 };
 	for (size_t i = 0; i < sizeof(channels); i++) {
@@ -110,13 +102,36 @@ void storage_init(void)
 		};
 		storage_register_device(device);
 	}
+}
 
-	if (storage_devices_count == 0) {
-		mprint("Storage: no ATA PIO devices found\n");
+void storage_init(void)
+{
+	storage_init_cache();
+
+	storage_clear_devices();
+
+	storage_try_ahci_init();
+	if (storage_devices_count > 0) {
+		mprint("Storage: AHCI enabled (%u drives)\n", storage_devices_count);
 		return;
 	}
 
-	mprint("Storage: ATA PIO enabled (%zu drives)\n", storage_devices_count);
+	struct pci_device ide = { 0 };
+	if (!pci_find_storage_device(PCI_SUBCLASS_IDE, &ide)) {
+		mprint("Storage: no IDE controller found\n");
+		return;
+	}
+
+	pci_enable_bus_mastering(&ide);
+	ide_initialize(ide.bar[0], ide.bar[1], ide.bar[2], ide.bar[3], ide.bar[4]);
+
+	storage_try_register_ide_dev();
+	if (storage_devices_count > 0) {
+		mprint("Storage: ATA PIO enabled (%zu drives)\n", storage_devices_count);
+		return;
+	}
+
+	mprint("Storage: no devices found\n");
 }
 
 size_t storage_device_count(void)
