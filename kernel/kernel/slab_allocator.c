@@ -212,13 +212,6 @@ static void slab_release_slab(struct slab *slab)
 	mem_gpa_free((fatptr_t){ .ptr = slab, .len = sizeof(*slab) });
 }
 
-static void slab_move_to_list(struct slab *slab, struct list_head *target)
-{
-	if (slab->list.next != nullptr && slab->list.prev != nullptr)
-		list_rm(&slab->list);
-	list_add(&slab->list, target);
-}
-
 static struct slab *slab_find_for_ptr(slab_cache_t *cache, void *ptr)
 {
 	list_for_each(&cache->partial) {
@@ -359,9 +352,9 @@ fatptr_t slab_alloc_obj(slab_cache_t *cache)
 		memset(obj, 0, cache->obj_size);
 
 	if (target->in_use == target->capacity)
-		slab_move_to_list(target, &cache->full);
+		list_mv(&target->list, &cache->full);
 	else if (list_is_first(&target->list, &cache->empty))
-		slab_move_to_list(target, &cache->partial);
+		list_mv(&target->list, &cache->partial);
 
 	return (fatptr_t){ .ptr = obj, .len = cache->obj_size };
 }
@@ -394,14 +387,14 @@ bool slab_free_obj(slab_cache_t *cache, fatptr_t obj)
 	slab_return_obj(slab, obj.ptr);
 
 	if (slab->in_use == 0) {
-		slab_move_to_list(slab, &cache->empty);
+		list_mv(&slab->list, &cache->empty);
 		if (cache->release_empty)
 			slab_release_slab(slab);
 		return true;
 	}
 
 	if (list_is_first(&slab->list, &cache->full))
-		slab_move_to_list(slab, &cache->partial);
+		list_mv(&slab->list, &cache->partial);
 
 	return true;
 }
