@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <kernel/storage.h>
 
@@ -45,7 +46,28 @@ typedef struct fat16_layout{
 	uint16_t sector_size;
 } fat16_layout_t;
 
+typedef struct fat_dir_entry {
+	char name[8];
+	char ext[3];
+	uint8_t attributes;
+	uint8_t reserved;
+	uint8_t creation_time_tenths;
+	uint16_t creation_time;
+	uint16_t creation_date;
+	uint16_t last_access_date;
+	uint16_t first_cluster_high;
+	uint16_t write_time;
+	uint16_t write_date;
+	uint16_t first_cluster_low;
+	uint32_t file_size;
+} __attribute__((packed)) fat_dir_entry_t;
+
 fat_BS_t *read_fat_boot_section(struct storage_device dev);
 void fat16_compute_layout(const fat_BS_t *bpb, fat16_layout_t *out);
 uint16_t fat16_read_fat_entry(const struct storage_device *device, const fat16_layout_t *layout, uint16_t cluster);
 bool fat16_is_end_of_chain(uint16_t entry);
+bool fat16_read_root_dir(const struct storage_device *device, const fat16_layout_t *layout,
+			 fat_dir_entry_t *entries, size_t max_entries);
+bool fat16_dir_entry_is_unused(const fat_dir_entry_t *entry);
+bool fat16_dir_entry_is_deleted(const fat_dir_entry_t *entry);
+bool fat16_decode_83_name(const fat_dir_entry_t *entry, char *out, size_t out_size);

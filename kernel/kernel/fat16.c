@@ -1,8 +1,49 @@
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <kernel/allocator.h>
 #include <kernel/fat16.h>
+
+static bool fat16_read_root_dir_sectors(const struct storage_device *device, const fat16_layout_t *layout,
+					uint8_t *out)
+{
+	if (layout->root_dir_sectors == 0 || layout->root_dir_sectors > UINT16_MAX)
+		return false;
+
+	return storage_read_device(device, layout->root_dir_lba,
+				   (uint16_t)layout->root_dir_sectors, out);
+}
+
+static size_t fat16_copy_root_dir_entries(const uint8_t *raw, size_t raw_entries,
+					  fat_dir_entry_t *entries, size_t max_entries)
+{
+	size_t stored = 0;
+	const fat_dir_entry_t *raw_entries_ptr = (const fat_dir_entry_t *)raw;
+
+	for (size_t i = 0; i < raw_entries && stored < max_entries; ++i) {
+		const fat_dir_entry_t *entry = &raw_entries_ptr[i];
+		if (fat16_dir_entry_is_unused(entry))
+			break;
+		if (fat16_dir_entry_is_deleted(entry))
+			continue;
+
+		memcpy(&entries[stored], entry, sizeof(*entry));
+		++stored;
+	}
+
+	return stored;
+}
+
+static size_t fat16_trim_spaces(const char *input, size_t max_len)
+{
+	size_t len = max_len;
+
+	while (len > 0 && input[len - 1] == ' ')
+		--len;
+
+	return len;
+}
 
 static uint32_t fat16_root_dir_sectors(const fat_BS_t *bpb)
 {
@@ -91,4 +132,67 @@ uint16_t fat16_read_fat_entry(const struct storage_device *device, const fat16_l
 bool fat16_is_end_of_chain(uint16_t entry)
 {
 	return entry >= 0xFFF8;
+}
+
+bool fat16_read_root_dir(const struct storage_device *device, const fat16_layout_t *layout,
+			 fat_dir_entry_t *entries, size_t max_entries)
+{
+	if (device == nullptr || layout == nullptr || entries == nullptr || max_entries == 0)
+		return false;
+	if (layout->sector_size == 0 || layout->root_dir_sectors == 0)
+		return false;
+
+	size_t raw_size = (size_t)layout->sector_size * layout->root_dir_sectors;
+	size_t raw_entries = raw_size / sizeof(fat_dir_entry_t);
+	allocator_t gpa_alloc = get_gpa_allocator();
+	fatptr_t raw_buf = gpa_alloc.alloc(raw_size);
+	if (raw_buf.ptr == nullptr)
+		return false;
+
+	bool ok = fat16_read_root_dir_sectors(device, layout, raw_buf.ptr);
+	if (ok)
+		fat16_copy_root_dir_entries(raw_buf.ptr, raw_entries, entries, max_entries);
+
+	gpa_alloc.free(raw_buf);
+	return ok;
+}
+
+bool fat16_dir_entry_is_unused(const fat_dir_entry_t *entry)
+{
+	if (entry == nullptr)
+		return true;
+
+	return (uint8_t)entry->name[0] == 0x00;
+}
+
+bool fat16_dir_entry_is_deleted(const fat_dir_entry_t *entry)
+{
+	if (entry == nullptr)
+		return true;
+
+	return (uint8_t)entry->name[0] == 0xE5;
+}
+
+bool fat16_decode_83_name(const fat_dir_entry_t *entry, char *out, size_t out_size)
+{
+	if (entry == nullptr || out == nullptr || out_size == 0)
+		return false;
+	if (fat16_dir_entry_is_unused(entry) || fat16_dir_entry_is_deleted(entry))
+		return false;
+
+	size_t name_len = fat16_trim_spaces(entry->name, sizeof(entry->name));
+	size_t ext_len = fat16_trim_spaces(entry->ext, sizeof(entry->ext));
+	size_t needed = name_len + (ext_len ? 1 : 0) + ext_len + 1;
+	if (needed > out_size)
+		return false;
+
+	memcpy(out, entry->name, name_len);
+	size_t offset = name_len;
+	if (ext_len > 0) {
+		out[offset++] = '.';
+		memcpy(out + offset, entry->ext, ext_len);
+		offset += ext_len;
+	}
+	out[offset] = '\0';
+	return true;
 }
