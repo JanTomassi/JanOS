@@ -45,20 +45,25 @@ qemu_sata: JanOS.iso
 	-m 1G \
 	-machine pc -cpu qemu64 \
 	-drive id=os_file,file=JanOS.iso,format=raw,if=none \
-	-drive id=test_disk,file=harry_potter.raw,format=raw,if=none \
+	-drive id=test_fat16,file=simple_fat16.raw,format=raw,if=none \
+	-drive id=test_raw_file,file=harry_potter.raw,format=raw,if=none \
 	-device ahci,id=ahci \
 	-device ide-hd,drive=os_file,bus=ahci.0 \
-	-device ide-hd,drive=test_disk,bus=ahci.1
+	-device ide-hd,drive=test_fat16,bus=ahci.1 \
+	-device ide-hd,drive=test_raw_file,bus=ahci.2
 
 qemu_sata_debug: JanOS.iso
 	qemu-system-${ARCH} -s -S \
 	-m 1G \
 	-machine pc -cpu qemu64 \
 	-drive id=os_file,file=JanOS.iso,format=raw,if=none \
-	-drive id=test_disk,file=harry_potter.raw,format=raw,if=none \
+	-drive id=test_fat16,file=simple_fat16.raw,format=raw,if=none \
+	-drive id=test_raw_file,file=harry_potter.raw,format=raw,if=none \
 	-device ahci,id=ahci \
 	-device ide-hd,drive=os_file,bus=ahci.0 \
-	-device ide-hd,drive=test_disk,bus=ahci.1
+	-device ide-hd,drive=test_fat16,bus=ahci.1 \
+	-device ide-hd,drive=test_raw_file,bus=ahci.2
+
 
 qemu: JanOS.iso
 	qemu-system-${ARCH} \
