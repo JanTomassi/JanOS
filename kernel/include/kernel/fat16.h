@@ -35,5 +35,13 @@ typedef struct fat1_EBR{
 	uint16_t boot_partition_sig;
 }__attribute__((packed)) fat1_EBR_t;
 
+typedef struct fat16_layout{
+	uint32_t fat_start_lba;
+	uint32_t root_dir_lba;
+	uint32_t root_dir_sectors;
+	uint32_t data_start_lba;
+	uint32_t sectors_per_cluster;
+} fat16_layout_t;
 
 fat_BS_t *read_fat_boot_section(struct storage_device dev);
+void fat16_compute_layout(const fat_BS_t *bpb, fat16_layout_t *out);

@@ -340,5 +340,9 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 
 	fat_BS_t *fat_bs = read_fat_boot_section(device);
 
+	fat16_layout_t layout;
+	fat16_compute_layout(fat_bs, &layout);
+
+
 	gpa_alloc.free((fatptr_t){.ptr=fat_bs, .len=sizeof(fat_BS_t)});
 }
