@@ -68,6 +68,10 @@ uint16_t fat16_read_fat_entry(const struct storage_device *device, const fat16_l
 bool fat16_is_end_of_chain(uint16_t entry);
 bool fat16_read_root_dir(const struct storage_device *device, const fat16_layout_t *layout,
 			 fat_dir_entry_t *entries, size_t max_entries);
+bool fat16_find_entry_by_name(const struct storage_device *device, const char *name,
+			      fat_dir_entry_t *out_entry);
+bool fat16_read_file(const struct storage_device *device, const fat_dir_entry_t *entry,
+		     void *buffer, size_t buffer_size, size_t *out_bytes);
 bool fat16_dir_entry_is_unused(const fat_dir_entry_t *entry);
 bool fat16_dir_entry_is_deleted(const fat_dir_entry_t *entry);
 bool fat16_decode_83_name(const fat_dir_entry_t *entry, char *out, size_t out_size);
