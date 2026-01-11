@@ -105,6 +105,88 @@ void gpa_test(allocator_t gpa_alloc){
 	kprintf("mem1 freed\n");
 	gpa_alloc.free(mem2);
 	kprintf("mem2 freed\n");
+
+	fatptr_t ptr[512] = { 0 };
+
+	for(size_t i = 0; i < 512; i++){
+		fatptr_t mem = gpa_alloc.alloc(8);
+		ptr[i] = mem;
+	}
+	for(size_t i = 0; i < 512; i++){
+		gpa_alloc.free(ptr[i]);
+	}
+
+	for(size_t i = 0; i < 512; i++){
+		fatptr_t mem = gpa_alloc.alloc(16);
+		ptr[i] = mem;
+	}
+	for(size_t i = 0; i < 512; i++){
+		gpa_alloc.free(ptr[i]);
+	}
+
+	for(size_t i = 0; i < 512; i++){
+		fatptr_t mem = gpa_alloc.alloc(32);
+		ptr[i] = mem;
+	}
+	for(size_t i = 0; i < 512; i++){
+		gpa_alloc.free(ptr[i]);
+	}
+
+	for(size_t i = 0; i < 512; i++){
+		fatptr_t mem = gpa_alloc.alloc(64);
+		ptr[i] = mem;
+	}
+	for(size_t i = 0; i < 512; i++){
+		gpa_alloc.free(ptr[i]);
+	}
+
+	for(size_t i = 0; i < 512; i++){
+		fatptr_t mem = gpa_alloc.alloc(128);
+		ptr[i] = mem;
+	}
+	for(size_t i = 0; i < 512; i++){
+		gpa_alloc.free(ptr[i]);
+	}
+
+	for(size_t i = 0; i < 512; i++){
+		fatptr_t mem = gpa_alloc.alloc(256);
+		ptr[i] = mem;
+	}
+	for(size_t i = 0; i < 512; i++){
+		gpa_alloc.free(ptr[i]);
+	}
+
+	for(size_t i = 0; i < 512; i++){
+		fatptr_t mem = gpa_alloc.alloc(512);
+		ptr[i] = mem;
+	}
+	for(size_t i = 0; i < 512; i++){
+		gpa_alloc.free(ptr[i]);
+	}
+
+	for(size_t i = 0; i < 512; i++){
+		fatptr_t mem = gpa_alloc.alloc(1024);
+		ptr[i] = mem;
+	}
+	for(size_t i = 0; i < 512; i++){
+		gpa_alloc.free(ptr[i]);
+	}
+
+	for(size_t i = 0; i < 512; i++){
+		fatptr_t mem = gpa_alloc.alloc(2048);
+		ptr[i] = mem;
+	}
+	for(size_t i = 0; i < 512; i++){
+		gpa_alloc.free(ptr[i]);
+	}
+
+	for(size_t i = 0; i < 512; i++){
+		fatptr_t mem = gpa_alloc.alloc(4096);
+		ptr[i] = mem;
+	}
+	for(size_t i = 0; i < 512; i++){
+		gpa_alloc.free(ptr[i]);
+	}
 }
 
 struct mbi_info{
