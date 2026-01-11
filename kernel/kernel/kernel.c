@@ -343,6 +343,21 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	fat16_layout_t layout;
 	fat16_compute_layout(fat_bs, &layout);
 
+	fat_dir_entry_t hp_entry;
+	if (fat16_find_entry_by_name(&device, "hp1.txt", &hp_entry)) {
+		size_t buf_size = hp_entry.file_size + 1;
+		fatptr_t buf = gpa_alloc.alloc(buf_size);
+		if (buf.ptr != nullptr) {
+			size_t read = 0;
+			if (fat16_read_file(&device, &hp_entry, buf.ptr, buf_size - 1, &read)) {
+				((char *)buf.ptr)[read] = '\0';
+				kprintf("hp1.txt contents:\n%s\n", (char *)buf.ptr);
+			}
+			gpa_alloc.free(buf);
+		}
+	} else {
+		kprintf("hp1.txt not found\n");
+	}
 
 	gpa_alloc.free((fatptr_t){.ptr=fat_bs, .len=sizeof(fat_BS_t)});
 }
