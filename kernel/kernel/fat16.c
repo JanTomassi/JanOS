@@ -1,10 +1,16 @@
-#include <ctype.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <kernel/allocator.h>
 #include <kernel/fat16.h>
+
+static char toupper(char c){
+	if(c >= 'a' && c <= 'z'){
+		c += 'A'-'a';
+	}
+	return c;
+}
 
 static bool fat16_read_root_dir_sectors(const struct storage_device *device, const fat16_layout_t *layout,
 					uint8_t *out)
