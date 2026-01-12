@@ -549,7 +549,7 @@ void slab_init_tag_caches(mem_malloc_tag_t *malloc_tags, size_t malloc_tag_count
 	slab_init_bootstrap_cache(&phy_mem_link_cache, &phy_mem_link_slab, "phy_mem_link", sizeof(mem_phy_mem_link_t), _Alignof(mem_phy_mem_link_t),
 				  phy_links, phy_link_count, false);
 
-	slab_set_cache_reserve(&malloc_tag_cache, 1);
+	slab_set_cache_reserve(&malloc_tag_cache, 10);
 	tag_caches_ready = true;
 }
 
