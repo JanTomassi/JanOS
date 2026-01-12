@@ -20,6 +20,7 @@ slab_cache_t *slab_create(const char *name, size_t obj_size, size_t align, slab_
 fatptr_t slab_alloc_obj(slab_cache_t *cache);
 bool slab_free_obj(slab_cache_t *cache, fatptr_t obj);
 void slab_destroy(slab_cache_t *cache);
+void slab_set_cache_reserve(slab_cache_t *cache, size_t reserve_free);
 
 struct mem_malloc_tag;
 struct mem_phy_mem_link;

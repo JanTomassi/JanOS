@@ -38,6 +38,8 @@ struct slab_cache {
 	size_t obj_size;
 	size_t align;
 	size_t objs_per_slab;
+	size_t free_objs;
+	size_t reserve_free;
 	slab_ctor_t ctor;
 	slab_dtor_t dtor;
 	bool release_empty;
@@ -60,6 +62,9 @@ static struct slab malloc_tag_slab = { 0 };
 static struct slab phy_mem_tag_slab = { 0 };
 static struct slab phy_mem_link_slab = { 0 };
 
+void slab_set_cache_reserve(slab_cache_t *cache, size_t reserve_free);
+
+static void *slab_take_cache_obj_no_grow(slab_cache_t *cache);
 static void slab_free_pages(malloc_tag_t *tag);
 static void slab_init_bootstrap_cache(slab_cache_t *cache, struct slab *slab, const char *name, size_t obj_size, size_t align,
 				      void *buffer, size_t obj_count, bool release_empty);
@@ -71,7 +76,9 @@ static size_t align_up(size_t val, size_t align)
 
 static malloc_tag_t *slab_alloc_pages(size_t req)
 {
-	malloc_tag_t *tag = mem_get_tag();
+	malloc_tag_t *tag = slab_take_cache_obj_no_grow(&malloc_tag_cache);
+	if (tag == nullptr)
+		BUG("malloc tag reserve exhausted");
 	if (tag == nullptr)
 		return nullptr;
 
@@ -194,6 +201,7 @@ static struct slab *slab_new_slab(slab_cache_t *cache)
 		slab->free_list = obj;
 	}
 
+	cache->free_objs += cache->objs_per_slab;
 	list_add(&slab->list, &cache->empty);
 	return slab;
 }
@@ -263,6 +271,38 @@ static void slab_return_obj(struct slab *slab, void *ptr)
 	slab->in_use -= 1;
 }
 
+static void *slab_take_cache_obj_no_grow(slab_cache_t *cache)
+{
+	if (cache == nullptr)
+		return nullptr;
+
+	struct slab *target = nullptr;
+
+	if (cache->partial.next != &cache->partial)
+		target = list_entry(cache->partial.next, struct slab, list);
+	else if (cache->empty.next != &cache->empty)
+		target = list_entry(cache->empty.next, struct slab, list);
+	else
+		return nullptr;
+
+	void *obj = slab_take_obj(target);
+	if (obj == nullptr)
+		return nullptr;
+
+	cache->free_objs -= 1;
+	if (cache->ctor != nullptr)
+		cache->ctor(obj);
+	else
+		memset(obj, 0, cache->obj_size);
+
+	if (target->in_use == target->capacity)
+		list_mv(&target->list, &cache->full);
+	else if (list_is_first(&target->list, &cache->empty))
+		list_mv(&target->list, &cache->partial);
+
+	return obj;
+}
+
 static slab_cache_t *slab_find_or_create_cache(size_t size)
 {
 	list_for_each(&slab_caches) {
@@ -307,6 +347,8 @@ slab_cache_t *slab_create(const char *name, size_t obj_size, size_t align, slab_
 	cache->obj_size = aligned_size;
 	cache->align = real_align;
 	cache->objs_per_slab = objs_per_slab;
+	cache->free_objs = 0;
+	cache->reserve_free = 0;
 	cache->ctor = ctor;
 	cache->dtor = dtor;
 	cache->release_empty = true;
@@ -331,9 +373,15 @@ fatptr_t slab_alloc_obj(slab_cache_t *cache)
 
 	struct slab *target = nullptr;
 
-	if (cache->partial.next != &cache->partial)
+	if (cache->reserve_free > 0 && cache->free_objs <= cache->reserve_free) {
+		target = slab_new_slab(cache);
+		if (target == nullptr)
+			return (fatptr_t){ .ptr = nullptr, .len = 0 };
+	}
+
+	if (target == nullptr && cache->partial.next != &cache->partial)
 		target = list_entry(cache->partial.next, struct slab, list);
-	else if (cache->empty.next != &cache->empty)
+	else if (target == nullptr && cache->empty.next != &cache->empty)
 		target = list_entry(cache->empty.next, struct slab, list);
 
 	if (target == nullptr)
@@ -346,6 +394,7 @@ fatptr_t slab_alloc_obj(slab_cache_t *cache)
 	if (obj == nullptr)
 		return (fatptr_t){ .ptr = nullptr, .len = 0 };
 
+	cache->free_objs -= 1;
 	if (cache->ctor != nullptr)
 		cache->ctor(obj);
 	else
@@ -385,11 +434,14 @@ bool slab_free_obj(slab_cache_t *cache, fatptr_t obj)
 		cache->dtor(obj.ptr);
 
 	slab_return_obj(slab, obj.ptr);
+	cache->free_objs += 1;
 
 	if (slab->in_use == 0) {
 		list_mv(&slab->list, &cache->empty);
-		if (cache->release_empty)
+		if (cache->release_empty && cache->free_objs - slab->capacity >= cache->reserve_free) {
+			cache->free_objs -= slab->capacity;
 			slab_release_slab(slab);
+		}
 		return true;
 	}
 
@@ -445,6 +497,8 @@ static void slab_init_bootstrap_cache(slab_cache_t *cache, struct slab *slab, co
 	cache->obj_size = aligned_size;
 	cache->align = real_align;
 	cache->objs_per_slab = obj_count;
+	cache->free_objs = obj_count;
+	cache->reserve_free = 0;
 	cache->ctor = nullptr;
 	cache->dtor = nullptr;
 	cache->release_empty = release_empty;
@@ -494,7 +548,23 @@ void slab_init_tag_caches(mem_malloc_tag_t *malloc_tags, size_t malloc_tag_count
 	slab_init_bootstrap_cache(&phy_mem_link_cache, &phy_mem_link_slab, "phy_mem_link", sizeof(mem_phy_mem_link_t), _Alignof(mem_phy_mem_link_t),
 				  phy_links, phy_link_count, false);
 
+	slab_set_cache_reserve(&malloc_tag_cache, 1);
 	tag_caches_ready = true;
+}
+
+void slab_set_cache_reserve(slab_cache_t *cache, size_t reserve_free)
+{
+	if (cache == nullptr)
+		return;
+
+	cache->reserve_free = reserve_free;
+	while (cache->free_objs < cache->reserve_free) {
+		struct slab *slab = slab_new_slab(cache);
+		if (slab == nullptr)
+			break;
+	}
+	if (cache->free_objs < cache->reserve_free)
+		BUG("slab cache reserve unmet");
 }
 
 slab_cache_t *slab_get_malloc_tag_cache(void)
