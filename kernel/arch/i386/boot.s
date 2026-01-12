@@ -103,16 +103,18 @@ section .data
 global initial_page_dir:data (initial_page_dir.end - initial_page_dir)
 align 4096
 initial_page_dir:
-	dd	(0 << 22) | 10000011b
-	dd	(1 << 22) | 10000011b
-	dd	(2 << 22) | 10000011b
-	dd	(3 << 22) | 10000011b
-	times	768-4 dd 0
-	dd	(0 << 22) | 10000011b
-	dd	(1 << 22) | 10000011b
-	dd	(2 << 22) | 10000011b
-	dd	(3 << 22) | 10000011b
-	times	256-4 dd 0
+	;; Lower kernel
+	%assign i 0
+	%rep 768
+		dd  (i << 22) | 10000011b
+	%assign i i+1
+	%endrep
+	;; Higher kernel
+	%assign i 0
+	%rep 256
+		dd  (i << 22) | 10000011b
+	%assign i i+1
+	%endrep
 .end:
 
 ;; -----------------------------------------------------------------------------
