@@ -92,6 +92,7 @@ static malloc_tag_t *slab_alloc_pages(size_t req)
 	mem_set_used_tag(tag, req_align);
 	mem_set_vmm_tag(tag, vir_mem);
 	struct list_head *tag_chain = mem_get_chain_tag(tag);
+        RESET_LIST_ITEM(tag_chain);
 
 	mem_register_tag(tag);
 

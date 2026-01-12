@@ -275,6 +275,13 @@ size_t phy_mem_get_free_blocks()
 	return bitmap_free_blocks();
 }
 
+size_t phy_mem_get_used_space(){
+
+}
+
+size_t phy_mem_get_free_space(){
+}
+
 void phy_mem_rm_region(size_t addr, size_t len)
 {
 	phy_mem_set_region(addr, len, true);
