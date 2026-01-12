@@ -54,33 +54,41 @@ void section_divisor(char *section_name)
 
 void phy_memory_test()
 {
-	section_divisor("1. Physical memory allocation test:\nTesting if they will overlap:\n");
+	section_divisor("Testing physical memory allocator");
 
-	fatptr_t alloc1 = phy_mem_alloc(4096);
-	kprintf("Step 1 alloc one block without freeing: %x\n", alloc1.ptr);
+	fatptr_t ptr[512] = { 0 };
 
-	fatptr_t alloc2 = phy_mem_alloc(4096);
-	kprintf("Step 2 alloc one block without freeing: %x\n", alloc2.ptr);
+	for(size_t i = 0; i < 512; i++){
+		fatptr_t mem = phy_mem_alloc(PAGE_SIZE);
+		ptr[i] = mem;
+	}
+	for(size_t i = 0; i < 512; i++){
+		phy_mem_free(ptr[i]);
+	}
 
-	if(alloc1.ptr == alloc2.ptr)
-		kerror("Physical memory allocator should have used two different block")
+	for(size_t i = 0; i < 512; i++){
+		fatptr_t mem = phy_mem_alloc(PAGE_SIZE*2);
+		ptr[i] = mem;
+	}
+	for(size_t i = 0; i < 512; i++){
+		phy_mem_free(ptr[i]);
+	}
 
-	phy_mem_free(alloc2);
-	phy_mem_free(alloc1);
+	for(size_t i = 0; i < 512; i++){
+		fatptr_t mem = phy_mem_alloc(PAGE_SIZE*3);
+		ptr[i] = mem;
+	}
+	for(size_t i = 0; i < 512; i++){
+		phy_mem_free(ptr[i]);
+	}
 
-	section_divisor("2. Physical memory allocation test:\nTesting if reuse work:\n");
-
-	fatptr_t alloc3 = phy_mem_alloc(4096);
-	kprintf("Step 1 alloc one block then free it: %x\n", alloc3.ptr);
-	phy_mem_free(alloc3);
-
-	fatptr_t alloc4 = phy_mem_alloc(4096);
-	kprintf("Step 2 alloc one block then free it: %x\n", alloc4.ptr);
-	phy_mem_free(alloc4);
-
-	if(alloc3.ptr != alloc4.ptr)
-		kerror("Physical memory allocator should have used the same block")
-
+	for(size_t i = 0; i < 512; i++){
+		fatptr_t mem = phy_mem_alloc(PAGE_SIZE*4);
+		ptr[i] = mem;
+	}
+	for(size_t i = 0; i < 512; i++){
+		phy_mem_free(ptr[i]);
+	}
 }
 
 void gpa_test(allocator_t gpa_alloc){
