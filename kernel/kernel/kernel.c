@@ -8,6 +8,7 @@
 #include <kernel/phy_mem.h>
 #include <kernel/vir_mem.h>
 #include <kernel/allocator.h>
+#include <kernel/mem_allocs.h>
 
 #include <kernel/interrupt.h>
 #include <kernel/storage.h>
