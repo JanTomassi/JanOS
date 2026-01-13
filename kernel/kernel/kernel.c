@@ -238,8 +238,8 @@ struct mbi_info get_mbi_info(uintptr_t mbi_addr, uintptr_t kernel_start_addr){
 			kprintf("mmap\n");
 			for (mmap = res.mmap_tag->entries; (multiboot_uint8_t *)mmap < (multiboot_uint8_t *)tag + tag->size;
 			     mmap = (multiboot_memory_map_t *)((unsigned long)mmap + res.mmap_tag->entry_size))
-				kprintf(" base_addr = %x%x,"
-					" length = %x%x, type = %x\n",
+				kprintf(" base_addr = %x:%x,"
+					" length = %x:%x, type = %x\n",
 					(unsigned)(mmap->addr >> 32), (unsigned)(mmap->addr & 0xffffffff), (unsigned)(mmap->len >> 32),
 					(unsigned)(mmap->len & 0xffffffff), (unsigned)mmap->type);
 		} break;
