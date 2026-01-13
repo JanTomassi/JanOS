@@ -39,21 +39,19 @@ SECTIONS
 	. += HIGHER_HALF;
 
 	/* Code. */
-	.text . : ALIGN(4096)
+	.text . :
 	{
 		*(.text)
-		FILL(0xaa)
 	} AT> rom
 
 	/* Read-only data. */
-	.rodata . : ALIGN(4096)
+	.rodata . :
 	{
 		*(.rodata)
-		FILL(0xaa)
 	} AT> rom
 
 	/* Read-only data. */
-	.eh_frame . : ALIGN(4096)
+	.eh_frame . :
 	{
 		*(.eh_frame)
 	} AT> rom
@@ -61,19 +59,19 @@ SECTIONS
 	. = ORIGIN(hk_ram);
 
 	/* Read-write data (initialized) */
-	.data . : ALIGN(4096)
+	.data . :
 	{
 		*(.data)
 	}  AT> ram
 
 	/* Global offset table */
-	.got . : ALIGN(4096)
+	.got . :
 	{
 		*(.got*)
 	}  AT> ram
 
 	/* Read-write data (uninitialized) and stack */
-	.bss . : ALIGN(4096)
+	.bss . :
 	{
 		*(COMMON)
 		*(.bss)
