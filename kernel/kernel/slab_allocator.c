@@ -375,9 +375,14 @@ fatptr_t slab_alloc_obj(slab_cache_t *cache)
 	struct slab *target = nullptr;
 
 	if (cache->reserve_free > 0 && cache->free_objs <= cache->reserve_free) {
+		size_t save_reserve_free = cache->reserve_free;
+		cache->reserve_free = 0;
+
 		target = slab_new_slab(cache);
 		if (target == nullptr)
 			return (fatptr_t){ .ptr = nullptr, .len = 0 };
+
+		cache->reserve_free = save_reserve_free;
 	}
 
 	if (target == nullptr && cache->partial.next != &cache->partial)
@@ -550,6 +555,8 @@ void slab_init_tag_caches(mem_malloc_tag_t *malloc_tags, size_t malloc_tag_count
 				  phy_links, phy_link_count, false);
 
 	slab_set_cache_reserve(&malloc_tag_cache, 10);
+	slab_set_cache_reserve(&phy_mem_tag_cache, 10);
+	slab_set_cache_reserve(&phy_mem_link_cache, 10);
 	tag_caches_ready = true;
 }
 
