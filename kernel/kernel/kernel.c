@@ -13,6 +13,7 @@
 #include <kernel/interrupt.h>
 #include <kernel/storage.h>
 #include <kernel/fat16.h>
+#include <kernel/memblock.h>
 
 #include <string.h>
 #include "../arch/i386/ata_pio.h"
@@ -202,10 +203,9 @@ struct mbi_info{
 	struct multiboot_tag_mmap *mmap_tag;
 	struct multiboot_tag_elf_sections *elf_sec_tag;
 	struct multiboot_tag *acpi_tag;
-	uintptr_t kernel_end_addr;
 };
-struct mbi_info get_mbi_info(uintptr_t mbi_addr, uintptr_t kernel_start_addr){
-	struct mbi_info res = {.kernel_end_addr = kernel_start_addr};
+struct mbi_info get_mbi_info(uintptr_t mbi_addr){
+	struct mbi_info res = { 0 };
 
 	for (struct multiboot_tag *tag = (struct multiboot_tag *)(mbi_addr + 8); tag->type != MULTIBOOT_TAG_TYPE_END;
 	     tag = (struct multiboot_tag *)((multiboot_uint8_t *)tag + ((tag->size + 7) & ~7))) {
@@ -254,8 +254,6 @@ struct mbi_info get_mbi_info(uintptr_t mbi_addr, uintptr_t kernel_start_addr){
 					continue;
 
 				size_t section_end = round_up_to_page(elf_sec[i].sh_addr + elf_sec[i].sh_size);
-				if (section_end > res.kernel_end_addr)
-					res.kernel_end_addr = section_end;
 			}
 		} break;
 		case MULTIBOOT_TAG_TYPE_FRAMEBUFFER: {
@@ -323,11 +321,9 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	size_t mbi_size = *(unsigned *)mbi_addr;
 	kprintf("Announced mbi size %x\n", mbi_size);
 
-	struct vmm_entry preserved_entries[1] = { 0 };
-	size_t preserved_entry_count = 0;
-	uintptr_t kernel_start_addr = round_up_to_page((uintptr_t)&HIGHER_HALF);
+	memblock_init(mbi_addr, true);
 
-	struct mbi_info mbi_info = get_mbi_info(mbi_addr, kernel_start_addr);
+	struct mbi_info mbi_info = get_mbi_info(mbi_addr);
 
 	section_divisor("Initializing programable interrupt controller:\n");
 
@@ -350,105 +346,105 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	kprintf("IDT initialized\n");
 
 	phy_mem_init(mbi_info.mmap_tag, mbi_info.elf_sec_tag);
-	phy_memory_test();
+	/* phy_memory_test(); */
 
 	// Preserve multiboot2 info in virtual memory
-	const size_t mbi_alloc_size = round_up_to_page(mbi_size);
-	fatptr_t mbi_buffer = phy_mem_alloc(mbi_alloc_size);
-	if (mbi_buffer.ptr == nullptr)
-		panic("Failed to allocate space for multiboot info copy\n");
+	/* const size_t mbi_alloc_size = round_up_to_page(mbi_size); */
+	/* fatptr_t mbi_buffer = phy_mem_alloc(mbi_alloc_size); */
+	/* if (mbi_buffer.ptr == nullptr) */
+	/* 	panic("Failed to allocate space for multiboot info copy\n"); */
 
-	struct vmm_entry mbi_virt = {
-		.ptr = (void *)mbi_info.kernel_end_addr,
-		.size = mbi_buffer.len,
-		.flags = VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT,
-	};
-	map_pages(&mbi_buffer, &mbi_virt);
+	/* struct vmm_entry mbi_virt = { */
+	/* 	.ptr = (void *)mbi_info.kernel_end_addr, */
+	/* 	.size = mbi_buffer.len, */
+	/* 	.flags = VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT, */
+	/* }; */
+	/* map_pages(&mbi_buffer, &mbi_virt); */
 
-	memcpy(mbi_virt.ptr, (void *)mbi_addr, mbi_size);
-	memset((uint8_t *)mbi_virt.ptr + mbi_size, 0, mbi_virt.size - mbi_size);
+	/* memcpy(mbi_virt.ptr, (void *)mbi_addr, mbi_size); */
+	/* memset((uint8_t *)mbi_virt.ptr + mbi_size, 0, mbi_virt.size - mbi_size); */
 
-	const unsigned long relocated_addr = (unsigned long)mbi_virt.ptr;
-	if (mbi_info.mmap_tag != nullptr) {
-		const size_t offset = (size_t)((unsigned long)mbi_info.mmap_tag - mbi_addr);
-		mbi_info.mmap_tag = (struct multiboot_tag_mmap *)(relocated_addr + offset);
-	}
-	if (mbi_info.elf_sec_tag != nullptr) {
-		const size_t offset = (size_t)((unsigned long)mbi_info.elf_sec_tag - mbi_addr);
-		mbi_info.elf_sec_tag = (struct multiboot_tag_elf_sections *)(relocated_addr + offset);
-	}
-	if (mbi_info.acpi_tag != nullptr) {
-		const size_t offset = (size_t)((unsigned long)mbi_info.acpi_tag - mbi_addr);
-		mbi_info.acpi_tag = (struct multiboot_tag *)(relocated_addr + offset);
-	}
+	/* const unsigned long relocated_addr = (unsigned long)mbi_virt.ptr; */
+	/* if (mbi_info.mmap_tag != nullptr) { */
+	/* 	const size_t offset = (size_t)((unsigned long)mbi_info.mmap_tag - mbi_addr); */
+	/* 	mbi_info.mmap_tag = (struct multiboot_tag_mmap *)(relocated_addr + offset); */
+	/* } */
+	/* if (mbi_info.elf_sec_tag != nullptr) { */
+	/* 	const size_t offset = (size_t)((unsigned long)mbi_info.elf_sec_tag - mbi_addr); */
+	/* 	mbi_info.elf_sec_tag = (struct multiboot_tag_elf_sections *)(relocated_addr + offset); */
+	/* } */
+	/* if (mbi_info.acpi_tag != nullptr) { */
+	/* 	const size_t offset = (size_t)((unsigned long)mbi_info.acpi_tag - mbi_addr); */
+	/* 	mbi_info.acpi_tag = (struct multiboot_tag *)(relocated_addr + offset); */
+	/* } */
 
-	if (preserved_entry_count < sizeof(preserved_entries) / sizeof(preserved_entries[0]))
-		preserved_entries[preserved_entry_count++] = mbi_virt;
+	/* if (preserved_entry_count < sizeof(preserved_entries) / sizeof(preserved_entries[0])) */
+	/* 	preserved_entries[preserved_entry_count++] = mbi_virt; */
 
-	section_divisor("Virtual memory init:\n");
-	vmm_init(mbi_info.elf_sec_tag, preserved_entries, preserved_entry_count);
+	/* section_divisor("Virtual memory init:\n"); */
+	/* vmm_init(mbi_info.elf_sec_tag, preserved_entries, preserved_entry_count); */
 
-	section_divisor("Init kernel memory allocator:\n");
+	/* section_divisor("Init kernel memory allocator:\n"); */
 
-	init_kmalloc();
-	init_slab_allocator();
-	vmm_finish_init(mbi_info.elf_sec_tag, preserved_entries, preserved_entry_count);
+	/* init_kmalloc(); */
+	/* init_slab_allocator(); */
+	/* vmm_finish_init(mbi_info.elf_sec_tag, preserved_entries, preserved_entry_count); */
 
-	allocator_t gpa_alloc = get_gpa_allocator();
-	gpa_test(gpa_alloc);
+	/* allocator_t gpa_alloc = get_gpa_allocator(); */
+	/* gpa_test(gpa_alloc); */
 
-	section_divisor("SMP init:\n");
-	smp_init(mbi_info.acpi_tag);
+	/* section_divisor("SMP init:\n"); */
+	/* smp_init(mbi_info.acpi_tag); */
 
-	struct madt_ioapic_info ioapic_desc = { 0 };
-	struct madt_irq_override overrides[16] = { 0 };
-	size_t override_count = smp_get_irq_overrides(overrides, 16);
-	if (apic_capable && smp_get_ioapic_info(&ioapic_desc)) {
-		struct ioapic_override ioapic_overrides[16] = { 0 };
-		for (size_t i = 0; i < override_count && i < 16; i++) {
-			ioapic_overrides[i].source = overrides[i].source;
-			ioapic_overrides[i].gsi = overrides[i].gsi;
-			ioapic_overrides[i].flags = overrides[i].flags;
-		}
-		ioapic_register_overrides(ioapic_overrides, override_count);
-		ioapic_init(ioapic_desc.phys_addr, ioapic_desc.gsi_base, lapic_get_id());
-		ioapic_configure_legacy_irqs();
-		pic_disable();
-	}
+	/* struct madt_ioapic_info ioapic_desc = { 0 }; */
+	/* struct madt_irq_override overrides[16] = { 0 }; */
+	/* size_t override_count = smp_get_irq_overrides(overrides, 16); */
+	/* if (apic_capable && smp_get_ioapic_info(&ioapic_desc)) { */
+	/* 	struct ioapic_override ioapic_overrides[16] = { 0 }; */
+	/* 	for (size_t i = 0; i < override_count && i < 16; i++) { */
+	/* 		ioapic_overrides[i].source = overrides[i].source; */
+	/* 		ioapic_overrides[i].gsi = overrides[i].gsi; */
+	/* 		ioapic_overrides[i].flags = overrides[i].flags; */
+	/* 	} */
+	/* 	ioapic_register_overrides(ioapic_overrides, override_count); */
+	/* 	ioapic_init(ioapic_desc.phys_addr, ioapic_desc.gsi_base, lapic_get_id()); */
+	/* 	ioapic_configure_legacy_irqs(); */
+	/* 	pic_disable(); */
+	/* } */
 
-	irq_register_handler(0, pit_tick_handler, nullptr);
-	ps2_init();
+	/* irq_register_handler(0, pit_tick_handler, nullptr); */
+	/* ps2_init(); */
 
-	storage_init();
+	/* storage_init(); */
 
-	__asm__ volatile("sti");
+	/* __asm__ volatile("sti"); */
 
-	struct storage_device device;
-	if (!storage_get_device(1, &device)) {
-		kprintf("No storage device available\n");
-		return;
-	}
+	/* struct storage_device device; */
+	/* if (!storage_get_device(1, &device)) { */
+	/* 	kprintf("No storage device available\n"); */
+	/* 	return; */
+	/* } */
 
-	fat_BS_t *fat_bs = read_fat_boot_section(device);
+	/* fat_BS_t *fat_bs = read_fat_boot_section(device); */
 
-	fat16_layout_t layout;
-	fat16_compute_layout(fat_bs, &layout);
+	/* fat16_layout_t layout; */
+	/* fat16_compute_layout(fat_bs, &layout); */
 
-	fat_dir_entry_t hp_entry;
-	if (fat16_find_entry_by_name(&device, "hp1.txt", &hp_entry)) {
-		size_t buf_size = hp_entry.file_size + 1;
-		fatptr_t buf = gpa_alloc.alloc(buf_size);
-		if (buf.ptr != nullptr) {
-			size_t read = 0;
-			if (fat16_read_file(&device, &hp_entry, buf.ptr, buf_size - 1, &read)) {
-				((char *)buf.ptr)[read] = '\0';
-				kprintf("hp1.txt contents:\n%s\n", (char *)buf.ptr);
-			}
-			gpa_alloc.free(buf);
-		}
-	} else {
-		kprintf("hp1.txt not found\n");
-	}
+	/* fat_dir_entry_t hp_entry; */
+	/* if (fat16_find_entry_by_name(&device, "hp1.txt", &hp_entry)) { */
+	/* 	size_t buf_size = hp_entry.file_size + 1; */
+	/* 	fatptr_t buf = gpa_alloc.alloc(buf_size); */
+	/* 	if (buf.ptr != nullptr) { */
+	/* 		size_t read = 0; */
+	/* 		if (fat16_read_file(&device, &hp_entry, buf.ptr, buf_size - 1, &read)) { */
+	/* 			((char *)buf.ptr)[read] = '\0'; */
+	/* 			kprintf("hp1.txt contents:\n%s\n", (char *)buf.ptr); */
+	/* 		} */
+	/* 		gpa_alloc.free(buf); */
+	/* 	} */
+	/* } else { */
+	/* 	kprintf("hp1.txt not found\n"); */
+	/* } */
 
-	gpa_alloc.free((fatptr_t){.ptr=fat_bs, .len=sizeof(fat_BS_t)});
+	/* gpa_alloc.free((fatptr_t){.ptr=fat_bs, .len=sizeof(fat_BS_t)}); */
 }
