@@ -2,78 +2,95 @@
    designated as the entry point. */
 ENTRY(_start)
 
+INIT_ADDR = 1M;
 HIGHER_HALF = 0xC0000000;
 
-MEMORY
+PHDRS
 {
-	rom (rx) : ORIGIN = 2M,				LENGTH = 1M
-	ram (rw) : ORIGIN = ORIGIN(rom)+LENGTH(rom), 	LENGTH = 1M
+  multiboot	PT_LOAD FLAGS(4);            /* R-- */
 
-    	hk_rom (rx) : ORIGIN = HIGHER_HALF+ORIGIN(rom),	       LENGTH = 1M
-    	hk_ram (rw) : ORIGIN = ORIGIN(hk_rom)+LENGTH(hk_rom),  LENGTH = 1M
+  boot   	PT_LOAD FLAGS(5);            /* R-X */
+
+  text   	PT_LOAD FLAGS(5);            /* R-X */
+  rodata 	PT_LOAD FLAGS(4);            /* R-- */
+  data   	PT_LOAD FLAGS(6);            /* RW- */
 }
 
 SECTIONS
 {
 	/DISCARD/ :
 	{
-		/* *(.got*) */
-		*(.eh_frame)
         	*(.note .note.*)
 	}
 
-	. = ORIGIN(rom);
+	. = INIT_ADDR;
 
-	.multiboot . :
+	.multiboot : AT (ADDR(.multiboot))
 	{
 		. = ALIGN(8);
 		*(.multiboot)
 		. = ALIGN(8);
-	} AT> rom
+	} :multiboot
 
-	.boot . :
+	. = ALIGN(4K);
+
+	.boot : AT (ADDR(.boot))
 	{
-		*(.boot)
-	} AT> rom
+		KEEP(*(.boot .boot.*))
+	} :boot
 
 	. += HIGHER_HALF;
+	. = ALIGN(4K);
 
 	/* Code. */
-	.text . :
+	.text : AT(ADDR(.text) - HIGHER_HALF)
 	{
-		*(.text)
-	} AT> rom
+		*(.text .text.*)
+	} :text
+
+	. = ALIGN(4K);
 
 	/* Read-only data. */
-	.rodata . :
+	.rodata : AT(ADDR(.rodata) - HIGHER_HALF)
 	{
-		*(.rodata)
-	} AT> rom
+		*(.rodata .rodata.*)
+	} :rodata
 
 	/* Read-only data. */
-	.eh_frame . :
+	.eh_frame : AT(ADDR(.eh_frame) - HIGHER_HALF)
 	{
-		*(.eh_frame)
-	} AT> rom
-
-	. = ORIGIN(hk_ram);
-
-	/* Read-write data (initialized) */
-	.data . :
-	{
-		*(.data)
-	}  AT> ram
+		*(.eh_frame .eh_frame.*)
+	} :rodata
 
 	/* Global offset table */
-	.got . :
+	.got : AT(ADDR(.got) - HIGHER_HALF)
 	{
-		*(.got*)
-	}  AT> ram
+		*(.got .got.*)
+	} :rodata
+
+	. = ALIGN(4K);
+
+	/* Read-write data (initialized) */
+	.data : AT(ADDR(.data) - HIGHER_HALF)
+	{
+		*(.data .data.*)
+	} :data
 
 	/* Read-write data (uninitialized) and stack */
-	.bss . :
+	.bss : AT(ADDR(.bss) - HIGHER_HALF)
 	{
 		*(COMMON)
-		*(.bss)
-	}  AT> ram
+		*(.bss .bss.*)
+	} :data
+
+	. = ALIGN(4K);
+	.init.text : AT(ADDR(.init.text) - HIGHER_HALF)
+	{
+		*(.init.text .init.text.*)
+	}
+
+	.init.data : AT(ADDR(.init.data) - HIGHER_HALF)
+	{
+		*(.init.data .init.data.*)
+	}
 }
