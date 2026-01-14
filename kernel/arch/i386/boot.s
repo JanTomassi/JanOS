@@ -23,7 +23,6 @@ framebuffer_tag_end:
 multiboot_header_end:
 
 
-extern kernel_main
 extern exception_handler
 extern kprintf
 
@@ -70,20 +69,16 @@ gdtr:
 	dw 	gdt.end - gdt
 	dd 	gdt
 
-
-
-
 ;; The linker script specifies _start as the entry point to the kernel and the
 ;; bootloader will jump to this position once the kernel has been loaded. It
 ;; doesn't make sense to return from this function as the bootloader is gone.
-section .boot
+section .boot exec
 extern	HIGHER_HALF
 global _start:function
 _start:
 	mov	ecx, initial_page_dir
 	sub	ecx, HIGHER_HALF
 	mov 	cr3, ecx
-	mov 	dword [ecx + 4 * 1023], 0
 	mov	dword [ecx + 4 * 1023], ecx
 	or	dword [ecx + 4 * 1023], 11b
 
@@ -97,7 +92,6 @@ _start:
 	mov 	cr0, ecx
 
 	jmp	call_kernel
-
 
 section .data
 global initial_page_dir:data (initial_page_dir.end - initial_page_dir)
@@ -128,6 +122,7 @@ stack_top:
 
 
 section .text
+extern kernel_main
 call_kernel:
 	;; The bootloader has loaded us into 32-bit protected mode on a x86
 	;; machine. Interrupts are disabled. Paging is disabled. The processor
@@ -147,9 +142,9 @@ call_kernel:
 	mov 	esp, stack_top
 	mov 	ebp, stack_top
 
+	;; pushing mbi_addr and magic num
 	push	ebx
 	push 	eax
-
 
 	mov 	eax, cr0
 	and 	ax, 0xFFFB	; clear coprocessor emulation CR0.EM
