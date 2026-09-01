@@ -1,4 +1,5 @@
 #include <kernel/display.h>
+#include <kernel/spinlock.h>
 #include <string.h>
 
 #include <stdint.h>
@@ -9,6 +10,7 @@ static display_t disps[DISPLAY_MAX_DISPS];
 static uint8_t _last_register = 0;
 static uint8_t current = 0;
 static bool enabled = false;
+static spinlock_t print_lock = { 0 };
 
 void __kprintf_va_list(char *str, va_list ap);
 
@@ -121,9 +123,16 @@ void __mprintf(char *m, ...)
 {
 	va_list ap;
 	va_start(ap, m);
-	kprintf("[%s]: ", m);
+	spin_lock(&print_lock);
+	if (enabled) {
+		disps[current].puts("[");
+		disps[current].puts(m);
+		disps[current].puts("]: ");
+	}
 	char *fmt = va_arg(ap, char *);
 	__kprintf_va_list(fmt, ap);
+	spin_unlock(&print_lock);
+	va_end(ap);
 }
 
 int kprintf(const char *str, ...)
@@ -132,7 +141,10 @@ int kprintf(const char *str, ...)
 		return 0;
 	va_list ap;
 	va_start(ap, str);
+	spin_lock(&print_lock);
 	__kprintf_va_list((char *)str, ap);
+	spin_unlock(&print_lock);
+	va_end(ap);
 	return 1;
 }
 

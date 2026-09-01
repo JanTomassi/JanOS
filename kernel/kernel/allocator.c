@@ -31,7 +31,7 @@ static void gpa_map_tag_pages(malloc_tag_t *tag, size_t alloc_size, size_t used_
 	struct list_head *tag_chain = mem_get_chain_tag(tag);
 
 	for (void *vir_ptr = mem_get_ptr_tag(tag); vir_ptr < mem_get_ptr_tag(tag) + mem_get_size_tag(tag); vir_ptr += PAGE_SIZE) {
-		fatptr_t phy_mem = phy_mem_alloc(PAGE_SIZE);
+		fatptr_t phy_mem = phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH);
 		struct vmm_entry vir_info = {
 			.ptr = vir_ptr,
 			.size = PAGE_SIZE,

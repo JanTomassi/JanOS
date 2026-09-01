@@ -80,9 +80,19 @@ void map_page(const void *phy_addr, const void *virt_addr, uint16_t virt_flags)
 	size_t *pt = ((size_t *)page_table_addr) + (0x400 * pd_idx);
 
 	if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0) {
-		pd[pd_idx] = (size_t)phy_mem_alloc(PAGE_SIZE).ptr;
+		pd[pd_idx] = (size_t)phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH).ptr;
 		pd[pd_idx] |= VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT;
 		memset(pt, 0, PAGE_SIZE);
+	} else if (pd[pd_idx] & VMM_ENTRY_PAGE_SIZE_BIT) {
+		const size_t huge = pd[pd_idx];
+		const size_t table = (size_t)phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH).ptr;
+		if (table == 0)
+			panic("Failed to split huge page mapping\n");
+
+		pd[pd_idx] = table | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT;
+		for (size_t i = 0; i < 1024; i++)
+			pt[i] = ((huge & VMM_ENTRY_LOCATION_4M_LOW_BITS) + i * PAGE_SIZE) |
+				(huge & 0xFFF & ~VMM_ENTRY_PAGE_SIZE_BIT);
 	}
 
 	pt[pt_idx] = ((size_t)phy_addr) | (virt_flags & 0xFFF);
@@ -167,15 +177,7 @@ void unmap_pages(const fatptr_t *phy_mem, const struct vmm_entry *virt_mem)
 
 static void invalidate_low_range(void)
 {
-	size_t *pd = (size_t *)page_directory_addr;
-	for (size_t i = 0; i < 768; i++) {
-		if ((pd[i] & VMM_ENTRY_PRESENT_BIT) == 1)
-			pd[i] = 0;
-	}
-	__asm__ volatile("push %eax;"
-			 "mov  %cr3, %eax;"
-			 "mov  %eax, %cr3;"
-			 "pop  %eax;");
+	/* Keep identity mappings until the physical allocator metadata is mapped high. */
 }
 
 static inline void print_elf_sector(const Elf32_Shdr *elf_sec, const char *elf_sec_str, const size_t i)
@@ -188,6 +190,12 @@ static inline void print_elf_sector(const Elf32_Shdr *elf_sec, const char *elf_s
 
 static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm_entry *preserved_entries, size_t preserved_entry_count)
 {
+	/* Boot paging already maps the complete low and higher-half address space. */
+	(void)elf_tag;
+	(void)preserved_entries;
+	(void)preserved_entry_count;
+	return;
+
 	LIST_HEAD(vmm_used_list);
 	struct vmm_entry usable_entry[64] = { 0 };
 	const size_t usable_capacity = sizeof(usable_entry) / sizeof(usable_entry[0]);
@@ -222,7 +230,7 @@ static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, c
 			print_elf_sector(elf_sec, elf_sec_str, i);
 		}
 
-		size_t elf_s = elf_sec[i].sh_addr;
+		size_t elf_s = round_down_to_page(elf_sec[i].sh_addr);
 		size_t elf_e = round_up_to_page(elf_sec[i].sh_addr + elf_sec[i].sh_size);
 
 		struct vmm_entry entry = {
@@ -250,7 +258,7 @@ static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, c
 	/**
 	 * Temporanialiy bind the address 1000 to the new pd
 	 */
-	fatptr_t pd = phy_mem_alloc(PAGE_SIZE);
+	fatptr_t pd = phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH);
 	struct vmm_entry tmp_virt = (struct vmm_entry){
 		.ptr = (void *)0x1000,
 		.size = PAGE_SIZE,
@@ -264,9 +272,10 @@ static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, c
 	list_for_each(&vmm_used_list) {
 		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
 
+		size_t mapped_pages = 0;
 		for (void *virt_addr = cur->ptr; virt_addr < (cur->ptr + cur->size); virt_addr += PAGE_SIZE) {
-			if (((size_t)virt_addr & 0xfff) != 0)
-				panic("address is not 4k aligned");
+			if (++mapped_pages > 1024)
+				panic("virtual range is unexpectedly large\n");
 
 			map_pages(&pd, &tmp_virt);
 
@@ -276,7 +285,7 @@ static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, c
 			size_t *px = (size_t *)tmp_virt.ptr;
 
 			if ((px[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0) {
-				px[pd_idx] = (size_t)phy_mem_alloc(PAGE_SIZE).ptr;
+				px[pd_idx] = (size_t)phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH).ptr;
 
 				px[pd_idx] |= 1 | cur->flags | VMM_ENTRY_READ_WRITE_BIT;
 
@@ -288,7 +297,10 @@ static void recreate_vir_mem(const struct multiboot_tag_elf_sections *elf_tag, c
 				map_pages(&(fatptr_t){ .ptr = (void *)(px[pd_idx] & ~0xfff), .len = PAGE_SIZE }, &tmp_virt);
 			}
 
-			px[pt_idx] = ((size_t)vmm_phy_addr((void *)virt_addr)) | (cur->flags & 0xFFF);
+			void *physical = vmm_phy_addr((void *)virt_addr);
+			if (physical == nullptr)
+				panic("missing physical mapping for kernel range\n");
+			px[pt_idx] = ((size_t)physical) | (cur->flags & 0xFFF);
 		}
 	}
 
@@ -430,7 +442,10 @@ struct vmm_entry *vmm_alloc(size_t req_size, uint8_t flags)
 
 	struct vmm_entry *free_chunk = nullptr;
 
+	size_t free_count = 0;
 	list_for_each(&vmm_free_list) {
+		if (++free_count > 256)
+			panic("Corrupt virtual free list\n");
 		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
 
 		size_t cur_free = cur->size;
@@ -513,6 +528,30 @@ void vmm_free(const void *ptr)
 #endif
 }
 
+void vmm_release_init(void)
+{
+	extern uint8_t __sinit;
+	extern uint8_t __einit;
+	const uintptr_t start = round_down_to_page((uintptr_t)&__sinit);
+	const uintptr_t end = round_up_to_page((uintptr_t)&__einit);
+
+	for (struct list_head *it = vmm_used_list.next; it != &vmm_used_list;) {
+		struct list_head *next = it->next;
+		struct vmm_entry *entry = list_entry(it, struct vmm_entry, list);
+		if ((uintptr_t)entry->ptr >= start && (uintptr_t)entry->ptr < end) {
+			for (uintptr_t page = round_down_to_page((uintptr_t)entry->ptr);
+			     page < round_up_to_page((uintptr_t)entry->ptr + entry->size);
+			     page += PAGE_SIZE) {
+				void *physical = vmm_phy_addr((void *)page);
+				if (physical != nullptr)
+					unmap_page(physical, (void *)page);
+			}
+			list_mv(&entry->list, vmm_free_list.prev);
+		}
+		it = next;
+	}
+}
+
 static void migrate_tags_to_slab(void)
 {
 	if (vmm_allocator_initialized)
@@ -593,7 +632,10 @@ static void init_vir_manager(struct list_head *vmm_init_list)
 	RESET_LIST_ITEM(&vmm_used_list);
 
 	// Add all the virtual memory mapping to the kmalloc known block
+	size_t count = 0;
 	list_for_each(vmm_init_list) {
+		if (++count > 64)
+			panic("Corrupt initial virtual memory list\n");
 		struct vmm_entry *vmm_cur = list_entry(it, struct vmm_entry, list);
 
 		struct vmm_entry *vmm_tag = vmm_entry_alloc();
@@ -665,7 +707,7 @@ void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm
 	RESET_LIST_ITEM(&init_entry.list);
 
 	init_vmm_entry[init_vmm_entris_used] = init_entry;
-	list_add(&init_entry.list, &init_vmm_free_list);
+	list_add(&init_vmm_entry[0].list, &init_vmm_free_list);
 	init_vmm_entris_used++;
 
 	const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)elf_tag->sections;
@@ -683,8 +725,10 @@ void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm
 			continue;
 		}
 
-		list_for_each(&init_vmm_free_list) {
+		for (struct list_head *it = init_vmm_free_list.next;
+		     it != &init_vmm_free_list;) {
 			struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
+			struct list_head *next = it->next;
 
 			/*
 			 * Intersect the two range, and in case split
@@ -697,8 +741,10 @@ void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm
 			void *elf_s = (void *)elf_sec[i].sh_addr;
 			void *elf_e = (void *)elf_sec[i].sh_addr + elf_sec[i].sh_size;
 
-			if (elf_s > cur_e || cur_s >= elf_e)
+			if (elf_s > cur_e || cur_s >= elf_e) {
+				it = next;
 				continue;
+			}
 
 			void *range_s = (void *)round_down_to_page((size_t)cur_s > (size_t)elf_s ? (size_t)cur_s : (size_t)elf_s);
 			void *range_e = (void *)round_up_to_page((size_t)cur_e < (size_t)elf_e ? (size_t)cur_e : (size_t)elf_e);
@@ -730,6 +776,7 @@ void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm
 				init_vmm_entris_used++;
 			}
 			list_rm(&cur->list);
+			it = next;
 		}
 	}
 
@@ -740,14 +787,18 @@ void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm
 		uintptr_t range_s = (uintptr_t)preserved_entries[i].ptr;
 		uintptr_t range_e = (uintptr_t)preserved_entries[i].ptr + preserved_entries[i].size;
 
-		list_for_each(&init_vmm_free_list) {
+		for (struct list_head *it = init_vmm_free_list.next;
+		     it != &init_vmm_free_list;) {
 			struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
+			struct list_head *next = it->next;
 
 			uintptr_t cur_s = (uintptr_t)cur->ptr;
 			uintptr_t cur_e = (uintptr_t)cur->ptr + cur->size;
 
-			if (range_s > cur_e || cur_s >= range_e)
+			if (range_s > cur_e || cur_s >= range_e) {
+				it = next;
 				continue;
+			}
 
 			uintptr_t inter_s = round_down_to_page((uintptr_t)(cur_s > range_s ? cur_s : range_s));
 			uintptr_t inter_e = round_up_to_page((uintptr_t)(cur_e < range_e ? cur_e : range_e));
@@ -776,6 +827,7 @@ void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm
 			}
 
 			list_rm(&cur->list);
+			it = next;
 		}
 	}
 

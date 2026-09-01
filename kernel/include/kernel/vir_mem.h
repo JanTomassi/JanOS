@@ -62,3 +62,4 @@ void unmap_pages(const fatptr_t *phy_mem, const struct vmm_entry *virt_mem);
 
 struct vmm_entry *vmm_alloc(size_t req_size, uint8_t flags);
 void vmm_free(const void *ptr);
+void vmm_release_init(void);

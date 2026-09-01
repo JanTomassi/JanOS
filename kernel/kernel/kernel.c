@@ -47,49 +47,40 @@ static void imcr_route_to_apic(void)
 
 void section_divisor(char *section_name)
 {
+	const char* div = "---------------------------------------"
+			  "-------------------------------------\n";
+	const size_t div_len = strlen(div);
+	const size_t section_len = strlen(section_name);
+
 	if (section_name != NULL)
 		kprintf("\n%s", section_name);
 
-	kprintf("---------------------------------------"
-		"-------------------------------------\n");
+	if ((long)div_len - (long)section_len < 1)
+		panic("section divisor to long");
+
+	kprintf(div + section_len);
 }
 
 void phy_memory_test()
 {
 	section_divisor("Testing physical memory allocator");
+	const size_t alloc_count = 4;
 
-	fatptr_t ptr[512] = { 0 };
+	fatptr_t ptr[alloc_count];
 
-	for(size_t i = 0; i < 512; i++){
-		fatptr_t mem = phy_mem_alloc(PAGE_SIZE);
-		ptr[i] = mem;
-	}
-	for(size_t i = 0; i < 512; i++){
-		phy_mem_free(ptr[i]);
-	}
-
-	for(size_t i = 0; i < 512; i++){
-		fatptr_t mem = phy_mem_alloc(PAGE_SIZE*2);
-		ptr[i] = mem;
-	}
-	for(size_t i = 0; i < 512; i++){
-		phy_mem_free(ptr[i]);
-	}
-
-	for(size_t i = 0; i < 512; i++){
-		fatptr_t mem = phy_mem_alloc(PAGE_SIZE*3);
-		ptr[i] = mem;
-	}
-	for(size_t i = 0; i < 512; i++){
-		phy_mem_free(ptr[i]);
-	}
-
-	for(size_t i = 0; i < 512; i++){
-		fatptr_t mem = phy_mem_alloc(PAGE_SIZE*4);
-		ptr[i] = mem;
-	}
-	for(size_t i = 0; i < 512; i++){
-		phy_mem_free(ptr[i]);
+	for (size_t k = 0; k <= 10; k++){
+		kprintf("Level is: %x\n", k);
+		for(size_t i = 0; i < alloc_count; i++){
+			fatptr_t mem = phy_mem_alloc(PAGE_SIZE << k, PHY_MEM_ALLOC_HIGH);
+			if (mem.ptr == nullptr)
+				panic("physical allocator test allocation failed at level %x\n", k);
+			kprintf("mem allocated: ptr %x, len %x\n", mem.ptr, mem.len);
+			ptr[i] = mem;
+		}
+		for(size_t i = 0; i < alloc_count; i++){
+			phy_mem_free(ptr[i]);
+		}
+		kprintf("\n");
 	}
 }
 
@@ -296,6 +287,30 @@ struct mbi_info get_mbi_info(uintptr_t mbi_addr){
 	return res;
 }
 
+static struct mbi_info find_mbi_info(uintptr_t mbi_addr)
+{
+	struct mbi_info res = { 0 };
+	for (struct multiboot_tag *tag = (struct multiboot_tag *)(mbi_addr + 8);
+	     tag->type != MULTIBOOT_TAG_TYPE_END;
+	     tag = (struct multiboot_tag *)((uint8_t *)tag + ((tag->size + 7) & ~7))) {
+		switch (tag->type) {
+		case MULTIBOOT_TAG_TYPE_MMAP:
+			res.mmap_tag = (struct multiboot_tag_mmap *)tag;
+			break;
+		case MULTIBOOT_TAG_TYPE_ELF_SECTIONS:
+			res.elf_sec_tag = (struct multiboot_tag_elf_sections *)tag;
+			break;
+		case MULTIBOOT_TAG_TYPE_ACPI_OLD:
+		case MULTIBOOT_TAG_TYPE_ACPI_NEW:
+			res.acpi_tag = tag;
+			break;
+		default:
+			break;
+		}
+	}
+	return res;
+}
+
 void kernel_main(unsigned int magic, unsigned long mbi_addr)
 {
 	display_t serial_dpy = init_serial();
@@ -305,7 +320,7 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 		display_setcurrent(serial_dpy_reg);
 	}
 
-	section_divisor("Control registers:\n");
+	section_divisor("Control registers");
 	debug_CR_reg();
 
 	/* Make sure the magic number matches for memory mapping*/
@@ -321,38 +336,28 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	size_t mbi_size = *(unsigned *)mbi_addr;
 	kprintf("Announced mbi size %x\n", mbi_size);
 
-	memblock_init(mbi_addr, true);
+	memblock_init(mbi_addr, false);
+	memblock_dump();
 
-	struct mbi_info mbi_info = get_mbi_info(mbi_addr);
+	phy_mem_init();
 
-	section_divisor("Initializing programable interrupt controller:\n");
-
-	bool apic_capable = cpuid_has_apic();
-	if (!apic_capable) {
-		PIC_remap(0x20, 0x28);
-		kprintf("- IRQ Master: start at dec: %u, hex: %x\n"
-			"                end at dec: %u, hex: %x\n",
-			0x20, 0x20, 0x20 + 7, 0x20 + 7);
-		kprintf("- IRQ Slave:  start at dec: %u, hex: %x\n"
-			"                end at dec: %u, hex: %x\n",
-			0x28, 0x28, 0x28 + 7, 0x28 + 7);
-	} else {
-		kprintf("APIC detected, routing interrupts via Local APIC/IOAPIC\n");
-		imcr_route_to_apic();
-	}
-
-	section_divisor("Initializing interrupt description table:\n");
-	idt_init();
-	kprintf("IDT initialized\n");
-
-	phy_mem_init(mbi_info.mmap_tag, mbi_info.elf_sec_tag);
-	/* phy_memory_test(); */
-
-	// Preserve multiboot2 info in virtual memory
-	/* const size_t mbi_alloc_size = round_up_to_page(mbi_size); */
-	/* fatptr_t mbi_buffer = phy_mem_alloc(mbi_alloc_size); */
-	/* if (mbi_buffer.ptr == nullptr) */
-	/* 	panic("Failed to allocate space for multiboot info copy\n"); */
+	struct mbi_info mbi_info = find_mbi_info(mbi_addr);
+	const size_t mbi_copy_size = round_up_to_page(mbi_size);
+	fatptr_t mbi_copy_phys = phy_mem_alloc(mbi_copy_size, PHY_MEM_ALLOC_HIGH);
+	if (mbi_copy_phys.ptr == nullptr)
+		panic("Failed to allocate Multiboot copy\n");
+	memcpy(mbi_copy_phys.ptr, (const void *)mbi_addr, mbi_size);
+	memset((uint8_t *)mbi_copy_phys.ptr + mbi_size, 0, mbi_copy_size - mbi_size);
+	const uintptr_t mbi_offset = mbi_addr & (PAGE_SIZE - 1);
+	const uintptr_t mbi_high_addr = (uintptr_t)&HIGHER_HALF + (mbi_addr - mbi_offset);
+	const size_t mbi_alloc_size = round_up_to_page(mbi_offset + mbi_size);
+	const struct vmm_entry preserved_entries[] = {
+		{
+			.ptr = (void *)mbi_high_addr,
+			.size = mbi_alloc_size,
+			.flags = VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT,
+		},
+	};
 
 	/* struct vmm_entry mbi_virt = { */
 	/* 	.ptr = (void *)mbi_info.kernel_end_addr, */
@@ -381,20 +386,40 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	/* if (preserved_entry_count < sizeof(preserved_entries) / sizeof(preserved_entries[0])) */
 	/* 	preserved_entries[preserved_entry_count++] = mbi_virt; */
 
-	/* section_divisor("Virtual memory init:\n"); */
-	/* vmm_init(mbi_info.elf_sec_tag, preserved_entries, preserved_entry_count); */
-
-	/* section_divisor("Init kernel memory allocator:\n"); */
-
-	/* init_kmalloc(); */
-	/* init_slab_allocator(); */
-	/* vmm_finish_init(mbi_info.elf_sec_tag, preserved_entries, preserved_entry_count); */
+	section_divisor("Virtual memory init");
+	vmm_init(mbi_info.elf_sec_tag, nullptr, 0);
+	init_kmalloc();
+	init_slab_allocator();
+	vmm_finish_init(mbi_info.elf_sec_tag, nullptr, 0);
+	struct vmm_entry *mbi_copy_virt = vmm_alloc(mbi_copy_size,
+		VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
+	if (mbi_copy_virt == nullptr)
+		panic("Failed to allocate virtual Multiboot copy\n");
+	map_pages(&mbi_copy_phys, mbi_copy_virt);
+	mbi_info = find_mbi_info((uintptr_t)mbi_copy_virt->ptr);
 
 	/* allocator_t gpa_alloc = get_gpa_allocator(); */
 	/* gpa_test(gpa_alloc); */
 
-	/* section_divisor("SMP init:\n"); */
-	/* smp_init(mbi_info.acpi_tag); */
+	/* section_divisor("Initializing programable interrupt controller:\n"); */
+
+	/* bool apic_capable = cpuid_has_apic(); */
+	/* if (!apic_capable) { */
+	/* 	PIC_remap(0x20, 0x28); */
+	/* 	kprintf("- IRQ Master: start at dec: %u, hex: %x\n" */
+	/* 		"                end at dec: %u, hex: %x\n", */
+	/* 		0x20, 0x20, 0x20 + 7, 0x20 + 7); */
+	/* 	kprintf("- IRQ Slave:  start at dec: %u, hex: %x\n" */
+	/* 		"                end at dec: %u, hex: %x\n", */
+	/* 		0x28, 0x28, 0x28 + 7, 0x28 + 7); */
+	/* } else { */
+	/* 	kprintf("APIC detected, routing interrupts via Local APIC/IOAPIC\n"); */
+	/* 	imcr_route_to_apic(); */
+	/* } */
+
+	idt_init();
+	smp_init(mbi_info.acpi_tag);
+	vmm_release_init();
 
 	/* struct madt_ioapic_info ioapic_desc = { 0 }; */
 	/* struct madt_irq_override overrides[16] = { 0 }; */
@@ -447,4 +472,6 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	/* } */
 
 	/* gpa_alloc.free((fatptr_t){.ptr=fat_bs, .len=sizeof(fat_BS_t)}); */
+
+	kprintf("Finish init\n");
 }

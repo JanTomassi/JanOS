@@ -84,6 +84,11 @@ SECTIONS
 	} :data
 
 	. = ALIGN(4K);
+	.init.begin : AT(ADDR(.init.begin) - HIGHER_HALF)
+	{
+		__sinit = .;
+	}
+
 	.init.text : AT(ADDR(.init.text) - HIGHER_HALF)
 	{
 		*(.init.text .init.text.*)
@@ -92,5 +97,11 @@ SECTIONS
 	.init.data : AT(ADDR(.init.data) - HIGHER_HALF)
 	{
 		*(.init.data .init.data.*)
+	}
+
+	. = ALIGN(4K);
+	.init.end : AT(ADDR(.init.end) - HIGHER_HALF)
+	{
+		__einit = .;
 	}
 }

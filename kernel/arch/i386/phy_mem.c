@@ -1,495 +1,447 @@
+#include <kernel/memblock.h>
 #include <kernel/phy_mem.h>
 #include <kernel/display.h>
+#include <kernel/sections.h>
 #include <string.h>
 #include <stdlib.h>
 #include <list.h>
+#include <kernel/spinlock.h>
 
 MODULE("Physical Memory");
 
-#define BLOCK_SIZE (KIBI(4ULL))
-#define MAX_BLOCKS (GIBI(4ULL) / BLOCK_SIZE) // Limit to x86_32 max addressable memory
-static_assert(MAX_BLOCKS == 0x100000);
-#define BITMAP_META_SIZE (sizeof(size_t) * 3 + sizeof(struct list_head))
-#define BITMAP_WORDS ((BLOCK_SIZE - BITMAP_META_SIZE) / sizeof(uint32_t))
-static_assert(BITMAP_WORDS > 0, "Bitmap words must be positive");
-#define BITMAP_CHUNK_CAPACITY (BITMAP_WORDS * BIT(sizeof(uint32_t)))
+#define ceil_div(x, y) ((x) / (y) + ((x) % (y) != 0))
 
-/**
- * Memory book keeping will be keept using a linked list of block all
- * the element of each block will be a fat pointer (address and size)
- * and the last element will rapresent links to next and prev
- **/
-#define BOOKING_COUNT BLOCK_SIZE / sizeof(fatptr_t) - 1
-struct booking_block {
-	fatptr_t allocs[BLOCK_SIZE / sizeof(fatptr_t) - 1];
-	struct list_head list;
-};
-static_assert(sizeof(struct booking_block) == BLOCK_SIZE, "Booking block is not equal to a block, this is not allowed");
+static struct buddy_bitmap{
+	size_t  pool_start;     // buddy managed memory start
+	size_t  pool_size;      // buddy managed memory size
+	size_t  min_block_size; // level 0 size
+	uint8_t levels;
+	size_t  top_childs_count; // Number of childs from level 0
+	size_t  level_0_count;
 
-struct bitmap_chunk {
-	size_t used_blocks;
-	size_t capacity;
-	size_t base_block;
-	struct list_head list;
-	uint32_t bits[BITMAP_WORDS];
-};
-static_assert(sizeof(struct bitmap_chunk) == BLOCK_SIZE, "Bitmap chunk must fit exactly one block");
+	// one bit per block
+	uint8_t *bitmap;
+	size_t bitmap_size;
+	size_t bitmap_managed_size;
+} buddy_bitmap;
 
-struct phy_slab_free {
-	struct phy_slab_free *next;
-};
+static spinlock_t buddy_lock = { 0 };
 
-struct phy_slab_page {
-	void *mem;
-	struct list_head list;
-};
-
-struct phy_slab_cache {
-	size_t obj_size;
-	struct phy_slab_free *free_list;
-	struct list_head pages;
-};
-
-#define METADATA_ARENA_SIZE (BLOCK_SIZE * 96)
-static uint8_t metadata_arena[METADATA_ARENA_SIZE] = { 0 };
-static size_t metadata_offset = 0;
-
-static struct phy_slab_cache bitmap_slab = { 0 };
-static struct phy_slab_cache booking_block_slab = { 0 };
-static LIST_HEAD(booking_block_list);
-static LIST_HEAD(bitmap_chunk_list);
-
-static void *metadata_alloc(size_t size)
+__pure static inline fatptr_t phy_mem_invalid(void)
 {
-	const size_t align = sizeof(void *);
-	const size_t aligned = (size + (align - 1)) & ~(align - 1);
-
-	if (metadata_offset + aligned > METADATA_ARENA_SIZE)
-		return nullptr;
-
-	void *ptr = metadata_arena + metadata_offset;
-	metadata_offset += aligned;
-	return ptr;
+	return (fatptr_t){ .ptr = nullptr, .len = 0 };
 }
 
-static void init_slab_cache(struct phy_slab_cache *cache, size_t obj_size)
-{
-	cache->obj_size = obj_size;
-	cache->free_list = nullptr;
-	cache->pages.next = &cache->pages;
-	cache->pages.prev = &cache->pages;
+__pure static inline size_t bitmap_get_max_idx(size_t level){
+	const size_t idx_s = (1 << level)-1;
+	const size_t idx_e = (1 << (level+1))-1; // Not inclusive range
+	const size_t idx_count = idx_e - idx_s;
+	return idx_count;
 }
 
-static void slab_add_page(struct phy_slab_cache *cache)
+__hot static inline bool bitmap_get_bit(size_t idx)
 {
-	void *page_mem = metadata_alloc(BLOCK_SIZE);
-	if (page_mem == nullptr)
-		return;
+	if(idx/8 >= buddy_bitmap.bitmap_size){
+		panic("bitmap access is outside range: max is %x, requested %x", buddy_bitmap.bitmap_size*8, idx);
+	}
+        return buddy_bitmap.bitmap[idx/8] >> (idx % 8) & 0x1;
+}
 
-	struct phy_slab_page *page = metadata_alloc(sizeof(struct phy_slab_page));
-	if (page == nullptr)
-		return;
+__hot static inline bool bitmap_set_bit(size_t idx, bool val)
+{
+	if(idx/8 >= buddy_bitmap.bitmap_size){
+		panic("bitmap access is outside range: max is %x, requested %x", buddy_bitmap.bitmap_size*8, idx);
+	}
+	const bool prev_val = bitmap_get_bit(idx);
+	buddy_bitmap.bitmap[idx/8] = (buddy_bitmap.bitmap[idx/8] & ~(1<< (idx % 8))) | (val << (idx % 8));
+	return prev_val;
+}
 
-	page->mem = page_mem;
-	RESET_LIST_ITEM(&page->list);
-	list_add(&page->list, &cache->pages);
+__hot __const static inline size_t bitmap_get_index(size_t tree, size_t level, size_t idx)
+{
+	if(tree >= buddy_bitmap.level_0_count){
+		panic("Requested tree is to big: max is %x, requested %x", buddy_bitmap.level_0_count, tree);
+	}else if (level >= buddy_bitmap.levels){
+		panic("Requested level is to depth: max is %x, requested %x", buddy_bitmap.levels - 1, level);
+	}
 
-	const size_t obj_count = BLOCK_SIZE / cache->obj_size;
-	for (size_t i = 0; i < obj_count; i++) {
-		struct phy_slab_free *obj = (struct phy_slab_free *)((uint8_t *)page_mem + (i * cache->obj_size));
-		obj->next = cache->free_list;
-		cache->free_list = obj;
+	const size_t idx_count = bitmap_get_max_idx(level);
+
+	if (idx >= idx_count){
+		panic("Requested idx is to big: max is %x, requested %x", idx_count + 1, idx);
+	}
+
+	const size_t level_start = (1u << level) - 1;
+	return tree * buddy_bitmap.top_childs_count + level_start + idx;
+}
+
+__hot __const static inline size_t bitmap_get_tree_from_idx(size_t idx)
+{
+	return idx / buddy_bitmap.top_childs_count;
+}
+
+__hot __const static inline size_t bitmap_get_level_from_idx(size_t idx)
+{
+	const unsigned long tree_idx = idx % buddy_bitmap.top_childs_count;
+	if (tree_idx == 0) return 0;
+	return (sizeof(tree_idx) * 8) - 1 - __builtin_clzl(tree_idx+1);
+}
+
+__hot __const static inline size_t bitmap_get_idx_at_level(size_t idx, size_t level)
+{
+	const size_t idx_s = (1u << level)-1;
+	const size_t idx_e = (1u << (level+1))-1; // Not inclusive range
+	const size_t idx_count = idx_e - idx_s;
+	const size_t local = idx % buddy_bitmap.top_childs_count;
+	return (local - idx_s) % idx_count;
+}
+
+static inline void bitmap_print_state_of_idx(size_t idx)
+{
+	size_t level = bitmap_get_level_from_idx(idx);
+
+	kprintf("global_idx: %x, tree %x, level %x, idx %x, state %x\n",
+		idx,
+		bitmap_get_tree_from_idx(idx),
+		level,
+		bitmap_get_idx_at_level(idx, level),
+		bitmap_get_bit(idx));
+}
+
+__hot static inline void bitmap_update_top(size_t idx)
+{
+    const size_t tree = bitmap_get_tree_from_idx(idx);
+
+    size_t level  = bitmap_get_level_from_idx(idx);
+    size_t offset = bitmap_get_idx_at_level(idx, level);
+
+	while (level > 0) {
+		const size_t parent_level = level - 1;
+		const size_t parent_offset = offset >> 1;
+		const size_t parent = bitmap_get_index(tree, parent_level, parent_offset);
+		const size_t left = bitmap_get_index(tree, level, parent_offset << 1);
+		const size_t right = bitmap_get_index(tree, level, (parent_offset << 1) + 1);
+		bitmap_set_bit(parent, bitmap_get_bit(left) && bitmap_get_bit(right));
+		level = parent_level;
+		offset = parent_offset;
 	}
 }
 
-static void *slab_alloc(struct phy_slab_cache *cache)
+
+__hot static inline void bitmap_update_down(size_t idx, bool new_val)
 {
-	if (cache->free_list == nullptr)
-		slab_add_page(cache);
+	size_t tree = bitmap_get_tree_from_idx(idx);
+	size_t level = bitmap_get_level_from_idx(idx);
+	size_t offset = bitmap_get_idx_at_level(idx, level);
 
-	if (cache->free_list == nullptr)
-		return nullptr;
+	for (size_t l = level + 1; l < buddy_bitmap.levels; l++) {
+		size_t shift = l - level;
+		size_t start = offset << shift;
+		size_t count = 1u << shift;
 
-	struct phy_slab_free *res = cache->free_list;
-	cache->free_list = res->next;
-	return res;
-}
-
-static void slab_free(struct phy_slab_cache *cache, void *ptr)
-{
-	struct phy_slab_free *node = ptr;
-	node->next = cache->free_list;
-	cache->free_list = node;
-}
-
-static struct booking_block *alloc_booking_block(void)
-{
-	struct booking_block *block = slab_alloc(&booking_block_slab);
-	if (block == nullptr)
-		return nullptr;
-
-	memset(block, 0, sizeof(*block));
-	RESET_LIST_ITEM(&block->list);
-	list_add(&block->list, booking_block_list.prev);
-
-	return block;
-}
-
-static bool booking_block_is_empty(const struct booking_block *block)
-{
-	for (size_t i = 0; i < BOOKING_COUNT; i++) {
-		if (block->allocs[i].ptr != nullptr)
-			return false;
-	}
-	return true;
-}
-
-static struct bitmap_chunk *find_chunk(size_t block_idx)
-{
-	list_for_each(&bitmap_chunk_list) {
-		struct bitmap_chunk *chunk = list_entry(it, struct bitmap_chunk, list);
-		if (block_idx >= chunk->base_block && block_idx < chunk->base_block + chunk->capacity)
-			return chunk;
-	}
-	return nullptr;
-}
-
-static bool bitmap_block_used(const struct bitmap_chunk *chunk, size_t block_idx)
-{
-	const size_t local = block_idx - chunk->base_block;
-	const size_t word = local / 32;
-	const size_t bit = local % 32;
-	return (chunk->bits[word] & (1u << bit)) != 0;
-}
-
-static void bitmap_set_block(struct bitmap_chunk *chunk, size_t block_idx, bool set)
-{
-	const size_t local = block_idx - chunk->base_block;
-	const size_t word = local / 32;
-	const size_t bit = local % 32;
-	const uint32_t mask = 1u << bit;
-	const bool cur = (chunk->bits[word] & mask) != 0;
-
-	if (cur == set)
-		return;
-
-	if (set) {
-		chunk->bits[word] |= mask;
-		chunk->used_blocks += 1;
-	} else {
-		chunk->bits[word] &= ~mask;
-		chunk->used_blocks -= 1;
+		for (size_t i = start; i < start + count; i++) {
+			size_t child_idx = bitmap_get_index(tree, l, i);
+			bitmap_set_bit(child_idx, new_val);
+		}
 	}
 }
 
-static size_t bitmap_total_blocks(void)
+__hot static inline bool bitmap_use_block(size_t idx)
 {
-	size_t total = 0;
-	list_for_each(&bitmap_chunk_list) {
-		struct bitmap_chunk *chunk = list_entry(it, struct bitmap_chunk, list);
-		total += chunk->capacity;
-	}
-	return total;
-}
+	if (bitmap_get_bit(idx))
+		return false;
 
-static size_t bitmap_free_blocks(void)
-{
-	size_t free = 0;
-	list_for_each(&bitmap_chunk_list) {
-		struct bitmap_chunk *chunk = list_entry(it, struct bitmap_chunk, list);
-		free += chunk->capacity - chunk->used_blocks;
-	}
-	return free;
-}
+	bitmap_set_bit(idx, true);
 
-static bool init_bitmap_chunks(void)
-{
-	size_t base = 0;
-	while (base < MAX_BLOCKS) {
-		struct bitmap_chunk *chunk = slab_alloc(&bitmap_slab);
-		if (chunk == nullptr)
-			return false;
+	bitmap_update_top(idx);
 
-		memset(chunk, 0, sizeof(*chunk));
-		memset(chunk->bits, 0xff, sizeof(chunk->bits));
-
-		const size_t remaining = MAX_BLOCKS - base;
-		chunk->capacity = remaining < BITMAP_CHUNK_CAPACITY ? remaining : BITMAP_CHUNK_CAPACITY;
-		chunk->used_blocks = chunk->capacity;
-		chunk->base_block = base;
-
-		RESET_LIST_ITEM(&chunk->list);
-		list_add(&chunk->list, bitmap_chunk_list.prev);
-
-		base += chunk->capacity;
-	}
+	bitmap_update_down(idx, true);
 
 	return true;
 }
 
-void phy_mem_reset()
+__hot static inline size_t buddy_req_level(size_t len, size_t leaf, size_t minb)
 {
-	metadata_offset = 0;
+	const size_t blocks = ceil_div(len, minb);
+	const size_t floor_k =
+		(sizeof((unsigned long)blocks) * 8) - 1 - __builtin_clzl((unsigned long)blocks);
+	const int k = (int)leaf - (int)(floor_k + ((blocks & (blocks - 1u)) != 0u));
+	return (k <= 0) ? 0 : (size_t)k;
+}
 
-	init_slab_cache(&bitmap_slab, sizeof(struct bitmap_chunk));
-	init_slab_cache(&booking_block_slab, sizeof(struct booking_block));
-
-	RESET_LIST_ITEM(&booking_block_list);
-	RESET_LIST_ITEM(&bitmap_chunk_list);
-
-	if (!init_bitmap_chunks())
-		return;
-
-	alloc_booking_block();
-};
-
-__attribute__((hot)) static void phy_mem_set_region(size_t addr, size_t len, bool set)
+__hot static inline void buddy_tree_range(phy_mem_alloc_mode_t mode, size_t tree_cnt,
+                                   size_t *t_lo, size_t *t_hi)
 {
-	const size_t page_offset = addr / BLOCK_SIZE;
-	const size_t num_pages = (len / BLOCK_SIZE) + 1;
+	*t_lo = 0;
+	*t_hi = tree_cnt ? tree_cnt - 1 : 0;
 
-	for (size_t i = 0; i < num_pages; i++) {
-		const size_t block_idx = page_offset + i;
-		struct bitmap_chunk *chunk = find_chunk(block_idx);
+	if (mode == PHY_MEM_ALLOC_LOW_16BIT)
+		*t_hi = *t_lo = 0;
+	// HIGH_ONLY scans all trees (including tree 0) but enforces addr >= +64KiB via offset range
+}
 
-		if (chunk == nullptr)
+__hot static inline bool buddy_offset_range(phy_mem_alloc_mode_t mode,
+                                      uintptr_t tree_base,
+                                      size_t len, size_t blk_size,
+                                      size_t idx_n, size_t *o0, size_t *o1)
+{
+	const size_t PHY_MEM_64K = (size_t)1u << 16;
+	*o0 = 0;
+	*o1 = idx_n;
+
+	switch(mode){
+	case PHY_MEM_ALLOC_LOW_16BIT:
+	case PHY_MEM_ALLOC_LOW_1M:
+	{
+		const size_t limit = mode == PHY_MEM_ALLOC_LOW_16BIT ? (size_t)1u << 16 : (size_t)1u << 20;
+		if (len > limit)  BUG("low-memory request too big: %x bytes", len);
+		if (blk_size > limit) BUG("low-memory block too big: %x bytes", blk_size);
+
+		if (tree_base >= limit)
+			return false;
+		/* Physical address zero is reserved; SIPI vector zero is not usable. */
+		if (tree_base == 0)
+			*o0 = 1;
+		if (tree_base + idx_n * blk_size > limit)
+			*o1 = (limit - tree_base) / blk_size;
+		return *o0 < *o1;
+	}
+	break;
+
+	case PHY_MEM_ALLOC_HIGH:
+	{
+		const uintptr_t boundary = PHY_MEM_64K;
+
+		// skip blocks that would start before boundary
+		if (tree_base < boundary) {
+			const size_t delta = (size_t)(boundary - tree_base);
+			const size_t skip  = ceil_div(delta, blk_size);
+			if (skip >= idx_n) return false;
+			*o0 = skip;
+		}
+		// (tree_base >= boundary) => start at 0
+		return *o0 < *o1;
+	}
+	break;
+
+	default:
+		return true; // ANY
+	}
+}
+
+__hot fatptr_t phy_mem_alloc(size_t len, phy_mem_alloc_mode_t mode)
+{
+	spin_lock(&buddy_lock);
+	if (!len) {
+		spin_unlock(&buddy_lock);
+		return phy_mem_invalid();
+	}
+
+	const size_t leaf = buddy_bitmap.levels - 1;
+	const size_t minb = buddy_bitmap.min_block_size;
+
+	const size_t level = buddy_req_level(len, leaf, minb);
+	const size_t size  = minb << (leaf - level);
+	if (len > (minb << leaf)) {
+		spin_unlock(&buddy_lock);
+		return phy_mem_invalid();
+	}
+	const size_t idx_n = bitmap_get_max_idx(level);
+
+	size_t t_lo, t_hi;
+	buddy_tree_range(mode, buddy_bitmap.level_0_count, &t_lo, &t_hi);
+
+	const uintptr_t pool = (uintptr_t)buddy_bitmap.pool_start;
+	const size_t tree_span = (minb << leaf);
+
+	for (size_t t = t_hi;; --t) {
+		const uintptr_t base = pool + t * tree_span;
+
+		size_t o_s, o_e;
+		if (!buddy_offset_range(mode, base, len, size, idx_n, &o_s, &o_e)) {
+			if (t == t_lo) break;
 			continue;
+		}
 
-		bitmap_set_block(chunk, block_idx, set);
-	}
-}
-
-size_t phy_mem_get_tot_blocks()
-{
-	return bitmap_total_blocks();
-}
-
-size_t phy_mem_get_used_blocks()
-{
-	const size_t total = bitmap_total_blocks();
-	return total - bitmap_free_blocks();
-}
-
-size_t phy_mem_get_free_blocks()
-{
-	return bitmap_free_blocks();
-}
-
-size_t phy_mem_get_used_space(){
-
-}
-
-size_t phy_mem_get_free_space(){
-}
-
-void phy_mem_rm_region(size_t addr, size_t len)
-{
-	phy_mem_set_region(addr, len, true);
-}
-
-void phy_mem_add_region(size_t addr, size_t len)
-{
-	phy_mem_set_region(addr, len, false);
-}
-
-__attribute__((hot)) fatptr_t phy_mem_alloc(size_t size)
-{
-	const size_t req_block = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-	const size_t req_size = req_block * BLOCK_SIZE;
-	size_t start_block = 0;
-	bool found = false;
-	size_t run = 0;
-
-	if (req_block == 0)
-		return (fatptr_t){ .ptr = 0, .len = 0 };
-
-	if (bitmap_free_blocks() < req_block)
-		return (fatptr_t){ .ptr = 0, .len = 0 };
-
-	list_rev_for_each(&bitmap_chunk_list) {
-		struct bitmap_chunk *chunk = list_entry(it, struct bitmap_chunk, list);
-		for (size_t i = chunk->capacity; i > 0 ; i--) {
-			const size_t block_idx = chunk->base_block + (i - 1);
-
-			if (!bitmap_block_used(chunk, block_idx)) {
-				if (run == 0)
-					start_block = block_idx;
-
-				run += 1;
-
-				if (run >= req_block) {
-					found = true;
-					goto found_blocks;
-				}
-			} else {
-				run = 0;
+		for (size_t o = o_s; o < o_e; ++o) {
+			const size_t p = bitmap_get_index(t, level, o);
+			const uintptr_t addr = base + o * size;
+			if (addr < pool || addr + size > pool + buddy_bitmap.pool_size)
+				continue;
+			if (!bitmap_get_bit(p)) {
+				bitmap_use_block(p);
+				fatptr_t result = (fatptr_t){
+					.ptr = (void*)addr,
+					.len = size,
+				};
+				spin_unlock(&buddy_lock);
+				return result;
 			}
 		}
+
+		if (t == t_lo) break;
 	}
 
-found_blocks:
-	if (!found)
-		return (fatptr_t){ .ptr = 0, .len = 0 };
-
-	struct booking_block *target_block = nullptr;
-	size_t slot_idx = 0;
-
-	list_for_each(&booking_block_list) {
-		struct booking_block *cur_block = list_entry(it, struct booking_block, list);
-		for (size_t i = 0; i < BOOKING_COUNT; i++) {
-			if (cur_block->allocs[i].ptr == nullptr) {
-				target_block = cur_block;
-				slot_idx = i;
-				goto slot_found;
-			}
-		}
-	}
-
-	target_block = alloc_booking_block();
-	slot_idx = 0;
-
-slot_found:
-	if (target_block == nullptr)
-		return (fatptr_t){ .ptr = 0, .len = 0 };
-
-	target_block->allocs[slot_idx].ptr = (void *)(start_block * BLOCK_SIZE);
-	target_block->allocs[slot_idx].len = req_size;
-
-	for (size_t i = 0; i < req_block; i++) {
-		const size_t block_idx = start_block + i;
-		struct bitmap_chunk *chunk = find_chunk(block_idx);
-		if (chunk != nullptr)
-			bitmap_set_block(chunk, block_idx, true);
-	}
-
-	return (fatptr_t){ .ptr = (void *)(start_block * BLOCK_SIZE), .len = req_size };
+	spin_unlock(&buddy_lock);
+	return phy_mem_invalid();
 }
 
-__attribute__((hot)) fatptr_t phy_mem_alloc_below(size_t size, size_t max_addr)
+
+__hot void phy_mem_free(fatptr_t alloc)
 {
-	const size_t req_block = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-	const size_t req_size = req_block * BLOCK_SIZE;
-	const size_t max_block = max_addr / BLOCK_SIZE;
-	size_t start_block = 0;
-	bool found = false;
-	size_t run = 0;
+	if (alloc.ptr == nullptr || alloc.len == 0)
+		return;
+	spin_lock(&buddy_lock);
 
-	if (req_block == 0 || max_block == 0 || req_block > max_block)
-		return (fatptr_t){ .ptr = 0, .len = 0 };
-	if (bitmap_free_blocks() < req_block)
-		return (fatptr_t){ .ptr = 0, .len = 0 };
+	const uintptr_t addr = (uintptr_t)alloc.ptr;
+	const uintptr_t base = (uintptr_t)buddy_bitmap.pool_start;
+	const uintptr_t end  = base + (uintptr_t)buddy_bitmap.pool_size;
 
-	list_for_each(&bitmap_chunk_list) {
-		struct bitmap_chunk *chunk = list_entry(it, struct bitmap_chunk, list);
-		for (size_t i = 0; i < chunk->capacity; i++) {
-			const size_t block_idx = chunk->base_block + i;
+	if (addr < base || addr >= end)
+		BUG("phy_mem_free: ptr out of pool");
+	if (alloc.len > buddy_bitmap.pool_size || addr + alloc.len > end)
+		BUG("phy_mem_free: range out of pool");
+	if (alloc.len % buddy_bitmap.min_block_size != 0)
+		BUG("phy_mem_free: len not multiple of min block");
 
-			if (block_idx + req_block > max_block)
-				goto end_search;
+	const size_t leaf_level = buddy_bitmap.levels - 1;
+	const size_t tree_size  = buddy_bitmap.min_block_size << leaf_level; /* max block per tree */
 
-			if (!bitmap_block_used(chunk, block_idx)) {
-				if (run == 0)
-					start_block = block_idx;
+	/* length must be a power-of-two multiple of min_block_size */
+	const size_t alloc_count = alloc.len / buddy_bitmap.min_block_size;
+	if (alloc_count == 0 || (alloc_count & (alloc_count - 1)) != 0)
+		BUG("phy_mem_free: len not power-of-two buddy size");
 
-				run += 1;
+	/* alloc_count = 2^(leaf_level - alloc_level)  =>  alloc_level = leaf_level - log2(alloc_count) */
+	const unsigned k = (unsigned)(sizeof(unsigned long long) * 8 - 1 - __builtin_clzll((unsigned long long)alloc_count));
+	if (k > leaf_level)
+		BUG("phy_mem_free: len too small for tree");
+	const size_t alloc_level = leaf_level - (size_t)k;
 
-				if (run >= req_block) {
-					found = true;
-					goto found_blocks;
-				}
-			} else {
-				run = 0;
-			}
-		}
-	}
+	const size_t off_bytes   = (size_t)(addr - base);
+	const size_t tree_id     = off_bytes / tree_size;
+	const size_t off_in_tree = off_bytes % tree_size;
 
-end_search:
-	if (!found)
-		return (fatptr_t){ .ptr = 0, .len = 0 };
+	/* must not cross a tree boundary */
+	if (off_in_tree + alloc.len > tree_size)
+		BUG("phy_mem_free: allocation crosses tree boundary");
 
-found_blocks:
-	struct booking_block *target_block = nullptr;
-	size_t slot_idx = 0;
+	const size_t block_size = tree_size >> alloc_level;
 
-	list_for_each(&booking_block_list) {
-		struct booking_block *cur_block = list_entry(it, struct booking_block, list);
-		for (size_t i = 0; i < BOOKING_COUNT; i++) {
-			if (cur_block->allocs[i].ptr == nullptr) {
-				target_block = cur_block;
-				slot_idx = i;
-				goto slot_found;
-			}
-		}
-	}
+	/* must be aligned to the block size at alloc_level */
+	if ((off_in_tree % block_size) != 0)
+		BUG("phy_mem_free: ptr misaligned for level");
 
-	target_block = alloc_booking_block();
-	slot_idx = 0;
+	const size_t i = off_in_tree / block_size; /* position within that level */
+	const size_t idx = bitmap_get_index(tree_id, alloc_level, i);
 
-slot_found:
-	if (target_block == nullptr)
-		return (fatptr_t){ .ptr = 0, .len = 0 };
+	/* Expect it to be currently allocated; if already free => double-free/corruption */
+	if (!bitmap_set_bit(idx, false))
+		BUG("phy_mem_free: double free or corrupt bitmap");
 
-	target_block->allocs[slot_idx].ptr = (void *)(start_block * BLOCK_SIZE);
-	target_block->allocs[slot_idx].len = req_size;
+	bitmap_update_top(idx);
 
-	for (size_t i = 0; i < req_block; i++) {
-		const size_t block_idx = start_block + i;
-		struct bitmap_chunk *chunk = find_chunk(block_idx);
-		if (chunk != nullptr)
-			bitmap_set_block(chunk, block_idx, true);
-	}
-
-	return (fatptr_t){ .ptr = (void *)(start_block * BLOCK_SIZE), .len = req_size };
+	bitmap_update_down(idx, false);
+	spin_unlock(&buddy_lock);
 }
 
-__attribute__((hot)) void phy_mem_free(const fatptr_t addr_ptr)
+__init static void phy_mem_remove_unreachable(void)
 {
-	list_for_each(&booking_block_list) {
-		struct booking_block *cur_block = list_entry(it, struct booking_block, list);
-		for (size_t i = 0; i < BOOKING_COUNT; i++) {
-			if (cur_block->allocs[i].ptr == addr_ptr.ptr) {
-				const size_t start_block = (size_t)cur_block->allocs[i].ptr / BLOCK_SIZE;
-				const size_t block_count = cur_block->allocs[i].len / BLOCK_SIZE;
+	size_t reg_ptr = buddy_bitmap.pool_start;
+	const size_t leaf_level = buddy_bitmap.levels - 1;
+	const size_t small_size = buddy_bitmap.min_block_size;
+	const size_t tree_size  = small_size << leaf_level; // max block size per tree
 
-				for (size_t blk = 0; blk < block_count; blk++) {
-					const size_t block_idx = start_block + blk;
-					struct bitmap_chunk *chunk = find_chunk(block_idx);
-					if (chunk != nullptr)
-						bitmap_set_block(chunk, block_idx, false);
-				}
+	do {
+		const bool inside_pool =
+			reg_ptr < buddy_bitmap.pool_start + buddy_bitmap.pool_size &&
+			reg_ptr + small_size <= buddy_bitmap.pool_start + buddy_bitmap.pool_size;
+		if (!inside_pool || !memblock_region_available(reg_ptr, small_size)) {
+			uintptr_t addr = (uintptr_t)reg_ptr;
+			uintptr_t base = (uintptr_t)buddy_bitmap.pool_start;
 
-				cur_block->allocs[i].ptr = nullptr;
-				cur_block->allocs[i].len = 0;
+			size_t off_bytes = (size_t)(addr - base);
+			size_t tree_id   = off_bytes / tree_size;
+			size_t i         = (off_bytes % tree_size) / small_size; // leaf index
 
-				if (booking_block_is_empty(cur_block) &&
-				    (cur_block->list.next != &booking_block_list || cur_block->list.prev != &booking_block_list)) {
-					list_rm(&cur_block->list);
-					slab_free(&booking_block_slab, cur_block);
-				}
-
-				break;
-			}
+			const size_t to_remove = bitmap_get_index(tree_id, leaf_level, i);
+			bitmap_set_bit(to_remove, true);
+			bitmap_update_top(to_remove);
 		}
-	}
+
+		reg_ptr += small_size;
+	} while (reg_ptr < buddy_bitmap.pool_start + buddy_bitmap.bitmap_managed_size);
 }
 
-void phy_mem_init(const struct multiboot_tag_mmap *mmap_tag, const struct multiboot_tag_elf_sections *elf_tag)
+__init void phy_mem_init()
 {
 	mprint("Initializing physical memory allocator\n");
 
-	phy_mem_reset();
+	const size_t levels = 11;
+	const size_t min_block_size = 4096;
 
-	for (const struct multiboot_mmap_entry *mmap = mmap_tag->entries; (multiboot_uint8_t *)mmap < (multiboot_uint8_t *)mmap_tag + mmap_tag->size;
-	     mmap = (multiboot_memory_map_t *)((unsigned long)mmap + mmap_tag->entry_size)) {
-		if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE) {
-			phy_mem_add_region(mmap->addr, mmap->len);
+	const size_t top_addr = memblock_top_address() & ~0xFFF;
+	const size_t bottom_addr = (memblock_bottom_address() + 0xFFF) & ~0xFFF;
+	const size_t pool_size = top_addr - bottom_addr;
+	if (top_addr <= bottom_addr || pool_size < min_block_size)
+		panic("No usable physical memory range\n");
+	mprint("Physical address ranges: [%x-%x]\n", bottom_addr, top_addr);
+	mprint("Number of pages in pool: %x\n", pool_size / min_block_size);
+
+	// Get the size of the buddy allocator, one bit per page, and align start and end to page
+	const size_t top_childs_count = ((1<<(levels))-1);
+	const size_t level_0_count =
+		ceil_div(pool_size, min_block_size * (1<<(levels-1))); // Divide by the biggest level size
+
+	const size_t bitmap_size = (ceil_div((top_childs_count * level_0_count) // count of node needed per big block
+					    , 8) + 0xFFF) & ~0xFFF;
+	mprint("Required memory for buddy allocator: %x\n", bitmap_size);
+
+	const size_t phy_mem_addr = memblock_alloc_range(bitmap_size, 4096, 0, -1);
+	if (phy_mem_addr == MEMBLOCK_ALLOC_FAIL)
+		panic("Unable to reserve buddy bitmap\n");
+	memset((void*)phy_mem_addr, 0, bitmap_size);
+	mprint("Buddy allocator addr: %x\n", phy_mem_addr);
+
+        uint8_t *const bitmap = (uint8_t*)phy_mem_addr;
+
+	buddy_bitmap = (struct buddy_bitmap){
+		.pool_start = bottom_addr,
+		.pool_size = pool_size,
+		.min_block_size = min_block_size,
+		.levels = levels,
+		.top_childs_count = top_childs_count,
+		.level_0_count = level_0_count,
+		.bitmap = bitmap,
+		.bitmap_size = bitmap_size,
+		.bitmap_managed_size = level_0_count * (min_block_size * (1<<(levels-1))),
+	};
+
+	phy_mem_remove_unreachable();
+
+	size_t free_pages = 0;
+	const size_t leaf_nodes = bitmap_get_max_idx(levels - 1);
+	for (size_t tree = 0; tree < level_0_count; tree++) {
+		for (size_t page = 0; page < leaf_nodes; page++) {
+			if (!bitmap_get_bit(bitmap_get_index(tree, levels - 1, page)))
+				free_pages++;
 		}
 	}
+	kprintf("buddy: pool %x-%x, bitmap %x-%x, free pages %x\n",
+	         bottom_addr, bottom_addr + pool_size,
+	         phy_mem_addr, phy_mem_addr + bitmap_size, free_pages);
 
-	const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)elf_tag->sections;
-	for (size_t i = 0; i < elf_tag->num; i++)
-		phy_mem_rm_region(elf_sec[i].sh_addr, elf_sec[i].sh_size);
+	/* for (const struct multiboot_mmap_entry *mmap = mmap_tag->entries; (multiboot_uint8_t *)mmap < (multiboot_uint8_t *)mmap_tag + mmap_tag->size; */
+	/*      mmap = (multiboot_memory_map_t *)((unsigned long)mmap + mmap_tag->entry_size)) { */
+	/* 	if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE) { */
+	/* 		phy_mem_add_region(mmap->addr, mmap->len); */
+	/* 	} */
+	/* } */
 
-	mprint("Physical memory allocator ready | total blocks: %x | used: %x | free: %x\n", phy_mem_get_tot_blocks(), phy_mem_get_used_blocks(),
-	       phy_mem_get_free_blocks());
+	/* const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)elf_tag->sections; */
+	/* for (size_t i = 0; i < elf_tag->num; i++) */
+	/* 	phy_mem_rm_region(elf_sec[i].sh_addr, elf_sec[i].sh_size); */
+
+	/* mprint("Physical memory allocator ready | total blocks: %x | used: %x | free: %x\n", phy_mem_get_tot_blocks(), phy_mem_get_used_blocks(), */
+	/*        phy_mem_get_free_blocks()); */
 }

@@ -35,6 +35,7 @@ struct idtr_desc {
 static struct cpu_info cpus[MAX_CPUS];
 static size_t cpu_count = 0;
 static spinlock_t cpu_lock = { 0 };
+static spinlock_t report_lock = { 0 };
 static struct idtr_desc bsp_idtr = { 0 };
 
 struct rsdp_descriptor {
@@ -68,9 +69,9 @@ struct madt_header {
 	uint8_t entries[];
 } __attribute__((packed));
 
-typedef __attribute__((packed)) struct tramp_gdtr {
+typedef struct __attribute__((packed)) tramp_gdtr {
 	uint16_t size;
-	uint32_t ptr
+	uint32_t ptr;
 } tramp_gdtr_t;
 
 extern uint8_t ap_trampoline_start;
@@ -161,6 +162,8 @@ static bool parse_madt(void *phys_addr)
 	{
 		struct madt_header *madt = (struct madt_header *)phys_addr;
 		madt_length = madt->header.length;
+		if (madt_length < sizeof(struct madt_header) || madt_length > 4096)
+			panic("SMP: invalid MADT length\n");
 	}
 
 	WITH(map_physical_range(phys_addr, madt_length, VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_CACHE_DISABLE_BIT),
@@ -169,6 +172,8 @@ static bool parse_madt(void *phys_addr)
 		struct madt_header *madt = (struct madt_header *)phys_addr;
 		allocator_t gpa = get_gpa_allocator();
 		fatptr_t copy_madt = gpa.alloc(madt_length);
+		if (copy_madt.ptr == nullptr || copy_madt.len < madt_length)
+			panic("SMP: failed to copy MADT\n");
 		memcpy(copy_madt.ptr, (uint8_t*)madt, madt_length);
 		madt_header = copy_madt.ptr;
 	}
@@ -179,7 +184,7 @@ static bool parse_madt(void *phys_addr)
 		uint8_t *entry = ((uint8_t *)madt_header) + offset;
 		uint8_t type = entry[0];
 		uint8_t length = entry[1];
-		if (length < 2)
+		if (length < 2 || offset + length > madt_header->header.length)
 			break;
 
 		switch (type) {
@@ -269,8 +274,10 @@ static bool parse_acpi_tag(struct multiboot_tag *acpi_tag)
 				     unmap_physical_range((void*)entries[i], PAGE_SIZE))
 				{
 					struct acpi_sdt_header *hdr = (struct acpi_sdt_header *)entries[i];
-					if (parse_madt(hdr))
-						return true;
+				if (parse_madt(hdr)) {
+					mprint("SMP: MADT parsed\n");
+					return true;
+				}
 				}
 			}
 		}
@@ -301,7 +308,7 @@ static void setup_ap_trampoline(void)
 	const size_t trampoline_pages = round_up_to_page(trampoline_size);
 	const size_t trampoline_page_count = trampoline_pages / PAGE_SIZE;
 
-	fatptr_t phys = phy_mem_alloc_below(trampoline_pages, MIBI(1));
+	fatptr_t phys = phy_mem_alloc(trampoline_pages, PHY_MEM_ALLOC_LOW_1M);
 	if (phys.ptr == nullptr)
 		panic("Failed to allocate physical memory for AP trampoline\n");
 
@@ -352,7 +359,7 @@ static void cleanup_ap_trampoline(void)
 		return;
 	fatptr_t phys = (fatptr_t){
 		.ptr = (void*)ap_trampoline_phys_base,
-		.len = ap_trampoline_page_count,
+		.len = ap_trampoline_page_count * PAGE_SIZE,
 	};
 
 	const size_t trampoline_size = (&ap_trampoline_end) - (&ap_trampoline_start);
@@ -390,7 +397,7 @@ static void start_aps(void)
 		if (cpus[i].online)
 			continue;
 		// TODO: pass the physical address of the trampoline
-		lapic_start_ap(i);
+		lapic_start_ap(cpus[i].apic_id, (uint8_t)(ap_trampoline_phys_base >> 12));
 	}
 }
 
@@ -403,25 +410,33 @@ void smp_init(struct multiboot_tag *acpi_tag)
 
 	record_idtr();
 	parse_apic_ids(acpi_tag);
+	kprintf("SMP: CPUs discovered: %u\n", cpu_count);
 	lapic_enable();
+	kprintf("SMP: LAPIC enabled\n");
 	setup_ap_trampoline();
+	kprintf("SMP: trampoline ready at %x\n", ap_trampoline_phys_base);
 	build_stacks();
+	kprintf("SMP: stacks ready\n");
 
 	for (size_t i = 0; i < cpu_count; i++) {
 		if (cpus[i].apic_id == lapic_get_id()) {
-			cpus[i].online = true;
+			__atomic_store_n(&cpus[i].online, true, __ATOMIC_RELEASE);
+			spin_lock(&report_lock);
+			kprintf("I am cpu %u :)\n", i);
+			spin_unlock(&report_lock);
 			break;
 		}
 	}
 
 	start_aps();
+	kprintf("SMP: startup IPIs sent\n");
 
 	for (volatile int wait = 0; wait < 1000000; wait++) {
 		bool all_online = true;
 		for (size_t i = 0; i < cpu_count; i++) {
 			if (cpus[i].apic_id == lapic_get_id())
 				continue;
-			if (!cpus[i].online) {
+			if (!__atomic_load_n(&cpus[i].online, __ATOMIC_ACQUIRE)) {
 				all_online = false;
 				break;
 			}
@@ -433,7 +448,8 @@ void smp_init(struct multiboot_tag *acpi_tag)
 	cleanup_ap_trampoline();
 
 	for (size_t i = 0; i < cpu_count; i++)
-		mprint("CPU APIC %u status: %s\n", cpus[i].apic_id, cpus[i].online ? "online" : "offline");
+		mprint("CPU %u (APIC %u): %s\n", i, cpus[i].apic_id,
+		       __atomic_load_n(&cpus[i].online, __ATOMIC_ACQUIRE) ? "online" : "offline");
 }
 
 struct cpu_info *smp_get_cpus(size_t *count)
@@ -476,12 +492,13 @@ void ap_main(void)
 
 	if (idx < MAX_CPUS) {
 		spin_lock(&cpu_lock);
-		cpus[idx].online = true;
+		__atomic_store_n(&cpus[idx].online, true, __ATOMIC_RELEASE);
 		spin_unlock(&cpu_lock);
-		mprint("AP (APIC %u) online\n", apic_id);
+		spin_lock(&report_lock);
+		kprintf("I am cpu %u :)\n", idx);
+		spin_unlock(&report_lock);
 	}
 
-	__asm__ volatile("sti");
 	for (;;)
 		__asm__ volatile("hlt");
 }

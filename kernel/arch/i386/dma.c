@@ -8,7 +8,7 @@ struct dma_buffer dma_alloc(size_t size)
 		return (struct dma_buffer){ 0 };
 
 	size_t aligned = round_up_to_page(size);
-	fatptr_t phys = phy_mem_alloc(aligned);
+	fatptr_t phys = phy_mem_alloc(aligned, PHY_MEM_ALLOC_HIGH);
 	if (phys.ptr == nullptr)
 		return (struct dma_buffer){ 0 };
 

@@ -93,23 +93,24 @@ uint8_t lapic_get_id(void)
 	return (uint8_t)(lapic_read(LAPIC_REG_ID) >> 24);
 }
 
-void lapic_start_ap(char cpu_idx){
+
+void lapic_start_ap(uint8_t apic_id, uint8_t startup_vector){
 	lapic_clear_error();
 
-	lapic_set_icr_cpu(cpu_idx);
+	lapic_set_icr_cpu(apic_id);
 	lapic_trigger_init();
 
 	lapic_wait_delivery();
 
-	lapic_set_icr_cpu(cpu_idx);
+	lapic_set_icr_cpu(apic_id);
 	lapic_trigger_deassert();
 
 	lapic_wait_delivery();
 	for (volatile int wait = 0; wait < 100000; wait++) ; // wait 10 msec
 	for(size_t j = 0; j < 2; j++) {
 		lapic_clear_error();
-		lapic_set_icr_cpu(cpu_idx);
-		lapic_trigger_startup(); // trigger STARTUP IPI for 0100:0000
+		lapic_set_icr_cpu(apic_id);
+		lapic_trigger_startup(startup_vector);
 		for (volatile int wait = 0; wait < 100000; wait++) ; // wait 200 usec
 		lapic_wait_delivery();
 	}
@@ -120,9 +121,9 @@ void lapic_clear_error(void){
 	lapic_write(LAPIC_REG_ERR_STAT, 0, (~0));
 }
 
-void lapic_set_icr_cpu(char cpu_idx){
+void lapic_set_icr_cpu(uint8_t apic_id){
 	lapic_map_base();
-	lapic_write(LAPIC_REG_ICR_HIGH, cpu_idx << 24, ~0);
+	lapic_write(LAPIC_REG_ICR_HIGH, (uint32_t)apic_id << 24, ~0);
 }
 
 void lapic_trigger_init(){
@@ -133,9 +134,9 @@ void lapic_trigger_deassert(){
 	lapic_map_base();
 	lapic_write(LAPIC_REG_ICR_LOW, 0x008500, ~0xfff00000);
 }
-void lapic_trigger_startup(){
+void lapic_trigger_startup(uint8_t vector){
 	lapic_map_base();
-	lapic_write(LAPIC_REG_ICR_LOW, 0x000601, ~0xfff0f800);
+	lapic_write(LAPIC_REG_ICR_LOW, 0x000600 | vector, ~0xfff0f800);
 }
 
 inline void lapic_wait_delivery(){

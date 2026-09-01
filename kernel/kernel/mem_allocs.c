@@ -162,7 +162,7 @@ void init_mem_alloc_tag_slabs(void)
 	if (tags_virt == nullptr)
 		BUG("failed to allocate tag slab page");
 
-	fatptr_t tags_phy = phy_mem_alloc(tags_virt->size);
+	fatptr_t tags_phy = phy_mem_alloc(tags_virt->size, PHY_MEM_ALLOC_HIGH);
 	if (tags_phy.ptr == nullptr)
 		BUG("failed to allocate tag slab physical memory");
 
