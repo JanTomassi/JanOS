@@ -35,7 +35,15 @@ kernel/allocator.o \
 kernel/slab_allocator.o \
 kernel/interrupt.o \
 kernel/memblock.o \
-kernel/storage.o
+kernel/storage.o \
+syscall/syscall.o \
+exec/elf_loader.o \
+process/address_space.o \
+process/stack.o \
+process/process.o \
+process/wait_queue.o \
+process/arch/i386/context.o \
+process/arch/i386/context_entry.o
 
 OBJS=\
 $(KERNEL_OBJS) \

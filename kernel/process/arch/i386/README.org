@@ -1,0 +1,12 @@
+#+TITLE: i386 Process Support
+
+Architecture-specific process code belongs here. Keep generic process policy in
+=kernel/process/=. This directory will contain:
+
+- =context.s=: interrupt/syscall entry frames and =iret= transitions.
+- =context.c=: i386 context initialization and validation.
+- Future TSS and privilege-stack support.
+
+The code here may depend on i386 descriptors, control registers, and assembly
+calling conventions. Generic scheduler and process code must not depend on
+these implementation details.

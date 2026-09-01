@@ -1,0 +1,25 @@
+#+TITLE: JanOS User Programs
+
+This subtree contains code that does not depend on kernel internals.
+
+* Calculator
+
+=calc/calc.c= implements a bounded, integer Polish-notation evaluator. The
+grammar is:
+
+#+BEGIN_EXAMPLE
+expression := integer | operator expression expression
+operator   := + | - | * | /
+#+END_EXAMPLE
+
+Integers are signed 32-bit values. Overflow, division by zero, malformed
+tokens, trailing input, and excessive nesting are errors.
+
+Run the host parser tests with =make user-test=. Run =make user= to build a
+static i386 ELF artifact using the declared syscall numbers and register ABI.
+
+The kernel currently has no syscall entry/registered handlers, user address
+space launch path, or filesystem-to-process integration. Consequently the ELF
+is not included in the ISO and cannot run under the current kernel. A shell is
+not provided because the repository has no supported user-binary execution
+path or file-descriptor/filesystem API to implement it against.

@@ -1,6 +1,11 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+
+typedef void (*irq_handler_t)(uint8_t irq_line, void *context);
+
+bool irq_register_handler(uint8_t irq_line, irq_handler_t handler, void *context);
+bool irq_unregister_handler(uint8_t irq_line, irq_handler_t handler, void *context);
 /**
  * DIVISION ERROR                 | 0          | Fault      | #DE        | No
  * DEBUG                          | 1          | Fault/Trap | #DB        | No

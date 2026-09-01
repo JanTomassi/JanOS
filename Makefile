@@ -12,6 +12,12 @@ build: headers
 	    DESTDIR="${SYSROOT}" ${MAKE} -C $$PROJECT install ; \
 	done
 
+user:
+	${MAKE} -C user
+
+user-test:
+	${MAKE} -C user test
+
 headers:
 	for PROJECT in ${SYSTEM_HEADER_PROJECTS} ; do \
 	    DESTDIR="${SYSROOT}" ${MAKE} -C $${PROJECT} install-headers ; \
@@ -81,4 +87,4 @@ qemu_debug: JanOS.iso
 	-drive file=JanOS.iso,format=raw \
 	-drive file=harry_potter.raw,format=raw
 
-.PHONY: build clean headers qemu qemu_debug
+.PHONY: build clean headers user user-test qemu qemu_debug

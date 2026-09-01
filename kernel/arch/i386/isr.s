@@ -46,8 +46,9 @@ isr_stub_%+%1:
 
 	popa
 
-	mov	[esp], eax
-	pop	eax
+	;; The CPU pushed an error code before the registers.
+	;; Remove it before returning with iret.
+	add	esp, 4
 
 	iret
 %endmacro
