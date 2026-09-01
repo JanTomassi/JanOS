@@ -347,6 +347,83 @@ bool fat16_read_file(const struct storage_device *device, const fat_dir_entry_t 
 	return total_read == to_read;
 }
 
+bool fat16_file_open(const struct storage_device *device, const char *name,
+		     struct fat16_file *out_file)
+{
+	if (device == nullptr || name == nullptr || out_file == nullptr)
+		return false;
+	if (!fat16_find_entry_by_name(device, name, &out_file->entry))
+		return false;
+	fat_BS_t *bpb = nullptr;
+	if (!fat16_load_layout(device, &out_file->layout, &bpb))
+		return false;
+	fat16_free_boot_sector(bpb);
+	out_file->device = *device;
+	return true;
+}
+
+bool fat16_file_read_at(const struct fat16_file *file, uint32_t offset,
+			void *buffer, size_t buffer_size, size_t *out_bytes)
+{
+	if (out_bytes != nullptr)
+		*out_bytes = 0;
+	if (file == nullptr || buffer == nullptr || offset > file->entry.file_size)
+		return false;
+	size_t available = file->entry.file_size - offset;
+	size_t wanted = available < buffer_size ? available : buffer_size;
+	if (wanted == 0)
+		return true;
+	if (offset == 0)
+		return fat16_read_file(&file->device, &file->entry, buffer, wanted, out_bytes);
+
+	size_t cluster_bytes = (size_t)file->layout.sector_size * file->layout.sectors_per_cluster;
+	if (cluster_bytes == 0 || file->entry.first_cluster_low < 2)
+		return false;
+	allocator_t alloc = get_gpa_allocator();
+	fatptr_t temporary = alloc.alloc(cluster_bytes);
+	if (temporary.ptr == nullptr)
+		return false;
+	uint16_t cluster = file->entry.first_cluster_low;
+	size_t skip = offset;
+	size_t copied = 0;
+	bool ok = true;
+	while (skip >= cluster_bytes) {
+		uint16_t next = fat16_read_fat_entry(&file->device, &file->layout, cluster);
+		if (fat16_is_end_of_chain(next) || next < 2) {
+			ok = false;
+			break;
+		}
+		cluster = next;
+		skip -= cluster_bytes;
+	}
+	while (ok && copied < wanted) {
+		size_t cluster_read = 0;
+		if (!fat16_read_cluster_data(&file->device, &file->layout, cluster,
+					     temporary.ptr, cluster_bytes, &cluster_read)) {
+			ok = false;
+			break;
+		}
+		size_t take = cluster_read - skip;
+		if (take > wanted - copied)
+			take = wanted - copied;
+		memcpy((uint8_t *)buffer + copied, (uint8_t *)temporary.ptr + skip, take);
+		copied += take;
+		skip = 0;
+		if (copied < wanted) {
+			uint16_t next = fat16_read_fat_entry(&file->device, &file->layout, cluster);
+			if (fat16_is_end_of_chain(next) || next < 2) {
+				ok = false;
+				break;
+			}
+			cluster = next;
+		}
+	}
+	alloc.free(temporary);
+	if (out_bytes != nullptr)
+		*out_bytes = copied;
+	return ok && copied == wanted;
+}
+
 bool fat16_dir_entry_is_unused(const fat_dir_entry_t *entry)
 {
 	if (entry == nullptr)

@@ -437,8 +437,30 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	/* 	pic_disable(); */
 	/* } */
 
-	/* irq_register_handler(0, pit_tick_handler, nullptr); */
-	/* ps2_init(); */
+	struct madt_ioapic_info ioapic_info;
+	if (smp_get_ioapic_info(&ioapic_info)) {
+		struct madt_irq_override overrides[16];
+		size_t override_count = smp_get_irq_overrides(overrides, 16);
+		struct ioapic_override ioapic_overrides[16];
+		for (size_t i = 0; i < override_count; i++)
+			ioapic_overrides[i] = (struct ioapic_override){
+				.source = overrides[i].source,
+				.gsi = overrides[i].gsi,
+				.flags = overrides[i].flags,
+			};
+		ioapic_register_overrides(ioapic_overrides, override_count);
+		ioapic_init(ioapic_info.phys_addr, ioapic_info.gsi_base, lapic_get_id());
+		ioapic_configure_legacy_irqs();
+	}
+
+	/* The legacy PIC starts with IRQ0 mapped to exception vector 8. */
+	if (cpuid_has_apic()) {
+		imcr_route_to_apic();
+		pic_disable();
+	}
+
+	ps2_init();
+	__asm__ volatile("sti");
 
 	/* storage_init(); */
 

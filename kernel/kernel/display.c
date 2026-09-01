@@ -205,7 +205,6 @@ void __kprintf_va_list(char *str, va_list ap)
 			disps[current].putc(str[i]);
 		}
 	}
-	va_end(ap);
 }
 
 /* Registers the display interface and returns its ID */

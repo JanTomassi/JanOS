@@ -47,7 +47,7 @@ void idt_init(void)
 	idtr.base = (uint32_t)&idt[0];
 	idtr.limit = (uint16_t)(sizeof(idt_entry_t) * IDT_MAX_DESCRIPTORS - 1);
 
-	for (uint16_t vector = 0; vector < (32 + 16); vector++) {
+	for (uint16_t vector = 0; vector < IDT_MAX_DESCRIPTORS; vector++) {
 		idt_set_descriptor(vector, (void *)isr_stub_table[vector], PRESENT | DPL_KERNEL_LEVEL | (vector < 20 ? GATE_TYPE_TRAP : GATE_TYPE_INTERRUPT));
 	}
 
