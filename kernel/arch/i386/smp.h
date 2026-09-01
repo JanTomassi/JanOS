@@ -7,7 +7,7 @@
 
 struct cpu_info {
 	uint8_t apic_id;
-	bool online;
+	volatile bool online;
 	void *stack_top;
 };
 

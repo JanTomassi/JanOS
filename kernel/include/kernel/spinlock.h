@@ -4,21 +4,21 @@
 #include <stdint.h>
 
 typedef struct {
-	volatile uint32_t locked;
+	volatile bool locked;
 } spinlock_t;
+
+static inline void spin_lock_init(spinlock_t *lock)
+{
+	__atomic_clear(&lock->locked, __ATOMIC_RELAXED);
+}
 
 static inline void spin_lock(spinlock_t *lock)
 {
-	while (true) {
-		uint32_t prev;
-		__asm__ volatile("lock xchg %0, %1" : "=r"(prev), "+m"(lock->locked) : "0"(1) : "memory");
-		if (prev == 0)
-			return;
-	}
+	while (__atomic_test_and_set(&lock->locked, __ATOMIC_ACQUIRE))
+		__asm__ volatile("pause" : : : "memory");
 }
 
 static inline void spin_unlock(spinlock_t *lock)
 {
-	__asm__ volatile("" : : : "memory");
-	lock->locked = 0;
+	__atomic_clear(&lock->locked, __ATOMIC_RELEASE);
 }

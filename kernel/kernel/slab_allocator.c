@@ -97,7 +97,7 @@ static malloc_tag_t *slab_alloc_pages(size_t req)
 	mem_register_tag(tag);
 
 	for (void *vir_ptr = mem_get_ptr_tag(tag); vir_ptr < mem_get_ptr_tag(tag) + mem_get_size_tag(tag); vir_ptr += PAGE_SIZE) {
-		fatptr_t phy_mem = phy_mem_alloc(PAGE_SIZE);
+		fatptr_t phy_mem = phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH);
 		if (phy_mem.ptr == nullptr)
 			goto fail_mem;
 

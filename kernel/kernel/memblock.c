@@ -1,12 +1,63 @@
 #include <kernel/memblock.h>
+#include <kernel/sections.h>
 #include <string.h>
 #include <kernel/memblock.h>
 #include <kernel/multiboot.h>
 #include <kernel/elf32.h>
 #include <string.h>
 #include <stdbool.h>
+#include <kernel/display.h>
 
-static inline size_t memblock_align_up(size_t addr, size_t align)
+struct rsdp_descriptor {
+	char signature[8];
+	uint8_t checksum;
+	char oem_id[6];
+	uint8_t revision;
+	uint32_t rsdt_address;
+	uint32_t length;
+	uint64_t xsdt_address;
+	uint8_t extended_checksum;
+	uint8_t reserved[3];
+} __attribute__((packed));
+
+struct acpi_sdt_header {
+	char signature[4];
+	uint32_t length;
+	uint8_t revision;
+	uint8_t checksum;
+	char oem_id[6];
+	char oem_table_id[8];
+	uint32_t oem_revision;
+	uint32_t creator_id;
+	uint32_t creator_revision;
+} __attribute__((packed));
+
+struct madt_header {
+	struct acpi_sdt_header header;
+	uint32_t lapic_addr;
+	uint32_t flags;
+	uint8_t entries[];
+} __attribute__((packed));
+
+struct madt_ioapic_info {
+	uintptr_t phys_addr;
+	uint32_t gsi_base;
+	uint8_t ioapic_id;
+};
+
+struct mbi_info{
+	struct multiboot_tag_mmap *mmap_tag;
+	struct multiboot_tag_elf_sections *elf_sec_tag;
+	struct multiboot_tag *acpi_tag;
+	uintptr_t kernel_start_addr;
+	uintptr_t kernel_end_addr;
+};
+
+__initdata struct memblock block = {0};
+extern uint8_t HIGHER_HALF;
+const uintptr_t HIGHER_HALF_ADDR = (uintptr_t)&HIGHER_HALF;
+
+__init static inline size_t memblock_align_up(size_t addr, size_t align)
 {
 	if (align == 0)
 		return addr;
@@ -15,7 +66,7 @@ static inline size_t memblock_align_up(size_t addr, size_t align)
 	return (addr + mask) & ~mask;
 }
 
-static inline size_t memblock_align_down(size_t addr, size_t align)
+__init static inline size_t memblock_align_down(size_t addr, size_t align)
 {
 	if (align == 0)
 		return addr;
@@ -24,7 +75,7 @@ static inline size_t memblock_align_down(size_t addr, size_t align)
 	return addr & ~mask;
 }
 
-static inline bool memblock_overlaps(size_t base1, size_t size1, size_t base2, size_t size2)
+__init bool memblock_overlaps(size_t base1, size_t size1, size_t base2, size_t size2)
 {
 	if (size1 == 0 || size2 == 0)
 		return false;
@@ -40,7 +91,7 @@ static inline bool memblock_overlaps(size_t base1, size_t size1, size_t base2, s
 	return (base1 < end2) && (base2 < end1);
 }
 
-static void memblock_insert_region(struct memblock_type *type, size_t base, size_t size, unsigned long flags)
+__init static void memblock_insert_region(struct memblock_type *type, size_t base, size_t size, unsigned long flags)
 {
 	if (size == 0 || type->cnt >= MEMBLOCK_MAX_REGIONS)
 		return;
@@ -60,7 +111,7 @@ static void memblock_insert_region(struct memblock_type *type, size_t base, size
 	type->cnt++;
 }
 
-static void memblock_merge_regions(struct memblock_type *type)
+__init static void memblock_merge_regions(struct memblock_type *type)
 {
 	if (type->cnt < 2)
 		return;
@@ -89,13 +140,13 @@ static void memblock_merge_regions(struct memblock_type *type)
 	}
 }
 
-static void memblock_add_region(struct memblock_type *type, size_t base, size_t size, unsigned long flags)
+__init static void memblock_add_region(struct memblock_type *type, size_t base, size_t size, unsigned long flags)
 {
 	memblock_insert_region(type, base, size, flags);
 	memblock_merge_regions(type);
 }
 
-static void memblock_remove_range(struct memblock_type *type, size_t base, size_t size)
+__init static void memblock_remove_range(struct memblock_type *type, size_t base, size_t size)
 {
 	if (size == 0 || type->cnt == 0)
 		return;
@@ -152,7 +203,7 @@ static void memblock_remove_range(struct memblock_type *type, size_t base, size_
 	}
 }
 
-static size_t memblock_find_bottom_up(const struct memblock *block, size_t size, size_t align, size_t start, size_t end)
+__init static size_t memblock_find_bottom_up(const struct memblock *block, size_t size, size_t align, size_t start, size_t end)
 {
 	for (unsigned int i = 0; i < block->memory.cnt; i++) {
 		const struct memblock_region *region = &block->memory.regions[i];
@@ -193,7 +244,7 @@ static size_t memblock_find_bottom_up(const struct memblock *block, size_t size,
 	return MEMBLOCK_ALLOC_FAIL;
 }
 
-static size_t memblock_find_top_down(const struct memblock *block, size_t size, size_t align, size_t start, size_t end)
+__init static size_t memblock_find_top_down(const struct memblock *block, size_t size, size_t align, size_t start, size_t end)
 {
 	for (int i = (int)block->memory.cnt - 1; i >= 0; i--) {
 		const struct memblock_region *region = &block->memory.regions[i];
@@ -241,24 +292,24 @@ static size_t memblock_find_top_down(const struct memblock *block, size_t size, 
 	return MEMBLOCK_ALLOC_FAIL;
 }
 
-void memblock_add(struct memblock *block, size_t base, size_t size)
+__init void memblock_add(size_t base, size_t size)
 {
-	memblock_add_region(&block->memory, base, size, MEMBLOCK_NONE);
+	memblock_add_region(&block.memory, base, size, MEMBLOCK_NONE);
 }
 
-void memblock_reserve(struct memblock *block, size_t base, size_t size)
+__init void memblock_reserve(size_t base, size_t size)
 {
-	memblock_add_region(&block->reserved, base, size, MEMBLOCK_RESERVED);
+	memblock_add_region(&block.reserved, base, size, MEMBLOCK_RESERVED);
 }
 
-void memblock_remove(struct memblock *block, size_t base, size_t size)
+__init void memblock_remove(size_t base, size_t size)
 {
-	memblock_remove_range(&block->memory, base, size);
+	memblock_remove_range(&block.memory, base, size);
 }
 
-size_t memblock_alloc_range(struct memblock *block, size_t size, size_t align, size_t start, size_t end)
+__init size_t memblock_alloc_range(size_t size, size_t align, size_t start, size_t end)
 {
-	if (size == 0 || block == nullptr)
+	if (size == 0)
 		return MEMBLOCK_ALLOC_FAIL;
 
 	if (align == 0)
@@ -266,84 +317,35 @@ size_t memblock_alloc_range(struct memblock *block, size_t size, size_t align, s
 	if (end == 0)
 		end = SIZE_MAX;
 
-	size_t addr = block->bottom_up
-		? memblock_find_bottom_up(block, size, align, start, end)
-		: memblock_find_top_down(block, size, align, start, end);
+	size_t addr = block.bottom_up
+		? memblock_find_bottom_up(&block, size, align, start, end)
+		: memblock_find_top_down(&block, size, align, start, end);
 
 	if (addr != MEMBLOCK_ALLOC_FAIL)
-		memblock_reserve(block, addr, size);
+		memblock_reserve(addr, size);
 
 	return addr;
 }
 
-void memblock_free(struct memblock *block, size_t base, size_t size)
+__init void memblock_free(size_t base, size_t size)
 {
-	memblock_remove_range(&block->reserved, base, size);
+	memblock_remove_range(&block.reserved, base, size);
 }
 
-struct memblock block = {0};
-extern void HIGHER_HALF;
-const uintptr_t HIGHER_HALF_ADDR = (uintptr_t)&HIGHER_HALF;
-
-struct rsdp_descriptor {
-	char signature[8];
-	uint8_t checksum;
-	char oem_id[6];
-	uint8_t revision;
-	uint32_t rsdt_address;
-	uint32_t length;
-	uint64_t xsdt_address;
-	uint8_t extended_checksum;
-	uint8_t reserved[3];
-} __attribute__((packed));
-
-struct acpi_sdt_header {
-	char signature[4];
-	uint32_t length;
-	uint8_t revision;
-	uint8_t checksum;
-	char oem_id[6];
-	char oem_table_id[8];
-	uint32_t oem_revision;
-	uint32_t creator_id;
-	uint32_t creator_revision;
-} __attribute__((packed));
-
-struct madt_header {
-	struct acpi_sdt_header header;
-	uint32_t lapic_addr;
-	uint32_t flags;
-	uint8_t entries[];
-} __attribute__((packed));
-
-struct madt_ioapic_info {
-	uintptr_t phys_addr;
-	uint32_t gsi_base;
-	uint8_t ioapic_id;
-};
-
-struct mbi_info{
-	struct multiboot_tag_mmap *mmap_tag;
-	struct multiboot_tag_elf_sections *elf_sec_tag;
-	struct multiboot_tag *acpi_tag;
-	uintptr_t kernel_start_addr;
-	uintptr_t kernel_end_addr;
-};
-
-inline static uintptr_t round_up_to_page(uintptr_t x){
+__init inline static uintptr_t round_up_to_page(uintptr_t x){
 	return (x + 0xFFF) & ~0xFFF;
 }
 
-static void parse_madt(void *phys_addr)
+__init static void parse_madt(void *phys_addr)
 {
 	static bool ioapic_found = false;
 
 	struct madt_header *madt = (struct madt_header *)phys_addr;
 	size_t madt_length = madt->header.length;
-	memblock_remove(&block, (size_t)madt, madt_length);
+	memblock_remove((size_t)madt, madt_length);
 	size_t offset = sizeof(struct madt_header);
 
-	memblock_remove(&block, madt->lapic_addr, 0x1000);
+	memblock_remove(madt->lapic_addr, 0x1000);
 
 	while (offset + 2 <= madt->header.length) {
 		uint8_t *entry = ((uint8_t *)madt) + offset;
@@ -353,7 +355,7 @@ static void parse_madt(void *phys_addr)
 			break;
 
 		if (type == 1 && length >= 12 && !ioapic_found) {
-			memblock_remove(&block, *(uint32_t *)(entry + 4), 0x40);
+			memblock_remove(*(uint32_t *)(entry + 4), 0x40);
 			ioapic_found = true;
 		}
 
@@ -361,7 +363,7 @@ static void parse_madt(void *phys_addr)
 	}
 }
 
-struct mbi_info init_memblock_from_mbi(uintptr_t mbi_addr, uintptr_t kernel_start_addr){
+__init struct mbi_info init_memblock_from_mbi(uintptr_t mbi_addr){
 	struct mbi_info res = {.kernel_start_addr = -1, .kernel_end_addr = 0};
 
 	// Filling the memblock with what ram is accessible
@@ -374,9 +376,9 @@ struct mbi_info init_memblock_from_mbi(uintptr_t mbi_addr, uintptr_t kernel_star
 			for (mmap = res.mmap_tag->entries; (multiboot_uint8_t *)mmap < (multiboot_uint8_t *)tag + tag->size;
 			     mmap = (multiboot_memory_map_t *)((unsigned long)mmap + res.mmap_tag->entry_size))
 				if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE){
-					memblock_add(&block, mmap->addr, mmap->len);
+					memblock_add(mmap->addr, mmap->len);
 				}else if(mmap->type == MULTIBOOT_MEMORY_RESERVED){
-					memblock_remove(&block, mmap->addr, mmap->len);
+					memblock_remove(mmap->addr, mmap->len);
 				}
 		}
 	}
@@ -388,18 +390,18 @@ struct mbi_info init_memblock_from_mbi(uintptr_t mbi_addr, uintptr_t kernel_star
 		case MULTIBOOT_TAG_TYPE_ACPI_NEW: {
 			res.acpi_tag = tag;
 			struct rsdp_descriptor *rsdp = (struct rsdp_descriptor *)(((struct multiboot_tag_new_acpi *)res.acpi_tag)->rsdp);
-			memblock_remove(&block, (size_t)rsdp, sizeof(struct rsdp_descriptor));
+			memblock_reserve((size_t)rsdp, sizeof(struct rsdp_descriptor));
 
 			struct acpi_sdt_header *rsdt = (void *)(uintptr_t)rsdp->rsdt_address;
 			size_t rsdt_len = rsdt->length;
-			memblock_remove(&block, (size_t)rsdt, rsdt_len);
+			memblock_reserve((size_t)rsdt, rsdt_len);
 
 			size_t entry_count = (rsdt->length - sizeof(struct acpi_sdt_header)) / sizeof(uint32_t);
 			uint32_t *entries = (uint32_t *)((uint8_t *)rsdt + sizeof(struct acpi_sdt_header));
 			for (size_t i = 0; i < entry_count; i++) {
 				struct acpi_sdt_header *hdr = (struct acpi_sdt_header *)entries[i];
 				size_t hdr_len = hdr->length;
-				memblock_remove(&block, (size_t)hdr, hdr_len);
+				memblock_reserve((size_t)hdr, hdr_len);
 				bool is_apic = true;
 				for(size_t i = 0; i<4; i++){
 					is_apic = is_apic && hdr->signature[i] == "APIC"[i];
@@ -414,9 +416,10 @@ struct mbi_info init_memblock_from_mbi(uintptr_t mbi_addr, uintptr_t kernel_star
 		case MULTIBOOT_TAG_TYPE_ELF_SECTIONS: {
 			res.elf_sec_tag = (struct multiboot_tag_elf_sections *)tag;
 			const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)res.elf_sec_tag->sections;
-			const char *elf_sec_str = (char *)(elf_sec[res.elf_sec_tag->shndx].sh_addr);
+
 			Elf32_Shdr string_sec = elf_sec[res.elf_sec_tag->shndx];
-			memblock_remove(&block,  string_sec.sh_addr, string_sec.sh_size);
+			memblock_reserve(string_sec.sh_addr, string_sec.sh_size);
+
 			for (size_t i = 0; i < res.elf_sec_tag->num; i++) {
 				if(!(elf_sec[i].sh_flags & ELF_SHF_ALLOC))
 					continue;
@@ -441,7 +444,7 @@ struct mbi_info init_memblock_from_mbi(uintptr_t mbi_addr, uintptr_t kernel_star
 				}
 
 				/* Remove from memblock the memory that is being used by the kernel code */
-				memblock_remove(&block, section_start, section_end - section_start);
+				memblock_reserve(section_start, section_end - section_start);
 			}
 		}
 			break;
@@ -450,14 +453,89 @@ struct mbi_info init_memblock_from_mbi(uintptr_t mbi_addr, uintptr_t kernel_star
 	}
 
 	/* Remove memory used for the multiboot info from the usable space */
-	memblock_remove(&block, mbi_addr, *(unsigned *)mbi_addr);
+	memblock_reserve(mbi_addr, *(unsigned *)mbi_addr);
 	return res;
 }
 
-void memblock_init(unsigned long mbi_addr, bool bottom_up)
+__init size_t memblock_bottom_address(){
+	size_t bottom_addr = 0;
+	if(block.memory.cnt > 0 && bottom_addr < block.memory.regions[0].base){
+		struct memblock_region region = block.memory.regions[0];
+		bottom_addr = region.base;
+	}
+	return bottom_addr;
+}
+
+__init size_t memblock_top_address(){
+	size_t top_addr = 0;
+	if(block.reserved.cnt > 0){
+		struct memblock_region region = block.reserved.regions[block.reserved.cnt-1];
+		top_addr = region.base + region.size;
+	}
+	if(block.memory.cnt > 0 && top_addr < block.memory.regions[block.memory.cnt-1].base){
+		struct memblock_region region = block.memory.regions[block.memory.cnt-1];
+		top_addr = region.base + region.size;
+	}
+	return top_addr;
+}
+
+__init struct memblock_type* memblock_get_memory(){
+	return &block.memory;
+}
+
+__init struct memblock_type* memblock_get_reserved(){
+	return &block.reserved;
+}
+
+__init bool memblock_region_available(size_t base, size_t size)
+{
+	if (size == 0)
+		return false;
+
+	bool in_memory = false;
+	size_t end = base + size;
+	if (end < base)
+		end = SIZE_MAX;
+	for (unsigned int i = 0; i < block.memory.cnt; i++) {
+		const struct memblock_region *region = &block.memory.regions[i];
+		size_t region_end = region->base + region->size;
+		if (region_end < region->base)
+			region_end = SIZE_MAX;
+		if (base >= region->base && end <= region_end) {
+			in_memory = true;
+			break;
+		}
+	}
+	if (!in_memory)
+		return false;
+
+	for (unsigned int i = 0; i < block.reserved.cnt; i++) {
+		if (memblock_overlaps(base, size,
+		                      block.reserved.regions[i].base,
+		                      block.reserved.regions[i].size))
+			return false;
+	}
+	return true;
+}
+
+__init void memblock_dump(void)
+{
+	kprintf("memblock memory (%u regions):\n", block.memory.cnt);
+	for (unsigned int i = 0; i < block.memory.cnt; i++) {
+		const struct memblock_region *r = &block.memory.regions[i];
+		kprintf("  usable:  %x-%x (%x bytes)\n", r->base, r->base + r->size, r->size);
+	}
+	kprintf("memblock reserved (%u regions):\n", block.reserved.cnt);
+	for (unsigned int i = 0; i < block.reserved.cnt; i++) {
+		const struct memblock_region *r = &block.reserved.regions[i];
+		kprintf("  reserved: %x-%x (%x bytes)\n", r->base, r->base + r->size, r->size);
+	}
+}
+
+__init void memblock_init(unsigned long mbi_addr, bool bottom_up)
 {
 	memset(&block, 0, sizeof(block));
 	block.bottom_up = bottom_up;
 
-	struct mbi_info mbi_info = init_memblock_from_mbi(mbi_addr, HIGHER_HALF_ADDR);
+	init_memblock_from_mbi(mbi_addr);
 }
