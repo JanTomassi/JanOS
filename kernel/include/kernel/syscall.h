@@ -4,16 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <janos/syscall.h>
 #include <kernel/interrupt.h>
 
 /* i386 Linux-style register ABI: eax is the call number, ebx..ebp args. */
-enum syscall_number {
-	SYSCALL_EXIT = 1,
-	SYSCALL_WRITE = 4,
-	SYSCALL_READ = 3,
-	SYSCALL_MAX = 32,
-};
-
 enum syscall_error {
 	SYSCALL_EBADF = 9,
 	SYSCALL_EFAULT = 14,

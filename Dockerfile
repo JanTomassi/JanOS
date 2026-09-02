@@ -1,21 +1,26 @@
 # syntax=docker/dockerfile:1.7-labs
-FROM archlinux:base-devel AS build-env
+FROM archlinux:base-devel AS build
+
+RUN pacman -Syu --noconfirm curl gmp libmpc mpfr nasm meson ninja grub libisoburn mtools
+
+WORKDIR /build/tools
+COPY tools/get_tools.sh ./
+RUN ./get_tools.sh
+
 WORKDIR /build
-RUN mkdir -p ./tools
+COPY meson.build meson.options ./
+COPY config ./config
+COPY data ./data
+COPY sdk ./sdk
+COPY libc ./libc
+COPY kernel ./kernel
+COPY apps ./apps
+COPY tests ./tests
+COPY tools/mkiso.sh tools/run-qemu.sh ./tools/
 
-COPY ./tools ./tools
-COPY ./libc ./libc/
-COPY ./kernel ./kernel
-
-RUN cd tools && ./get-tool.sh
-RUN pacman -Syu --noconfirm nasm grub libisoburn mtools
-
-
-FROM build-env as build
-WORKDIR /build
-COPY Makefile make.config ./
-RUN make JanOS.iso
-
+RUN meson setup out --cross-file config/i686-elf.ini --prefix=/usr --libdir=lib32 \
+    -Diso=enabled -Dqemu=disabled
+RUN meson compile -C out iso
 
 FROM scratch AS iso
-COPY --from=build /build/JanOS.iso /
+COPY --from=build /build/out/JanOS.iso /

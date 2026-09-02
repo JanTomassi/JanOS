@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-struct storage_device;
+struct block_device;
 
 struct elf_load_ops {
 	/* map must reserve exactly the requested user virtual range and return a
@@ -35,5 +35,5 @@ struct elf_load_result {
 bool elf32_load(const void *image, size_t image_size,
 		const struct elf_load_ops *ops, struct elf_load_result *result);
 
-bool elf32_load_fat16(const struct storage_device *device, const char *name,
+bool elf32_load_fat16(const struct block_device *device, const char *name,
 			const struct elf_load_ops *ops, struct elf_load_result *result);

@@ -1,0 +1,6 @@
+option('iso', type: 'feature', value: 'auto', description: 'Enable the GRUB ISO target')
+option('qemu', type: 'feature', value: 'auto', description: 'Enable QEMU run targets')
+option('host_tests', type: 'boolean', value: true, description: 'Build native host tests')
+option('qemu_disk', type: 'string', value: '', description: 'Optional raw disk for run targets')
+option('qemu_sata_disk1', type: 'string', value: '', description: 'Optional first SATA disk')
+option('qemu_sata_disk2', type: 'string', value: '', description: 'Optional second SATA disk')

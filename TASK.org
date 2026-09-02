@@ -1,0 +1,353 @@
+#+TITLE: JanOS Interactive Console and Dynamic Program Loading
+#+TODO: TODO IN-PROGRESS BLOCKED REVIEW DONE
+#+PROPERTY: Effort_ALL 0:15 0:30 1:00 2:00 4:00 1d 2d
+
+* Mission
+
+Build the smallest end-to-end user experience for JanOS:
+
+#+BEGIN_EXAMPLE
+JanOS boots -> interactive console -> loads /bin/calc -> prefix calculator REPL
+#+END_EXAMPLE
+
+The calculator is a normal ring-3 ELF program. It is not a kernel module.
+
+* Collaboration Rules
+
+** Human responsibilities
+
+- Decide ABI and user-visible behavior.
+- Review all changes affecting paging, privilege transitions, interrupts, and
+  filesystem corruption risk.
+- Run manual QEMU tests and approve acceptance criteria.
+- Keep architecture notes and document intentional limitations.
+
+** AI responsibilities
+
+- Explore existing interfaces before changing them.
+- Make small, isolated changes and add focused tests where possible.
+- Never change the syscall ABI, executable format, or on-disk format without
+  human review.
+- Report exact files changed, commands run, warnings, and unresolved risks.
+- Do not remove unrelated worktree changes or generated files.
+
+** Definition of done for every task
+
+- Code builds with the repository toolchain.
+- QEMU behavior is tested when the task affects boot or kernel runtime.
+- Failure paths are checked, especially malformed input and allocation failure.
+- The task includes a short test note in the commit or review description.
+
+* Current Baseline
+
+** DONE SMP startup
+
+- [X] Multiple CPUs start through the AP trampoline.
+- [X] CPU online state uses atomic operations.
+- [X] Console printing has a display-layer spinlock.
+- [X] AP trampoline physical storage is released by =unmap_pages=, which calls
+  =phy_mem_free=.
+
+** TODO Known limitations
+
+- [X] Interrupt handling has a working IOAPIC/PS2 activation path; timer and
+  process scheduling IRQ users remain future work.
+- [ ] There is no process abstraction or ring-3 execution path.
+- [ ] There is no syscall ABI.
+- [ ] FAT16 does not yet provide a complete file API for programs.
+- [ ] The ELF support currently concerns kernel boot sections, not user ELF
+  program loading.
+
+* Phase 1: Console Input
+
+** DONE Establish IRQ subsystem
+
+- [X] Install IDT entries for all 256 vectors.
+- [X] Remove CPU error codes correctly before exception =iret=.
+- [X] Expose =irq_register_handler= and =irq_unregister_handler= through the
+  public interrupt header.
+- [X] Protect handler-list updates and dispatch with an IRQ lock.
+- [X] Route external interrupts to the IOAPIC and disable the legacy PIC before
+  enabling interrupts.
+- [X] Enable PS/2 IRQ 1 after IOAPIC initialization.
+
+*** Acceptance criteria
+
+ - [X] Unhandled vectors return or stop safely without corrupting the stack.
+ - [X] Registered handlers receive the logical IRQ line.
+- [X] IRQs are acknowledged exactly once.
+- [X] Keyboard IRQ 1 can be enabled without an exception flood.
+
+** TODO Audit keyboard and interrupt path :human:ai:
+
+Confirm the PS/2 controller, IRQ routing, IDT entries, and interrupt enabling
+sequence. Produce a short note identifying the safe input path.
+
+*** Acceptance criteria
+
+- Keyboard input is received without interrupt-fault floods.
+- IRQ handling works with one and multiple CPUs.
+- Interrupt handlers do not perform unbounded console output.
+
+** TODO Add keyboard ring buffer :ai:
+
+Create a bounded, lock-protected input queue. The IRQ handler places decoded
+key events or bytes in the queue and wakes or signals the console reader.
+
+*** Acceptance criteria
+
+- Input is not lost during normal typing.
+- Buffer-full behavior is defined.
+- Producer and consumer synchronization is safe on SMP.
+
+** TODO Implement terminal line discipline :ai:
+
+Add character input, backspace, Enter, and a minimal Ctrl-C policy. Keep line
+editing separate from the keyboard driver.
+
+*** Acceptance criteria
+
+- A user can type and submit a complete line.
+- Backspace updates both the buffer and display.
+- Lines are bounded and safely terminated.
+
+** TODO Define console device API :human:ai:
+
+Choose and document interfaces equivalent to:
+
+#+BEGIN_SRC c
+ssize_t console_read(void *buffer, size_t length);
+ssize_t console_write(const void *buffer, size_t length);
+#+END_SRC
+
+Decide blocking behavior, EOF, errors, and whether serial and VGA share one
+console.
+
+* Phase 2: Processes and User Mode
+
+Implementation lives under =kernel/process/=; see
+=kernel/process/README.org=.
+
+** TODO Define process subsystem contracts :human:
+
+Document PID allocation, process states, ownership, and module boundaries
+before implementation.
+
+** TODO Process objects: =kernel/process/process.c= :ai:
+
+Implement PID allocation, process states, process creation, termination, and a
+kernel-owned process table.
+
+*** Acceptance criteria
+
+- A process has an independent user address space.
+- Kernel stacks are not shared between processes.
+- Process resources can be released exactly once.
+
+** TODO Address spaces: =kernel/process/address_space.c= :human:ai:
+
+Create and destroy per-process page directories using the existing VMM. Share
+only the intentional kernel mappings and keep user mappings isolated.
+
+*** Acceptance criteria
+
+- A process has an independent user address space.
+- User mappings carry the user permission bit.
+- Address-space teardown frees every process-owned page exactly once.
+
+** TODO Stacks: =kernel/process/stack.c= :ai:
+
+Allocate separate kernel and user stacks and define the initial user-stack
+layout for argc/argv.
+
+** TODO i386 context: =kernel/process/arch/i386/= :human:ai:
+
+Set up user code/data descriptors, a user stack, and an =iret= transition.
+Add a safe return path for syscall and exception entry.
+
+*** Acceptance criteria
+
+- A test process executes in CPL 3.
+- User code cannot write kernel-only mappings.
+- Invalid user addresses are rejected without corrupting the kernel.
+
+** TODO Cooperative scheduler: =kernel/process/scheduler.c= :ai:
+
+Implement =scheduler_init=, =scheduler_current=, =scheduler_yield=, and a
+simple runnable queue. Preemption can wait until the timer and interrupt path
+are stable.
+
+** TODO Wait queues: =kernel/process/wait_queue.c= :ai:
+
+Add blocking and wake-up primitives. Use them later to replace the current
+console-read halt loop.
+
+* Phase 3: System Call ABI
+
+** TODO Approve syscall ABI :human:
+
+Use a documented i386 convention, initially =int 0x80=. Define register
+arguments, return values, and negative error codes.
+
+Initial calls:
+
+- =SYS_read=
+- =SYS_write=
+- =SYS_exit=
+- =SYS_yield=
+- =SYS_open=
+- =SYS_close=
+
+** TODO Implement syscall entry and validation :ai:
+
+Validate syscall numbers, pointers, lengths, file descriptors, and process
+state. Copy data across the user/kernel boundary rather than trusting user
+addresses.
+
+** TODO Add tiny user libc wrappers :ai:
+
+Provide C wrappers for the approved calls. Keep the ABI implementation in one
+place and add a user-program build target.
+
+* Phase 4: Filesystem API
+
+** TODO Audit FAT16 implementation :human:ai:
+
+Record supported media, sector sizes, long-name limitations, and current
+read/write behavior. Decide whether the first executable is loaded from FAT16
+or supplied as a Multiboot module during early development.
+
+** TODO Implement read-only file API :ai:
+
+Add path lookup and file operations for the initial namespace, preferably
+=/bin=. Start with read-only access:
+
+- =open(path)=
+- =read(fd, buffer, length)=
+- =close(fd)=
+- =readdir(path)=
+
+*** Acceptance criteria
+
+- Short reads are handled correctly.
+- Files crossing cluster boundaries load correctly.
+- Malformed or truncated FAT metadata fails safely.
+
+** TODO Choose initial image workflow :human:
+
+Decide whether the first development image embeds =calc= in FAT16 or passes it
+as a Multiboot module. FAT16 is the product path; a Multiboot module is useful
+for isolating loader work.
+
+* Phase 5: User ELF Loader
+
+** TODO Define supported ELF subset :human:ai:
+
+Support 32-bit little-endian i386 ELF executables with =PT_LOAD= segments.
+Initially reject dynamic linking, TLS, relocations, interpreters, and shared
+libraries.
+
+** TODO Implement ELF validation :ai:
+
+Validate magic, class, machine, version, program-header bounds, alignment,
+overflow, entry point, and segment overlap.
+
+** TODO Map and load PT_LOAD segments :ai:
+
+- Allocate user pages.
+- Apply writable/executable permissions from segment flags.
+- Copy file-backed bytes.
+- Zero the remainder for BSS.
+- Map the user stack.
+- Set entry EIP and initial ESP.
+
+*** Acceptance criteria
+
+- A static ELF test program reaches its entry point.
+- Non-writable segments cannot be written from user mode.
+- Malformed ELF files are rejected without leaking pages.
+- All allocated pages are freed on load failure and process exit.
+
+** TODO Add user program linker/build target :human:ai:
+
+Create a linker script and compiler flags for static i386 user programs. Keep
+kernel and user headers clearly separated.
+
+* Phase 6: Polish Prefix Calculator
+
+** TODO Specify calculator language :human:
+
+Initial grammar:
+
+#+BEGIN_EXAMPLE
+expression := integer | operator expression expression
+operator   := + | - | * | /
+#+END_EXAMPLE
+
+Define integer width, division by zero, overflow, whitespace, negative
+integers, and error messages before implementation.
+
+** TODO Implement calculator parser :ai:
+
+Build a small tokenizer and recursive prefix parser with bounded input and
+explicit error results. Do not use floating point initially.
+
+** TODO Implement calculator REPL :ai:
+
+Read one line, evaluate it, print the result or an error, and continue until
+EOF or an agreed exit command.
+
+Example session:
+
+#+BEGIN_EXAMPLE
+jan> + 2 3
+5
+jan> * + 2 3 4
+20
+jan> /
+error: expected two operands
+#+END_EXAMPLE
+
+** TODO End-to-end calculator test :human:ai:
+
+Boot QEMU, launch =/bin/calc=, enter valid and invalid expressions, and verify
+the process exits or continues according to the specification.
+
+* Phase 7: Shell
+
+** TODO Launch =/bin/calc= directly :ai:
+
+Use this as the first console integration point before implementing a shell.
+
+** TODO Add minimal shell :ai:
+
+Implement command parsing and:
+
+- =help=
+- =ls=
+- =calc=
+- =exit=
+
+Add argument passing only after the basic command loop works.
+
+* Suggested Execution Order
+
+1. Human approves console, syscall, ELF, and calculator specifications.
+2. AI completes keyboard queue and console line input.
+3. AI implements a kernel test process and ring-3 transition.
+4. AI and human freeze the syscall ABI.
+5. AI implements syscalls and user libc.
+6. AI implements the read-only filesystem API.
+7. AI implements the static ELF loader.
+8. AI builds and launches a trivial user program such as =hello=.
+9. AI implements and launches =/bin/calc=.
+10. Human performs QEMU acceptance testing and reviews security boundaries.
+11. AI implements the shell.
+
+* Risks and Non-Goals
+
+- Do not begin with dynamic linking or kernel module loading.
+- Do not share the kernel address space as the application's only memory model.
+- Do not enable preemption before interrupt entry and locking are reliable.
+- Do not let user programs call kernel internals directly.
+- Do not reclaim pages until ownership and failure cleanup are explicit.

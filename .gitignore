@@ -1,6 +1,9 @@
 tools/build
 tools/src
 
+/build/
+/dist/
+
 locate.db
 TAGS
 

@@ -1,23 +1,12 @@
 #pragma once
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+/* Compatibility include for code that has not moved to the block-device API. */
+#include <kernel/block_device.h>
 
-enum storage_backend {
-	STORAGE_BACKEND_AHCI,
-	STORAGE_BACKEND_ATA_PIO,
-};
+typedef struct block_device storage_device;
 
-struct storage_device {
-	enum storage_backend backend;
-	uint8_t ahci_port;
-	uint8_t channel;
-	uint8_t drive;
-};
-
-void storage_init(void);
-size_t storage_device_count(void);
-bool storage_get_device(size_t device_index, struct storage_device *out_device);
-bool storage_read_device(const struct storage_device *device, uint32_t lba_addr, uint16_t sector_count, void *dest);
-bool storage_write_device(const struct storage_device *device, uint32_t lba_addr, uint16_t sector_count, const void *src);
+#define storage_init block_device_init
+#define storage_device_count block_device_count
+#define storage_get_device block_device_get
+#define storage_read_device block_device_read
+#define storage_write_device block_device_write

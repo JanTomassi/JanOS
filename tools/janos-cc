@@ -1,0 +1,38 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+
+if [ -n "${JANOS_SYSROOT:-}" ]; then
+  sysroot=$JANOS_SYSROOT
+elif [ -d "$repo_root/dist/sysroot/usr/include" ]; then
+  sysroot=$repo_root/dist/sysroot
+else
+  sysroot=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+fi
+
+if [ -n "${JANOS_CC:-}" ]; then
+  cc=$JANOS_CC
+elif [ -x "$repo_root/tools/build/bin/i686-elf-gcc" ]; then
+  cc=$repo_root/tools/build/bin/i686-elf-gcc
+else
+  cc=i686-elf-gcc
+fi
+
+compile_only=false
+for argument in "$@"; do
+  case "$argument" in
+    -c|-E|-S) compile_only=true ;;
+  esac
+done
+
+if $compile_only; then
+  exec "$cc" --sysroot="$sysroot" -isystem=/usr/include -ffreestanding \
+    -fno-stack-protector -fno-pie "$@"
+fi
+
+exec "$cc" --sysroot="$sysroot" -nostdlib -no-pie \
+  -Wl,-T,"$sysroot/usr/lib32/janos/user.ld" \
+  "$sysroot/usr/lib32/janos/crt0.o" "$@" \
+  -L"$sysroot/usr/lib32" -lc -lgcc

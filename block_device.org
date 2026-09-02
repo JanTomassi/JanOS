@@ -1,0 +1,268 @@
+#+title: Block Device and FAT16 Application Boot Plan
+
+* Goal
+
+Add a block-device subsystem that exposes SATA disks through a generic kernel
+interface, reads a FAT16 filesystem, loads the ~calc~ ELF from the filesystem,
+and starts it as the first user process.
+
+The existing Multiboot module path is useful as a fallback during migration, but
+the normal SATA image should eventually contain the application at the root as
+the file ~CALC~. The FAT16 volume is unpartitioned and starts at LBA 0.
+
+* Current State
+
+- AHCI probing, port initialization, DMA setup, and sector transfers already
+  exist under ~kernel/src/drivers/storage/~.
+- ~kernel/src/drivers/storage/storage.c~ currently exposes a backend-tagged
+  structure rather than a generic block device.
+- FAT16 support exists under ~kernel/src/fs/fat16.c~ and currently reads from
+  ~struct storage_device~.
+- ~elf32_load_fat16()~ already connects FAT16 file reads to the ELF loader.
+- Storage initialization is currently commented out and appears after the
+  non-returning transition to userspace in ~kernel/src/init/main.c~.
+- The current calculator is loaded from a GRUB Multiboot module, not a disk.
+- Existing raw disk files are not a reproducible source of the application
+  image and must not be required for a clean checkout.
+
+* Target Data Flow
+
+#+begin_example
+QEMU SATA disk
+  -> PCI AHCI controller
+  -> AHCI port
+  -> block_device
+  -> FAT16 root directory entry CALC
+  -> ELF image
+  -> address-space mappings
+  -> process and user stack
+  -> ring-3 calc process
+#+end_example
+
+The boot order must be:
+
+1. Multiboot and early memory initialization.
+2. Physical, virtual, GPA, and slab allocators.
+3. IDT, IRQ, APIC, and SMP initialization.
+4. Block-device/SATA initialization.
+5. FAT16 lookup of ~calc~.
+6. Process and syscall initialization.
+7. ELF loading from FAT16.
+8. Process start and entry into userspace.
+
+* Phase 1: Generic Block Device API
+
+Replace the backend-specific public structure in ~kernel/include/kernel/storage.h~
+with a generic block-device interface. The public API should define:
+
+- sector size, initially 512 bytes;
+- sector count/capacity;
+- stable device name or ID;
+- read and write operations using a 64-bit LBA;
+- optional flush operation;
+- consistent rejection of zero-length operations;
+- boolean or enumerated error results, never a panic for caller input.
+
+The low-level AHCI and ATA objects remain private to their drivers. Filesystems
+must not know about AHCI ports, PCI BARs, ATA channels, or drive numbers.
+
+Suggested shape:
+
+#+begin_src c
+struct block_device;
+
+struct block_device_ops {
+    bool (*read)(struct block_device *, uint64_t lba,
+                 uint32_t sectors, void *destination);
+    bool (*write)(struct block_device *, uint64_t lba,
+                  uint32_t sectors, const void *source);
+    bool (*flush)(struct block_device *);
+};
+
+struct block_device_info {
+    uint32_t sector_size;
+    uint64_t sector_count;
+    const char *name;
+};
+#+end_src
+
+Keep compatibility wrappers temporarily if needed, but make FAT16 depend only
+on the generic interface.
+
+* Phase 2: SATA/AHCI Driver
+
+Adapt the existing AHCI driver to register each supported SATA disk as a
+~block_device~.
+
+Required work:
+
+- Validate SATA disk signatures and reject ATAPI/unsupported ports.
+- Store sector capacity and sector size using IDENTIFY data.
+- Use 64-bit LBA internally or explicitly reject unsupported high LBAs.
+- Add per-device locking so requests cannot overwrite one AHCI command slot.
+- Add bounded timeouts to port stop, reset, command issue, and completion loops.
+- Return I/O errors instead of hanging or panicking on invalid requests.
+- Clean up partial command-list, FIS, and command-table allocations.
+- Make probing and initialization idempotent.
+- Expose stable device identity instead of relying on linked-list insertion order.
+
+The first supported configuration is QEMU's AHCI controller with the FAT16
+application disk on AHCI port 1. The ISO remains on AHCI port 0.
+
+* Phase 3: FAT16 Integration
+
+Change FAT16 functions to accept a generic block device. The filesystem must:
+
+- read sector 0 through the block-device API;
+- validate the BPB and FAT16 geometry;
+- reject unsupported sector sizes or out-of-volume LBAs;
+- bound all cluster traversal by the filesystem's cluster count;
+- detect cyclic and invalid FAT chains;
+- read root-directory entries and match ~CALC~ case-insensitively;
+- return errors for failed block reads.
+
+The first version only needs root-directory files. Directory traversal and
+partition-table support are separate future features.
+
+* Phase 4: Reproducible Application Disk
+
+Add a build-time FAT16 image generator under ~tools/~. It should:
+
+- create an unpartitioned FAT16 image;
+- use fixed image size and geometry;
+- use a fixed volume ID and label;
+- use deterministic timestamps and file ordering;
+- copy the Meson-built ~calc~ ELF to the root as ~CALC~;
+- write the output under the Meson build directory;
+- verify that the resulting image is a valid FAT16 volume.
+
+The generated dependency graph should be:
+
+#+begin_example
+calc ELF + image generator -> build/test-disk.img
+kernel + grub.cfg         -> build/JanOS.iso
+ISO + test-disk.img       -> QEMU SATA run
+#+end_example
+
+Do not depend on untracked root-level raw images for the normal build.
+
+* Phase 5: Disk-Backed ELF Execution
+
+Add a general disk-backed process execution helper, for example:
+
+#+begin_src c
+bool process_exec_block_device_file(const struct block_device *device,
+                                    const char *name,
+                                    int argc, const char *const argv[],
+                                    struct process_exec_result *result);
+#+end_src
+
+It should:
+
+1. Open ~CALC~ through FAT16.
+2. Read the complete ELF image.
+3. Pass it to ~elf32_load()~.
+4. Create the process and address space.
+5. Build ~argv = { "calc", NULL }~.
+6. Start the process.
+7. Return the initial i386 context to the caller.
+
+Failure paths must free the file image, unmap loaded segments, destroy a
+not-yet-started process, and report the failing phase.
+
+* Phase 6: Boot Integration
+
+Move storage initialization before process execution in
+~kernel/src/init/main.c~. Select the application disk by stable identity or
+AHCI port rather than assuming list index 0.
+
+The production boot path becomes:
+
+#+begin_src c
+storage_init();
+struct block_device *device = storage_find_named("sata1");
+if (device == nullptr)
+    panic("application disk unavailable");
+
+process_system_init();
+syscall_init();
+syscall_register_console_handlers();
+
+process_exec_block_device_file(device, "calc", 1,
+                               (const char *[]) { "calc", nullptr }, &calc);
+i386_context_enter_user(&calc.context);
+#+end_src
+
+Remove ~module2 /boot/calc calc~ from the disk-backed test ISO once this path
+works. Keep a separate Multiboot fallback target while debugging migration.
+
+* Phase 7: QEMU Configuration
+
+The SATA QEMU configuration must attach:
+
+- AHCI port 0: boot ISO;
+- AHCI port 1: generated FAT16 application disk.
+
+Use an explicit CPU count and add serial output for diagnostics. Add QEMU's
+~isa-debug-exit~ device for automated results after a test-only guest exit path
+exists:
+
+#+begin_example
+-display none
+-serial file:build/qemu.serial.log
+-monitor none
+-no-reboot
+-device isa-debug-exit,iobase=0xf4,iosize=0x04
+#+end_example
+
+* Verification
+
+Host tests:
+
+- block-device range validation with fake devices;
+- FAT16 BPB, directory, and file-read tests with a memory-backed device;
+- ELF loader tests with fake mapping callbacks.
+
+QEMU tests:
+
+- AHCI device discovery and registration;
+- sector read from the generated FAT16 disk;
+- FAT16 lookup of ~CALC~;
+- ELF loading from disk;
+- process creation and user-stack construction;
+- actual ring-3 execution of ~calc~;
+- syscall output and exit status;
+- boot with one and two CPUs.
+
+Required serial markers include:
+
+#+begin_example
+JANOS:BOOT:STORAGE:PASS
+JANOS:FAT16:CALC:PASS
+JANOS:ELF:DISK:PASS
+JANOS:USER:CALC:PASS
+#+end_example
+
+The final acceptance test is:
+
+#+begin_src sh
+meson setup --wipe build \
+  --cross-file config/i686-elf.ini \
+  --prefix=/usr --libdir=lib32 \
+  -Dqemu=enabled
+meson test -C build --print-errorlogs
+meson compile -C build run-sata
+#+end_src
+
+* Implementation Order
+
+1. Add and document the generic block-device API.
+2. Adapt AHCI to register a stable SATA block device.
+3. Add AHCI validation, locking, timeouts, and cleanup.
+4. Inject the generic block device into FAT16.
+5. Generate a deterministic FAT16 image containing ~calc~.
+6. Add disk-backed ELF/process execution.
+7. Move storage initialization before process startup.
+8. Boot ~calc~ from FAT16 in QEMU.
+9. Add host and QEMU regression tests for every phase.
+#+end:
