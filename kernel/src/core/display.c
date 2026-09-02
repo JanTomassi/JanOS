@@ -156,13 +156,11 @@ void __kprintf_va_list(char *str, va_list ap)
 	for (size_t i = 0; i < strlen((const char *)str); i++) {
 		if (str[i] == '%') {
 			switch (str[i + 1]) {
-			// string
 			case 's':
 				s = va_arg(ap, char *);
 				disps[current].puts(s);
 				i++;
 				continue;
-			// unsigned
 			case 'u': {
 				uint32_t c = va_arg(ap, uint32_t);
 				char str[32] = { 0 };
@@ -171,7 +169,6 @@ void __kprintf_va_list(char *str, va_list ap)
 				i++;
 				continue;
 			}
-			// decimal
 			case 'd': {
 				int32_t c = va_arg(ap, int32_t);
 				char str[32] = { 0 };
@@ -180,7 +177,6 @@ void __kprintf_va_list(char *str, va_list ap)
 				i++;
 				continue;
 			}
-			// hex
 			case 'x': {
 				uint32_t c = va_arg(ap, uint32_t);
 				char str[32] = { 0 };
@@ -189,10 +185,7 @@ void __kprintf_va_list(char *str, va_list ap)
 				i++;
 				continue;
 			}
-			// character
 			case 'c': {
-				// char gets promoted to int for va_arg!
-				// clean it.
 				char c = (char)(va_arg(ap, int) & ~0xFFFFFF00);
 				disps[current].putc(c);
 				i++;
@@ -207,15 +200,12 @@ void __kprintf_va_list(char *str, va_list ap)
 	}
 }
 
-/* Registers the display interface and returns its ID */
 uint8_t display_register(display_t d)
 {
 	enabled = true;
 	disps[_last_register] = d;
-	//dispis[_last_register]->onregister();
 	return _last_register++;
 }
-/* Sets it as current display */
 bool display_setcurrent(uint8_t id)
 {
 	if (current == id && id < _last_register)
@@ -223,7 +213,6 @@ bool display_setcurrent(uint8_t id)
 	current = id;
 	return true;
 }
-/* returns current DISPLAY */
 display_t *display_getcurrent()
 {
 	return &disps[current];

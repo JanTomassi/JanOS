@@ -121,6 +121,9 @@ uint32_t ata_pio_detect_devtype(uint8_t channel, uint8_t drive)
 
 	outb(channels[channel].base + REG_DEVSEL, 0xA0 | drive << 4);
 	wait_device(channel);
+	uint8_t status = inb(channels[channel].base + 7);
+	if (status == 0 || status == 0xFF)
+		return ATADEV_UNKNOWN;
 
 	unsigned cl = inb(channels[channel].base + REG_CYL_LO); /* get the "signature bytes" */
 	unsigned ch = inb(channels[channel].base + REG_CYL_HI);

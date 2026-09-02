@@ -99,7 +99,6 @@ static bool ahci_port_rebase(struct ahci_port_state *state)
 	state->cmd_list = dma_alloc(1024);
 	state->fis = dma_alloc(256);
 	if (state->cmd_list.virt == nullptr || state->fis.virt == nullptr) {
-		mprint("AHCI port %u: command memory allocation failed\n", state->port_index);
 		return false;
 	}
 
@@ -116,7 +115,6 @@ static bool ahci_port_rebase(struct ahci_port_state *state)
 	for (int i = 0; i < 1; i++) {
 		state->cmd_tables[i] = dma_alloc(4096);
 		if (state->cmd_tables[i].virt == nullptr) {
-			mprint("AHCI port %u: command table allocation failed at %u\n", state->port_index, i);
 			return false;
 		}
 
@@ -214,7 +212,6 @@ void ahci_init(void)
 			continue;
 
 		volatile struct hba_port *port = &ahci_state.hba->ports[i];
-		mprint("AHCI port %u ssts=%x sig=%x\n", i, port->ssts, port->sig);
 		if (!ahci_port_present(port))
 			continue;
 
@@ -231,7 +228,6 @@ void ahci_init(void)
 			continue;
 		}
 
-		mprint("Port %u active\n", i);
 	}
 
 	if (ahci_state.irq_line < 16)

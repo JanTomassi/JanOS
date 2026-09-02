@@ -15,6 +15,11 @@ static void halt_after_user_fault(struct i386_trap_frame *frame)
 {
 	struct process *process = process_current();
 	if (process != nullptr && (frame->cs & 3u) == 3u) {
+		uint32_t cr2 = 0;
+		if (frame->vector == INTN_PAGE_FAULT)
+			__asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+		kprintf("User fault: vector=%u EIP=%x CS=%x error=%x CR2=%x\n",
+			frame->vector, frame->eip, frame->cs, frame->error_code, cr2);
 		process_exit_current(128 + (int)frame->vector);
 		__asm__ volatile("cli");
 		for (;;)

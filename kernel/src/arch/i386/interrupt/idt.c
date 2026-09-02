@@ -66,5 +66,4 @@ void idt_init(void)
 			 "longjmp_after_gdt:"
 			 :
 			 : "m"(idtr)); // load the new IDT
-	/* __asm__ volatile("sti");       // set the interrupt flag */
 }
