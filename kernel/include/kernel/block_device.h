@@ -9,7 +9,6 @@ enum block_device_backend {
 	BLOCK_DEVICE_BACKEND_ATA_PIO,
 };
 
-/* The generic layer currently stores the low-level driver handle internally. */
 struct block_device {
 	enum block_device_backend backend;
 	uint32_t sector_size;

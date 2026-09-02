@@ -146,9 +146,30 @@ __hot static inline void bitmap_update_down(size_t idx, bool new_val)
 	}
 }
 
+__hot static inline bool bitmap_block_is_free(size_t idx)
+{
+	const size_t level = bitmap_get_level_from_idx(idx);
+	const size_t tree = bitmap_get_tree_from_idx(idx);
+	const size_t offset = bitmap_get_idx_at_level(idx, level);
+
+	if (bitmap_get_bit(idx))
+		return false;
+
+	for (size_t l = level + 1; l < buddy_bitmap.levels; l++) {
+		const size_t shift = l - level;
+		const size_t start = offset << shift;
+		const size_t count = 1u << shift;
+		for (size_t i = start; i < start + count; i++)
+			if (bitmap_get_bit(bitmap_get_index(tree, l, i)))
+				return false;
+	}
+
+	return true;
+}
+
 __hot static inline bool bitmap_use_block(size_t idx)
 {
-	if (bitmap_get_bit(idx))
+	if (!bitmap_block_is_free(idx))
 		return false;
 
 	bitmap_set_bit(idx, true);
@@ -268,8 +289,7 @@ __hot fatptr_t phy_mem_alloc(size_t len, phy_mem_alloc_mode_t mode)
 			const uintptr_t addr = base + o * size;
 			if (addr < pool || addr + size > pool + buddy_bitmap.pool_size)
 				continue;
-			if (!bitmap_get_bit(p)) {
-				bitmap_use_block(p);
+			if (bitmap_use_block(p)) {
 				fatptr_t result = (fatptr_t){
 					.ptr = (void*)addr,
 					.len = size,
@@ -431,17 +451,4 @@ __init void phy_mem_init()
 	         bottom_addr, bottom_addr + pool_size,
 	         phy_mem_addr, phy_mem_addr + bitmap_size, free_pages);
 
-	/* for (const struct multiboot_mmap_entry *mmap = mmap_tag->entries; (multiboot_uint8_t *)mmap < (multiboot_uint8_t *)mmap_tag + mmap_tag->size; */
-	/*      mmap = (multiboot_memory_map_t *)((unsigned long)mmap + mmap_tag->entry_size)) { */
-	/* 	if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE) { */
-	/* 		phy_mem_add_region(mmap->addr, mmap->len); */
-	/* 	} */
-	/* } */
-
-	/* const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)elf_tag->sections; */
-	/* for (size_t i = 0; i < elf_tag->num; i++) */
-	/* 	phy_mem_rm_region(elf_sec[i].sh_addr, elf_sec[i].sh_size); */
-
-	/* mprint("Physical memory allocator ready | total blocks: %x | used: %x | free: %x\n", phy_mem_get_tot_blocks(), phy_mem_get_used_blocks(), */
-	/*        phy_mem_get_free_blocks()); */
 }

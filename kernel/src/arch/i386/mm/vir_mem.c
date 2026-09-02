@@ -41,10 +41,8 @@ void *vmm_phy_addr(const void *vir_addr)
 	size_t pd_idx = (size_t)vir_addr >> 22;
 	size_t pt_idx = (size_t)vir_addr >> 12 & 0x03FF;
 
-	// I'm assuming that the pd will alwais be valid
 	size_t *pd = (size_t *)page_directory_addr;
 
-	// No mapping in this range
 	if (!(pd[pd_idx] & VMM_ENTRY_PRESENT_BIT))
 		return nullptr;
 	else if ((pd[pd_idx] & VMM_ENTRY_PAGE_SIZE_BIT))

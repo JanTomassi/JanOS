@@ -92,9 +92,6 @@ bool pci_find_class(uint8_t class_id, uint8_t subclass, uint8_t prog_if, struct 
 			struct pci_device dev = { 0 };
 			if (!pci_read_device((uint8_t)bus, device, 0, &dev))
 				continue;
-			if (dev.class_id == PCI_CLASS_MASS_STORAGE)
-				kprintf("PCI storage %x:%x class=%x sub=%x prog=%x\n", dev.vendor_id,
-					dev.device_id, dev.class_id, dev.subclass, dev.prog_if);
 
 			if (pci_match_class(&dev, class_id, subclass, prog_if)) {
 				if (out != nullptr)
