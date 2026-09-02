@@ -1,11 +1,42 @@
 #include <kernel/interrupt.h>
 
+#include <kernel/display.h>
+#include <kernel/process/process.h>
+#include <kernel/vir_mem.h>
+
 #include "../arch/i386/ioapic.h"
 #include "../arch/i386/pic.h"
 #include "../arch/i386/cpuid.h"
 #include "../arch/i386/lapic.h"
 
 #define IRQ_LINE_COUNT 16
+
+static void halt_after_user_fault(struct i386_trap_frame *frame)
+{
+	struct process *process = process_current();
+	if (process != nullptr && (frame->cs & 3u) == 3u) {
+		process_exit_current(128 + (int)frame->vector);
+		__asm__ volatile("cli");
+		for (;;)
+			__asm__ volatile("hlt");
+	}
+	panic("Unhandled exception %u: EIP=%x CS=%x error=%x\n",
+		frame->vector, frame->eip, frame->cs, frame->error_code);
+}
+
+void exception_dispatch(struct i386_trap_frame *frame)
+{
+	if (frame == nullptr)
+		panic("Exception entry supplied a null frame\n");
+
+	if (frame->vector == INTN_PAGE_FAULT && (frame->cs & 3u) == 0u) {
+		uint32_t cr2;
+		__asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+		panic("Kernel page fault: CR2=%x error=%x EIP=%x CS=%x\n",
+			cr2, frame->error_code, frame->eip, frame->cs);
+	}
+	halt_after_user_fault(frame);
+}
 
 static bool irq_shared[IRQ_LINE_COUNT] = { false };
 

@@ -66,7 +66,7 @@ gdt_udata:	dq 58531401993093119
 gdt.end:
 
 gdtr:
-	dw 	gdt.end - gdt
+	dw 	gdt.end - gdt - 1
 	dd 	gdt
 
 ;; The linker script specifies _start as the entry point to the kernel and the

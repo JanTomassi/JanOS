@@ -18,11 +18,14 @@ static bool bsp_tss_loaded;
 
 static uint64_t tss_descriptor(uintptr_t base, size_t limit)
 {
-	return (limit & 0xffffu) |
-		((base & 0xffffffu) << 16) |
+	const uint32_t base32 = (uint32_t)base;
+	const uint32_t limit20 = (uint32_t)limit & 0xfffffu;
+
+	return (uint64_t)(limit20 & 0xffffu) |
+		((uint64_t)(base32 & 0xffffffu) << 16) |
 		(0x89ull << 40) |
-		(((uint64_t)limit & 0xf0000u) << 32) |
-		(((uint64_t)base & 0xff000000ull) << 32);
+		((uint64_t)(limit20 >> 16) << 48) |
+		((uint64_t)(base32 >> 24) << 56);
 }
 
 bool i386_tss_install(struct i386_cpu_state *state, uintptr_t kernel_stack_top)
@@ -33,10 +36,15 @@ bool i386_tss_install(struct i386_cpu_state *state, uintptr_t kernel_stack_top)
 
 	struct i386_gdtr old_gdtr;
 	__asm__ volatile("sgdt %0" : "=m"(old_gdtr));
-	if (old_gdtr.base == 0 || old_gdtr.limit < 39)
+	if (old_gdtr.base == 0 || old_gdtr.limit < 15)
 		return false;
 
-	memcpy(state->gdt, (const void *)old_gdtr.base, 5 * sizeof(uint64_t));
+	memset(state->gdt, 0, sizeof(state->gdt));
+	const size_t descriptor_count = ((size_t)old_gdtr.limit + 1) /
+		                               sizeof(uint64_t);
+	const size_t copied_count = descriptor_count < 5 ? descriptor_count : 5;
+	memcpy(state->gdt, (const void *)old_gdtr.base,
+	       copied_count * sizeof(uint64_t));
 	memset(&state->tss, 0, sizeof(state->tss));
 	state->tss.esp0 = (uint32_t)kernel_stack_top;
 	state->tss.ss0 = I386_KERNEL_DATA_SELECTOR;
@@ -48,7 +56,7 @@ bool i386_tss_install(struct i386_cpu_state *state, uintptr_t kernel_stack_top)
 		.limit = sizeof(state->gdt) - 1,
 		.base = (uintptr_t)state->gdt,
 	};
-	const uint16_t tss_selector = 5u << 3;
+	const uint16_t tss_selector = I386_TSS_SELECTOR;
 	__asm__ volatile("lgdt %0\n\n"
 			     "mov %1, %%ax\n\n"
 			     "mov %%ax, %%ds\n\n"
@@ -59,6 +67,21 @@ bool i386_tss_install(struct i386_cpu_state *state, uintptr_t kernel_stack_top)
 			     : "m"(new_gdtr), "i"(I386_KERNEL_DATA_SELECTOR),
 			       "m"(tss_selector)
 			     : "ax", "memory");
+	return true;
+}
+
+bool i386_tss_init_cpu(struct i386_cpu_state *state, uintptr_t kernel_stack_top)
+{
+	return i386_tss_install(state, kernel_stack_top);
+}
+
+bool i386_tss_set_kernel_stack(struct i386_cpu_state *state,
+	                             uintptr_t kernel_stack_top)
+{
+	if (state == nullptr || kernel_stack_top == 0 ||
+	    (kernel_stack_top & 3u) != 0)
+		return false;
+	state->tss.esp0 = (uint32_t)kernel_stack_top;
 	return true;
 }
 
@@ -83,8 +106,7 @@ bool i386_tss_set_bsp_kernel_stack(uintptr_t kernel_stack_top)
 	if (!bsp_tss_loaded || kernel_stack_top == 0 ||
 	    (kernel_stack_top & 3u) != 0)
 		return false;
-	bsp_cpu_state.tss.esp0 = (uint32_t)kernel_stack_top;
-	return true;
+	return i386_tss_set_kernel_stack(&bsp_cpu_state, kernel_stack_top);
 }
 
 static bool user_address(uintptr_t address)

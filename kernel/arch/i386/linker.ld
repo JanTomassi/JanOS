@@ -84,7 +84,7 @@ SECTIONS
 	} :data
 
 	. = ALIGN(4K);
-	.init.begin : AT(ADDR(.init.begin) - HIGHER_HALF)
+	.init.begin ALIGN(4K) : AT(ADDR(.init.begin) - HIGHER_HALF)
 	{
 		__sinit = .;
 	}
@@ -100,7 +100,7 @@ SECTIONS
 	}
 
 	. = ALIGN(4K);
-	.init.end : AT(ADDR(.init.end) - HIGHER_HALF)
+	.init.end ALIGN(4K) : AT(ADDR(.init.end) - HIGHER_HALF)
 	{
 		__einit = .;
 	}

@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <list.h>
 #include <kernel/phy_mem.h>
+#include <kernel/process/arch/i386/context.h>
 
 struct address_space;
 struct process_stack;
@@ -31,7 +32,9 @@ void process_destroy(struct process *process);
 struct process *process_current(void);
 bool process_start(struct process *process, uintptr_t entry, int argc,
                    const char *const argv[]);
-void process_exit_current(int status);
+bool process_initial_context(const struct process *process,
+                             struct i386_context *context);
+[[noreturn]] void process_exit_current(int status);
 
 process_pid_t process_pid(const struct process *process);
 struct process *process_parent(const struct process *process);

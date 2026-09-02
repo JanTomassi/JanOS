@@ -1,10 +1,9 @@
 #include <kernel/syscall.h>
 
 #include <kernel/process/process.h>
+#include <kernel/process/address_space.h>
 #include <kernel/tty.h>
 #include <kernel/vir_mem.h>
-
-#define USER_ADDRESS_LIMIT 0xc0000000u
 
 struct syscall_slot {
 	syscall_handler_t handler;
@@ -13,42 +12,81 @@ struct syscall_slot {
 
 static struct syscall_slot slots[SYSCALL_MAX];
 
-/*
- * There is currently no public page-table range query.  Keep the range below
- * the kernel split and reject arithmetic wraparound; mapped-page validation
- * must be added before arbitrary user processes are supported.
- */
-static bool user_buffer(uint32_t address, uint32_t length)
+bool copy_from_user(void *destination, const void *source, size_t length)
 {
-	if (length == 0)
-		return true;
-	if (process_current() == nullptr || address < PAGE_SIZE ||
-	    address >= USER_ADDRESS_LIMIT)
-		return false;
-	return (uint64_t)address + length <= USER_ADDRESS_LIMIT;
+	struct process *process = process_current();
+	return process != nullptr && (destination != nullptr || length == 0) &&
+		address_space_validate(process_address_space(process), (uintptr_t)source,
+			length, VMM_ENTRY_USER_SUPER_BIT) &&
+		address_space_copy_from(process_address_space(process), destination,
+			(uintptr_t)source, length);
 }
 
-static int32_t syscall_read_handler(struct syscall_frame *frame, void *context)
+bool copy_to_user(void *destination, const void *source, size_t length)
+{
+	struct process *process = process_current();
+	return process != nullptr && (source != nullptr || length == 0) &&
+		address_space_validate(process_address_space(process), (uintptr_t)destination,
+			length, VMM_ENTRY_USER_SUPER_BIT | VMM_ENTRY_READ_WRITE_BIT) &&
+		address_space_copy_to(process_address_space(process), (uintptr_t)destination,
+			source, length);
+}
+
+static bool user_buffer(uintptr_t address, size_t length, uint16_t flags)
+{
+	struct process *process = process_current();
+	return process != nullptr && (length == 0 || address_space_validate(
+		process_address_space(process), address, length, flags));
+}
+
+static int32_t syscall_read_handler(syscall_frame *frame, void *context)
 {
 	(void)context;
 	if (frame->ebx != 0)
 		return -SYSCALL_EBADF;
-	if (frame->edx > INT32_MAX || !user_buffer(frame->ecx, frame->edx))
+	if (frame->edx > INT32_MAX || !user_buffer(frame->ecx, frame->edx,
+		VMM_ENTRY_USER_SUPER_BIT | VMM_ENTRY_READ_WRITE_BIT))
 		return -SYSCALL_EFAULT;
-	return (int32_t)console_read((char *)(uintptr_t)frame->ecx, frame->edx);
+	char buffer[256];
+	size_t count = 0;
+	while (count < frame->edx) {
+		size_t chunk = frame->edx - count;
+		if (chunk > sizeof(buffer))
+			chunk = sizeof(buffer);
+		size_t got = console_read(buffer, chunk);
+		if (got == 0)
+			break;
+		if (!copy_to_user((void *)(uintptr_t)frame->ecx + count, buffer, got))
+			return -SYSCALL_EFAULT;
+		count += got;
+		break;
+	}
+	return (int32_t)count;
 }
 
-static int32_t syscall_write_handler(struct syscall_frame *frame, void *context)
+static int32_t syscall_write_handler(syscall_frame *frame, void *context)
 {
 	(void)context;
 	if (frame->ebx != 1 && frame->ebx != 2)
 		return -SYSCALL_EBADF;
-	if (frame->edx > INT32_MAX || !user_buffer(frame->ecx, frame->edx))
+	if (frame->edx > INT32_MAX || !user_buffer(frame->ecx, frame->edx,
+		VMM_ENTRY_USER_SUPER_BIT))
 		return -SYSCALL_EFAULT;
-	return (int32_t)console_write((const char *)(uintptr_t)frame->ecx, frame->edx);
+	char buffer[256];
+	size_t count = 0;
+	while (count < frame->edx) {
+		size_t chunk = frame->edx - count;
+		if (chunk > sizeof(buffer))
+			chunk = sizeof(buffer);
+		if (!copy_from_user(buffer, (const void *)(uintptr_t)frame->ecx + count, chunk))
+			return -SYSCALL_EFAULT;
+		console_write(buffer, chunk);
+		count += chunk;
+	}
+	return (int32_t)count;
 }
 
-static int32_t syscall_exit_handler(struct syscall_frame *frame, void *context)
+static int32_t syscall_exit_handler(syscall_frame *frame, void *context)
 {
 	(void)context;
 	if (process_current() == nullptr)
@@ -71,13 +109,14 @@ bool syscall_register(uint32_t number, syscall_handler_t handler, void *context)
 	return true;
 }
 
-int32_t syscall_dispatch(struct syscall_frame *frame)
+int32_t syscall_dispatch(syscall_frame *frame)
 {
-	if (frame == nullptr || frame->eax >= SYSCALL_MAX || slots[frame->eax].handler == nullptr)
+	if (frame == nullptr)
 		return -SYSCALL_ENOSYS;
-	int32_t result = slots[frame->eax].handler(frame, slots[frame->eax].context);
-	if (frame != nullptr)
-		frame->eax = (uint32_t)result;
+	int32_t result = -SYSCALL_ENOSYS;
+	if (frame->eax < SYSCALL_MAX && slots[frame->eax].handler != nullptr)
+		result = slots[frame->eax].handler(frame, slots[frame->eax].context);
+	frame->eax = (uint32_t)result;
 	return result;
 }
 

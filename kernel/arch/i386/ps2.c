@@ -72,7 +72,7 @@ static void console_key_event(struct key_event event)
 	if (!event.pressed)
 		return;
 
-	spin_lock(&console_lock);
+	uint32_t flags = spin_lock_irqsave(&console_lock);
 	if (event.key_code == KEY_CODE_BACKSPACE) {
 		if (edit_length != 0) {
 			edit_line[--edit_length] = '\0';
@@ -105,7 +105,7 @@ static void console_key_event(struct key_event event)
 			}
 		}
 	}
-	spin_unlock(&console_lock);
+	spin_unlock_irqrestore(&console_lock, flags);
 }
 
 static void ps2_irq_handler(uint8_t irq_line, void *context)
@@ -137,15 +137,31 @@ size_t console_read(char *buffer, size_t length)
 		return 0;
 
 	size_t count = 0;
-	while (count == 0) {
-		spin_lock(&console_lock);
-		while (count < length && input_pop(&buffer[count]))
-			count++;
+	for (;;) {
+		uint32_t flags = spin_lock_irqsave(&console_lock);
+		bool complete = false;
+		for (size_t i = input_read; i != input_write; i = (i + 1) % CONSOLE_INPUT_SIZE)
+			if (input_buffer[i] == '\n') {
+				complete = true;
+				break;
+			}
+		if (complete) {
+			while (count < length && input_pop(&buffer[count])) {
+				if (buffer[count++] == '\n')
+					break;
+			}
+			spin_unlock(&console_lock);
+			local_irq_restore(flags);
+			return count;
+		}
 		spin_unlock(&console_lock);
-		if (count == 0)
-			__asm__ volatile("hlt");
+		/* Keep interrupts disabled until the immediately following sti;hlt. */
+		if ((flags & (1u << 9)) != 0)
+			__asm__ volatile("sti; hlt" : : : "memory");
+		else
+			__asm__ volatile("pause" : : : "memory");
+		local_irq_restore(flags);
 	}
-	return count;
 }
 
 size_t console_write(const char *buffer, size_t length)

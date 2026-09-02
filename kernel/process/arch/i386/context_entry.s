@@ -37,3 +37,18 @@ i386_context_enter_asm:
 	mov	ecx, [eax + 24]
 	mov	eax, [eax + 28]
 	iret
+
+global i386_reaper_enter:function
+i386_reaper_enter:
+	; Preserve the arguments before abandoning the exiting process's stack.
+	mov	eax, [esp + 4]
+	mov	edx, [esp + 8]
+	mov	ecx, [esp + 12]
+	cli
+	and	eax, 0xfffffff0
+	mov	esp, eax
+	push	ecx
+	call	edx
+.reaper_halt:
+	hlt
+	jmp	.reaper_halt

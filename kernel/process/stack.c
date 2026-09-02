@@ -112,19 +112,27 @@ bool process_user_stack_layout(struct process_stack *stack, int argc,
 	if (stack == nullptr || !stack->user || argc < 0 || user_sp == nullptr ||
 	    (argc != 0 && argv == nullptr))
 		return false;
+	uint32_t old_cr3;
+	__asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3) : : "memory");
+	const fatptr_t *page_directory = address_space_page_directory(stack->space);
+	if (page_directory == nullptr || page_directory->ptr == nullptr)
+		return false;
+	bool switched = old_cr3 != (uint32_t)(uintptr_t)page_directory->ptr;
+	if (switched && !address_space_activate(stack->space))
+		return false;
 	uintptr_t cursor = (uintptr_t)process_stack_top(stack);
 	uintptr_t addresses[argc > 0 ? argc : 1];
 	for (int i = argc - 1; i >= 0; --i) {
 		size_t length = strlen(argv[i]) + 1;
 		if (cursor < (uintptr_t)stack->base + length)
-			return false;
+			goto fail;
 		cursor = (cursor - length) & ~(uintptr_t)(sizeof(uintptr_t) - 1);
 		memcpy((void *)cursor, argv[i], length);
 		addresses[i] = cursor;
 	}
 	cursor &= ~(uintptr_t)(sizeof(uintptr_t) - 1);
 	if (cursor < (uintptr_t)stack->base + (size_t)(argc + 2) * sizeof(uintptr_t))
-		return false;
+		goto fail;
 	cursor -= (size_t)(argc + 2) * sizeof(uintptr_t);
 	uintptr_t *vector = (uintptr_t *)cursor;
 	vector[0] = (uintptr_t)argc;
@@ -132,5 +140,12 @@ bool process_user_stack_layout(struct process_stack *stack, int argc,
 		vector[i + 1] = addresses[i];
 	vector[argc + 1] = 0;
 	*user_sp = (void *)cursor;
+	if (switched)
+		__asm__ volatile("mov %0, %%cr3" : : "r"(old_cr3) : "memory");
 	return true;
+
+fail:
+	if (switched)
+		__asm__ volatile("mov %0, %%cr3" : : "r"(old_cr3) : "memory");
+	return false;
 }
