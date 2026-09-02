@@ -34,7 +34,11 @@ void scheduler_process_ready(struct process *process)
 	scheduler_init();
 	uint8_t cpu = process_cpu_affinity(process);
 	if (cpu >= SCHEDULER_CPU_LIMIT)
+		cpu = smp_current_cpu_index();
+	if (cpu >= SCHEDULER_CPU_LIMIT)
 		cpu = 0;
+	if (process_cpu_affinity(process) == PROCESS_CPU_UNASSIGNED)
+		(void)process_set_affinity(process, cpu);
 	uint32_t flags = spin_lock_irqsave(&scheduler_lock);
 	if (!process_is_queued(process)) {
 		list_add(process_run_link(process), &runqueues[cpu]);
@@ -90,7 +94,10 @@ static void schedule(struct i386_trap_frame *frame, bool rotate)
 		process_save_context(current, &saved);
 		if (rotate && process_get_state(current) == PROCESS_RUNNING) {
 			process_set_state(current, PROCESS_READY);
-			list_add(process_run_link(current), &runqueues[index]);
+			uint8_t target = process_cpu_affinity(current);
+			if (target >= SCHEDULER_CPU_LIMIT)
+				target = index;
+			list_add(process_run_link(current), &runqueues[target]);
 			process_set_queued(current, true);
 		}
 	}
@@ -99,10 +106,14 @@ static void schedule(struct i386_trap_frame *frame, bool rotate)
 		process_set_state(next, PROCESS_RUNNING);
 		cpu->current_process = next;
 		(void)address_space_activate(process_address_space(next));
-		(void)i386_tss_set_bsp_kernel_stack((uintptr_t)process_stack_top(process_kernel_stack(next)));
+		(void)i386_tss_set_current_kernel_stack((uintptr_t)process_stack_top(process_kernel_stack(next)));
 		struct i386_context context;
 		if (process_load_context(next, &context))
 			frame_from_context(frame, &context);
+	} else {
+		/* A blocked or exited process must never remain current while idle. */
+		cpu->current_process = nullptr;
+		(void)i386_tss_set_current_kernel_stack((uintptr_t)cpu->stack_top);
 	}
 	spin_unlock_irqrestore(&scheduler_lock, flags);
 }
@@ -139,8 +150,36 @@ bool scheduler_set_affinity(struct process *process, uint8_t cpu)
 {
 	size_t count = 0;
 	smp_get_cpus(&count);
-	return cpu < count && cpu < SCHEDULER_CPU_LIMIT &&
-		process_set_affinity(process, cpu);
+	if (cpu >= count || cpu >= SCHEDULER_CPU_LIMIT || process == nullptr)
+		return false;
+	uint32_t flags = spin_lock_irqsave(&scheduler_lock);
+	uint8_t old_cpu = process_cpu_affinity(process);
+	if (old_cpu == cpu) {
+		spin_unlock_irqrestore(&scheduler_lock, flags);
+		return true;
+	}
+	if (process_is_queued(process)) {
+		if (old_cpu < SCHEDULER_CPU_LIMIT) {
+			list_rm(process_run_link(process));
+		} else {
+			for (size_t i = 0; i < SCHEDULER_CPU_LIMIT; ++i) {
+				list_for_each(&runqueues[i]) {
+					if (it != process_run_link(process))
+						continue;
+					list_rm(it);
+					break;
+				}
+			}
+		}
+		RESET_LIST_ITEM(process_run_link(process));
+		process_set_queued(process, false);
+	}
+	bool result = process_set_affinity(process, cpu);
+	if (result && process_get_state(process) == PROCESS_READY)
+		list_add(process_run_link(process), &runqueues[cpu]),
+		process_set_queued(process, true);
+	spin_unlock_irqrestore(&scheduler_lock, flags);
+	return result;
 }
 
 [[noreturn]] void scheduler_idle(void)

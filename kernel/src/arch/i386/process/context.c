@@ -3,6 +3,7 @@
 #include <kernel/process/process.h>
 #include <kernel/process/stack.h>
 #include <kernel/vir_mem.h>
+#include <arch/i386/smp.h>
 
 #include <string.h>
 
@@ -12,8 +13,8 @@ struct i386_gdtr {
 } __attribute__((packed));
 
 [[noreturn]] extern void i386_context_enter_asm(const struct i386_context *context);
+extern uint64_t gdt[5];
 
-static struct i386_cpu_state bsp_cpu_state;
 static bool bsp_tss_loaded;
 
 static uint64_t tss_descriptor(uintptr_t base, size_t limit)
@@ -34,17 +35,9 @@ bool i386_tss_install(struct i386_cpu_state *state, uintptr_t kernel_stack_top)
 	    (kernel_stack_top & 3u) != 0)
 		return false;
 
-	struct i386_gdtr old_gdtr;
-	__asm__ volatile("sgdt %0" : "=m"(old_gdtr));
-	if (old_gdtr.base == 0 || old_gdtr.limit < 15)
-		return false;
-
 	memset(state->gdt, 0, sizeof(state->gdt));
-	const size_t descriptor_count = ((size_t)old_gdtr.limit + 1) /
-		                               sizeof(uint64_t);
-	const size_t copied_count = descriptor_count < 5 ? descriptor_count : 5;
-	memcpy(state->gdt, (const void *)old_gdtr.base,
-	       copied_count * sizeof(uint64_t));
+	/* APs still have the trampoline GDT loaded when they enter C. */
+	memcpy(state->gdt, gdt, 5 * sizeof(uint64_t));
 	memset(&state->tss, 0, sizeof(state->tss));
 	state->tss.esp0 = (uint32_t)kernel_stack_top;
 	state->tss.ss0 = I386_KERNEL_DATA_SELECTOR;
@@ -66,13 +59,28 @@ bool i386_tss_install(struct i386_cpu_state *state, uintptr_t kernel_stack_top)
 			     :
 			     : "m"(new_gdtr), "i"(I386_KERNEL_DATA_SELECTOR),
 			       "m"(tss_selector)
-			     : "ax", "memory");
+				     : "ax", "memory");
 	return true;
 }
 
 bool i386_tss_init_cpu(struct i386_cpu_state *state, uintptr_t kernel_stack_top)
 {
 	return i386_tss_install(state, kernel_stack_top);
+}
+
+bool i386_tss_init_current(void)
+{
+	struct cpu_info *cpu = smp_current_cpu();
+	if (cpu == nullptr)
+		return false;
+	struct process *process = process_current();
+	struct process_stack *stack = process_kernel_stack(process);
+	uintptr_t stack_top = (uintptr_t)process_stack_top(stack);
+	if (stack_top == 0)
+		return false;
+	if (cpu->tss_state.tss.iomap_base != sizeof(cpu->tss_state.tss))
+		return i386_tss_install(&cpu->tss_state, stack_top);
+	return i386_tss_set_kernel_stack(&cpu->tss_state, stack_top);
 }
 
 bool i386_tss_set_kernel_stack(struct i386_cpu_state *state,
@@ -85,8 +93,16 @@ bool i386_tss_set_kernel_stack(struct i386_cpu_state *state,
 	return true;
 }
 
+bool i386_tss_set_current_kernel_stack(uintptr_t kernel_stack_top)
+{
+	struct cpu_info *cpu = smp_current_cpu();
+	return cpu != nullptr && i386_tss_set_kernel_stack(&cpu->tss_state,
+		kernel_stack_top);
+}
+
 bool i386_tss_init_bsp(void)
 {
+	struct cpu_info *cpu = smp_current_cpu();
 	struct process *process = process_current();
 	struct process_stack *stack = process_kernel_stack(process);
 	uintptr_t stack_top = (uintptr_t)process_stack_top(stack);
@@ -94,8 +110,8 @@ bool i386_tss_init_bsp(void)
 	if (stack_top == 0)
 		return false;
 	if (bsp_tss_loaded)
-		return i386_tss_set_bsp_kernel_stack(stack_top);
-	if (!i386_tss_install(&bsp_cpu_state, stack_top))
+		return cpu != nullptr && i386_tss_set_kernel_stack(&cpu->tss_state, stack_top);
+	if (cpu == nullptr || !i386_tss_install(&cpu->tss_state, stack_top))
 		return false;
 	bsp_tss_loaded = true;
 	return true;
@@ -103,10 +119,10 @@ bool i386_tss_init_bsp(void)
 
 bool i386_tss_set_bsp_kernel_stack(uintptr_t kernel_stack_top)
 {
-	if (!bsp_tss_loaded || kernel_stack_top == 0 ||
-	    (kernel_stack_top & 3u) != 0)
+	struct cpu_info *cpu = smp_current_cpu();
+	if (!bsp_tss_loaded || cpu == nullptr)
 		return false;
-	return i386_tss_set_kernel_stack(&bsp_cpu_state, kernel_stack_top);
+	return i386_tss_set_kernel_stack(&cpu->tss_state, kernel_stack_top);
 }
 
 static bool user_address(uintptr_t address)

@@ -55,8 +55,12 @@ bool i386_tss_install(struct i386_cpu_state *state, uintptr_t kernel_stack_top);
 
 /* Initialize or update the TSS associated with the current CPU. */
 bool i386_tss_init_cpu(struct i386_cpu_state *state, uintptr_t kernel_stack_top);
+bool i386_tss_init_current(void);
 bool i386_tss_set_kernel_stack(struct i386_cpu_state *state,
 	                             uintptr_t kernel_stack_top);
+
+/* Update the TSS loaded on the CPU executing this call. */
+bool i386_tss_set_current_kernel_stack(uintptr_t kernel_stack_top);
 
 /* Initialize the BSP TSS from the currently running process's kernel stack. */
 bool i386_tss_init_bsp(void);

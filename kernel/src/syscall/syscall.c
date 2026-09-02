@@ -5,6 +5,7 @@
 #include <kernel/tty.h>
 #include <kernel/vir_mem.h>
 #include <kernel/scheduler.h>
+#include <kernel/ipc.h>
 
 struct syscall_slot {
 	syscall_handler_t handler;
@@ -33,7 +34,7 @@ bool copy_to_user(void *destination, const void *source, size_t length)
 			source, length);
 }
 
-static bool user_buffer(uintptr_t address, size_t length, uint16_t flags)
+bool user_buffer(uintptr_t address, size_t length, uint16_t flags)
 {
 	struct process *process = process_current();
 	return process != nullptr && (length == 0 || address_space_validate(
@@ -137,5 +138,6 @@ bool syscall_register_console_handlers(void)
 	return syscall_register(JANOS_SYS_READ, syscall_read_handler, nullptr) &&
 		syscall_register(JANOS_SYS_YIELD, syscall_yield_handler, nullptr) &&
 		syscall_register(JANOS_SYS_WRITE, syscall_write_handler, nullptr) &&
-		syscall_register(JANOS_SYS_EXIT, syscall_exit_handler, nullptr);
+		syscall_register(JANOS_SYS_EXIT, syscall_exit_handler, nullptr) &&
+		ipc_register_syscalls();
 }

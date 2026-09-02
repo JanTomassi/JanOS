@@ -29,3 +29,4 @@ bool syscall_register_console_handlers(void);
 int32_t syscall_dispatch(syscall_frame *frame);
 bool copy_from_user(void *destination, const void *source, size_t length);
 bool copy_to_user(void *destination, const void *source, size_t length);
+bool user_buffer(uintptr_t address, size_t length, uint16_t flags);

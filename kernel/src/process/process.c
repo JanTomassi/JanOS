@@ -10,6 +10,7 @@
 #include <list.h>
 #include <arch/i386/smp.h>
 #include <kernel/scheduler.h>
+#include <kernel/ipc.h>
 
 struct process {
 	process_pid_t pid;
@@ -171,9 +172,11 @@ bool process_start(struct process *process, uintptr_t entry, int argc,
 		cpu->current_process = process;
 	} else {
 		process->state = PROCESS_READY;
+		process->owner_cpu = smp_current_cpu_index();
+		process->cpu_affinity = process->owner_cpu;
 	}
 	spin_unlock(&process_lock);
-	if (cpu->current_process == process && !i386_tss_init_bsp()) {
+	if (cpu->current_process == process && !i386_tss_init_current()) {
 		spin_lock(&process_lock);
 		cpu->current_process = nullptr;
 		process->state = PROCESS_NEW;
@@ -333,6 +336,7 @@ void process_exit(struct process *process, int status)
 		process->waiting_on = nullptr;
 	}
 	process->status = status;
+	ipc_process_cleanup(process);
 	process->state = PROCESS_ZOMBIE;
 	spin_unlock(&process_lock);
 	process_reap(process);
@@ -357,6 +361,7 @@ void process_exit(struct process *process, int status)
 			__asm__ volatile("hlt");
 	}
 	process->status = status;
+	ipc_process_cleanup(process);
 	process->state = PROCESS_ZOMBIE;
 	if (process->waiting_on != nullptr) {
 		list_rm(&process->wait_link);
@@ -368,7 +373,7 @@ void process_exit(struct process *process, int status)
 	const fatptr_t *kernel_page_directory = vmm_kernel_page_directory();
 	if (kernel_page_directory == nullptr ||
 		!vmm_page_directory_activate(kernel_page_directory) ||
-		!i386_tss_set_bsp_kernel_stack((uintptr_t)reaper_stack + sizeof(reaper_stack)))
+		!i386_tss_set_current_kernel_stack((uintptr_t)reaper_stack + sizeof(reaper_stack)))
 		panic("Unable to enter process reaper\n");
 	i386_reaper_enter((uintptr_t)reaper_stack + sizeof(reaper_stack),
 	                  process_reaper_cleanup, process);
