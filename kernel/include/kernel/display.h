@@ -44,6 +44,7 @@ typedef struct {
 
 uint8_t display_register(display_t);
 bool display_setcurrent(uint8_t);
+void display_set_debug(uint8_t);
 display_t *display_getcurrent();
 void __mprintf(char *m, ...);
 int kprintf(const char *str, ...);

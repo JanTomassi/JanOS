@@ -1,9 +1,14 @@
 #include <arch/i386/tty/tty_frame.h>
+#include <stdbool.h>
 #include <string.h>
 
 static uint8_t *buffer;
 static size_t pitch, columns, rows, cursor_column, cursor_row;
 static uint8_t bytes_per_pixel;
+static const uint8_t *font_data;
+static size_t font_header_size, font_glyph_count, font_glyph_size;
+static size_t font_width = 5, font_height = 7, cell_width = 6, cell_height = 8;
+static size_t screen_width, screen_height;
 
 /* Small built-in font: enough to keep the early console independent of BIOS. */
 static const uint8_t font[37][7] = {
@@ -41,6 +46,12 @@ static const uint8_t *glyph(char ch)
 	return font[0];
 }
 
+static uint32_t font_u32(const uint8_t *p)
+{
+	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+		((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
 static void pixel(size_t x, size_t y, uint32_t color)
 {
  uint8_t *p = buffer + y * pitch + x * bytes_per_pixel;
@@ -50,20 +61,31 @@ static void pixel(size_t x, size_t y, uint32_t color)
 
 static void draw(char ch, size_t x, size_t y)
 {
- const uint8_t *bits = glyph(ch);
- for (size_t row = 0; row < 8; ++row)
-  for (size_t col = 0; col < 6; ++col)
-   pixel(x + col, y + row, row < 7 && col < 5 && (bits[row] & (1u << (4 - col))) ? 0xffffff : 0);
+	if (font_data != nullptr) {
+		size_t index = (unsigned char)ch;
+		if (index >= font_glyph_count)
+			index = 0;
+		const uint8_t *bits = font_data + font_header_size + index * font_glyph_size;
+		for (size_t row = 0; row < font_height; ++row)
+			for (size_t col = 0; col < font_width; ++col)
+				pixel(x + col, y + row, (bits[row * ((font_width + 7) / 8) + col / 8] &
+					(0x80u >> (col & 7))) ? 0xffffff : 0);
+		return;
+	}
+	const uint8_t *bits = glyph(ch);
+	for (size_t row = 0; row < cell_height; ++row)
+	 for (size_t col = 0; col < cell_width; ++col)
+	  pixel(x + col, y + row, row < font_height && col < font_width && (bits[row] & (1u << (4 - col))) ? 0xffffff : 0);
 }
 
 static void putc_frame(char ch)
 {
  if (ch == '\n') { cursor_column = 0; ++cursor_row; }
- else if (ch == '\b') { if (cursor_column) --cursor_column; draw(' ', cursor_column * 6, cursor_row * 8); }
- else { draw(ch, cursor_column * 6, cursor_row * 8); if (++cursor_column >= columns) { cursor_column = 0; ++cursor_row; } }
- if (cursor_row >= rows) {
-  memmove(buffer, buffer + pitch * 8, pitch * (rows * 8 - 8));
-  memset(buffer + pitch * (rows * 8 - 8), 0, pitch * 8);
+  else if (ch == '\b') { if (cursor_column) --cursor_column; draw(' ', cursor_column * cell_width, cursor_row * cell_height); }
+  else { draw(ch, cursor_column * cell_width, cursor_row * cell_height); if (++cursor_column >= columns) { cursor_column = 0; ++cursor_row; } }
+  if (cursor_row >= rows) {
+   memmove(buffer, buffer + pitch * cell_height, pitch * (rows * cell_height - cell_height));
+   memset(buffer + pitch * (rows * cell_height - cell_height), 0, pitch * cell_height);
   cursor_row = rows - 1;
  }
 }
@@ -74,8 +96,40 @@ display_t tty_frame_initialize(size_t buffer_addr, size_t fb_pitch, size_t width
  size_t height, uint8_t bit_per_pixel)
 {
  if (!buffer_addr || !fb_pitch || width < 6 || height < 8 || (bit_per_pixel != 24 && bit_per_pixel != 32)) return (display_t){};
- buffer = (uint8_t *)buffer_addr; pitch = fb_pitch; bytes_per_pixel = bit_per_pixel / 8;
- columns = width / 6; rows = height / 8; cursor_column = cursor_row = 0;
- for (size_t y = 0; y < rows * 8; ++y) memset(buffer + y * pitch, 0, columns * 6 * bytes_per_pixel);
- return (display_t){ .width = columns, .height = rows, .putc = putc_frame, .puts = puts_frame };
+  buffer = (uint8_t *)buffer_addr; pitch = fb_pitch; bytes_per_pixel = bit_per_pixel / 8;
+  screen_width = width; screen_height = height;
+  columns = width / cell_width; rows = height / cell_height; cursor_column = cursor_row = 0;
+  for (size_t y = 0; y < rows * cell_height; ++y) memset(buffer + y * pitch, 0, columns * cell_width * bytes_per_pixel);
+  return (display_t){ .width = columns, .height = rows, .putc = putc_frame, .puts = puts_frame };
+}
+
+bool tty_frame_set_font(const void *data, size_t size)
+{
+	const uint8_t *font = data;
+	if (font == nullptr || size < 32 || font_u32(font) != 0x864AB572u)
+		return false;
+	if (font_u32(font + 4) != 0 || font_u32(font + 12) > 1)
+		return false;
+	size_t header = font_u32(font + 8), count = font_u32(font + 16), glyph_size = font_u32(font + 20);
+	size_t width = font_u32(font + 28), height = font_u32(font + 24);
+	if (header < 32 || header > size || count == 0 || glyph_size == 0 || width == 0 || width > 32 ||
+		height == 0 || height > 64 || count > (size - header) / glyph_size || header + count * glyph_size != size ||
+		glyph_size < height * ((width + 7) / 8))
+		return false;
+	if (buffer != nullptr && (width + 2 > screen_width || height > screen_height))
+		return false;
+	font_data = font;
+	font_header_size = header;
+        font_glyph_count = count;
+        font_glyph_size = glyph_size;
+	font_width = width;
+        font_height = height;
+        cell_width = width - 2;
+        cell_height = height;
+	if (buffer != nullptr) {
+		columns = screen_width / cell_width;
+		rows = screen_height / cell_height;
+		cursor_column = cursor_row = 0;
+	}
+	return true;
 }

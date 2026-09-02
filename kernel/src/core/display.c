@@ -9,10 +9,25 @@
 static display_t disps[DISPLAY_MAX_DISPS];
 static uint8_t _last_register = 0;
 static uint8_t current = 0;
+static uint8_t debug_display = DISPLAY_MAX_DISPS;
 static bool enabled = false;
 static spinlock_t print_lock = { 0 };
 
-void __kprintf_va_list(char *str, va_list ap);
+static void print_formatted(display_t *display, char *str, va_list ap);
+
+static void print_to_displays(char *str, va_list ap)
+{
+	va_list current_ap;
+	va_list debug_ap;
+	if (debug_display < _last_register && debug_display != current) {
+		va_copy(debug_ap, ap);
+		print_formatted(&disps[debug_display], str, debug_ap);
+		va_end(debug_ap);
+	}
+	va_copy(current_ap, ap);
+	print_formatted(&disps[current], str, current_ap);
+	va_end(current_ap);
+}
 
 MODULE("DISPLAY");
 
@@ -125,12 +140,17 @@ void __mprintf(char *m, ...)
 	va_start(ap, m);
 	uint32_t flags = spin_lock_irqsave(&print_lock);
 	if (enabled) {
+		if (debug_display < _last_register && debug_display != current) {
+			disps[debug_display].puts("[");
+			disps[debug_display].puts(m);
+			disps[debug_display].puts("]: ");
+		}
 		disps[current].puts("[");
 		disps[current].puts(m);
 		disps[current].puts("]: ");
 	}
 	char *fmt = va_arg(ap, char *);
-	__kprintf_va_list(fmt, ap);
+	print_to_displays(fmt, ap);
 	spin_unlock_irqrestore(&print_lock, flags);
 	va_end(ap);
 }
@@ -142,13 +162,13 @@ int kprintf(const char *str, ...)
 	va_list ap;
 	va_start(ap, str);
 	uint32_t flags = spin_lock_irqsave(&print_lock);
-	__kprintf_va_list((char *)str, ap);
+	print_to_displays((char *)str, ap);
 	spin_unlock_irqrestore(&print_lock, flags);
 	va_end(ap);
 	return 1;
 }
 
-void __kprintf_va_list(char *str, va_list ap)
+static void print_formatted(display_t *display, char *str, va_list ap)
 {
 	if (!enabled)
 		return;
@@ -158,14 +178,14 @@ void __kprintf_va_list(char *str, va_list ap)
 			switch (str[i + 1]) {
 			case 's':
 				s = va_arg(ap, char *);
-				disps[current].puts(s);
+				display->puts(s);
 				i++;
 				continue;
 			case 'u': {
 				uint32_t c = va_arg(ap, uint32_t);
 				char str[32] = { 0 };
 				unumber_to_str(c, str, 32);
-				disps[current].puts(str);
+				display->puts(str);
 				i++;
 				continue;
 			}
@@ -173,7 +193,7 @@ void __kprintf_va_list(char *str, va_list ap)
 				int32_t c = va_arg(ap, int32_t);
 				char str[32] = { 0 };
 				number_to_str(c, str, 32);
-				disps[current].puts(str);
+				display->puts(str);
 				i++;
 				continue;
 			}
@@ -181,13 +201,13 @@ void __kprintf_va_list(char *str, va_list ap)
 				uint32_t c = va_arg(ap, uint32_t);
 				char str[32] = { 0 };
 				hex_to_str(c, str, 32);
-				disps[current].puts(str);
+				display->puts(str);
 				i++;
 				continue;
 			}
 			case 'c': {
 				char c = (char)(va_arg(ap, int) & ~0xFFFFFF00);
-				disps[current].putc(c);
+				display->putc(c);
 				i++;
 				continue;
 			}
@@ -195,7 +215,7 @@ void __kprintf_va_list(char *str, va_list ap)
 				break;
 			}
 		} else {
-			disps[current].putc(str[i]);
+			display->putc(str[i]);
 		}
 	}
 }
@@ -212,6 +232,10 @@ bool display_setcurrent(uint8_t id)
 		return false;
 	current = id;
 	return true;
+}
+void display_set_debug(uint8_t id)
+{
+	debug_display = id < _last_register ? id : DISPLAY_MAX_DISPS;
 }
 display_t *display_getcurrent()
 {
