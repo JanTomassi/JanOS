@@ -26,6 +26,10 @@
 #include "../arch/i386/irq.h"
 #include "../arch/i386/smp.h"
 #include "../arch/i386/port.h"
+#include "../exec/multiboot_exec.h"
+#include <kernel/process/process.h>
+#include <kernel/process/arch/i386/context.h>
+#include <kernel/syscall.h>
 
 extern void idt_init(void);
 extern void init_kmalloc(void);
@@ -460,6 +464,14 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	}
 
 	ps2_init();
+
+	process_system_init();
+	syscall_init();
+	if (!syscall_register_console_handlers())
+		panic("Failed to register console syscalls\n");
+
+	/* User-process launch remains disabled until the active VMM mapping
+	 * contract is replaced with a process-owned page directory. */
 	__asm__ volatile("sti");
 
 	/* storage_init(); */

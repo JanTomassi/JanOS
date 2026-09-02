@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <kernel/display.h>
+#include <kernel/syscall.h>
 
 #define GATE_TYPE_TASK (0x5)
 #define GATE_TYPE_INTERRUPT (0xE)
@@ -41,6 +42,13 @@ void idt_set_descriptor(uint8_t vector, void *isr, uint8_t flags)
 }
 
 extern void *isr_stub_table[];
+extern void syscall_entry(void);
+
+void syscall_entry_init(void)
+{
+	idt_set_descriptor(SYSCALL_VECTOR, (void *)syscall_entry,
+		PRESENT | DPL_USER_LEVEL | GATE_TYPE_TRAP);
+}
 
 void idt_init(void)
 {
@@ -50,6 +58,7 @@ void idt_init(void)
 	for (uint16_t vector = 0; vector < IDT_MAX_DESCRIPTORS; vector++) {
 		idt_set_descriptor(vector, (void *)isr_stub_table[vector], PRESENT | DPL_KERNEL_LEVEL | (vector < 20 ? GATE_TYPE_TRAP : GATE_TYPE_INTERRUPT));
 	}
+	syscall_entry_init();
 
 	__asm__ volatile("lidt %0;\n"
 			 "jmp longjmp_after_gdt;\n"

@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <list.h>
+#include <kernel/phy_mem.h>
 
 struct address_space;
 struct process_stack;
@@ -26,11 +27,20 @@ void process_system_init(void);
 struct process *process_create(struct process *parent);
 void process_destroy(struct process *process);
 
+/* The MVP runtime owns at most one process as the active process. */
+struct process *process_current(void);
+bool process_start(struct process *process, uintptr_t entry, int argc,
+                   const char *const argv[]);
+void process_exit_current(int status);
+
 process_pid_t process_pid(const struct process *process);
 struct process *process_parent(const struct process *process);
 struct address_space *process_address_space(const struct process *process);
+const fatptr_t *process_page_directory(const struct process *process);
 struct process_stack *process_kernel_stack(const struct process *process);
 struct process_stack *process_user_stack(const struct process *process);
+uintptr_t process_user_entry(const struct process *process);
+void *process_user_stack_pointer(const struct process *process);
 
 enum process_state process_get_state(const struct process *process);
 bool process_set_state(struct process *process, enum process_state state);

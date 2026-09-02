@@ -38,6 +38,7 @@ kernel/memblock.o \
 kernel/storage.o \
 syscall/syscall.o \
 exec/elf_loader.o \
+exec/multiboot_exec.o \
 process/address_space.o \
 process/stack.o \
 process/process.o \

@@ -150,6 +150,30 @@ isr_stub_%+%1:
 	iret
 %endmacro
 
+extern syscall_dispatch:function
+global syscall_entry:function
+syscall_entry:
+	; pusha has the same order as struct syscall_frame. The CPU's iret
+	; frame follows it, with the user ESP at offset 44.
+	pusha
+	mov	eax, [esp + 44]
+	mov	dword [esp + 12], eax
+
+	get_GOT
+	push	esp
+	call	[ebx + syscall_dispatch wrt ..got]
+	add	esp, 4
+
+	; Return the dispatch result in EAX while restoring every other register.
+	mov	edi, [esp + 0]
+	mov	esi, [esp + 4]
+	mov	ebp, [esp + 8]
+	mov	ebx, [esp + 16]
+	mov	edx, [esp + 20]
+	mov	ecx, [esp + 24]
+	add	esp, 32
+	iret
+
 
 isr_no_err_stub 0
 isr_no_err_stub 1

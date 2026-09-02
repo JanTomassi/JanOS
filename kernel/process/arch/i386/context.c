@@ -1,5 +1,7 @@
 #include <kernel/process/arch/i386/context.h>
 
+#include <kernel/process/process.h>
+#include <kernel/process/stack.h>
 #include <kernel/vir_mem.h>
 
 #include <string.h>
@@ -10,6 +12,9 @@ struct i386_gdtr {
 } __attribute__((packed));
 
 [[noreturn]] extern void i386_context_enter_asm(const struct i386_context *context);
+
+static struct i386_cpu_state bsp_cpu_state;
+static bool bsp_tss_loaded;
 
 static uint64_t tss_descriptor(uintptr_t base, size_t limit)
 {
@@ -54,6 +59,31 @@ bool i386_tss_install(struct i386_cpu_state *state, uintptr_t kernel_stack_top)
 			     : "m"(new_gdtr), "i"(I386_KERNEL_DATA_SELECTOR),
 			       "m"(tss_selector)
 			     : "ax", "memory");
+	return true;
+}
+
+bool i386_tss_init_bsp(void)
+{
+	struct process *process = process_current();
+	struct process_stack *stack = process_kernel_stack(process);
+	uintptr_t stack_top = (uintptr_t)process_stack_top(stack);
+
+	if (stack_top == 0)
+		return false;
+	if (bsp_tss_loaded)
+		return i386_tss_set_bsp_kernel_stack(stack_top);
+	if (!i386_tss_install(&bsp_cpu_state, stack_top))
+		return false;
+	bsp_tss_loaded = true;
+	return true;
+}
+
+bool i386_tss_set_bsp_kernel_stack(uintptr_t kernel_stack_top)
+{
+	if (!bsp_tss_loaded || kernel_stack_top == 0 ||
+	    (kernel_stack_top & 3u) != 0)
+		return false;
+	bsp_cpu_state.tss.esp0 = (uint32_t)kernel_stack_top;
 	return true;
 }
 

@@ -2,23 +2,14 @@
 
 #include <kernel/allocator.h>
 #include <kernel/process/address_space.h>
-#include <kernel/phy_mem.h>
 #include <kernel/vir_mem.h>
-#include <list.h>
 #include <string.h>
-
-struct stack_page {
-	fatptr_t physical;
-	struct list_head list;
-};
 
 struct process_stack {
 	void *base;
 	size_t size;
 	bool user;
 	struct address_space *space;
-	struct vmm_entry *virtual_range;
-	struct list_head pages;
 };
 
 static allocator_t allocator;
@@ -53,48 +44,20 @@ static struct process_stack *stack_alloc(size_t size, bool user,
 	if (stack == nullptr)
 		return nullptr;
 	*stack = (struct process_stack){ .size = size, .user = user, .space = space };
-	RESET_LIST_ITEM(&stack->pages);
-
 	if (!user) {
 		fatptr_t memory = allocator.alloc(size);
 		if (memory.ptr == nullptr)
 			goto fail_stack;
 		stack->base = memory.ptr;
-		stack->virtual_range = nullptr;
 		return stack;
 	}
 
-	stack->virtual_range = vmm_alloc(size, VMM_ENTRY_PRESENT_BIT |
-		VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_USER_SUPER_BIT);
-	if (stack->virtual_range == nullptr)
+	if (!address_space_map_at(space, PROCESS_DEFAULT_USER_STACK_TOP - size, size,
+	                          VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_USER_SUPER_BIT,
+	                          &stack->base))
 		goto fail_stack;
-	stack->base = stack->virtual_range->ptr;
-	for (size_t offset = 0; offset < size; offset += PAGE_SIZE) {
-		struct stack_page *page = alloc_object(sizeof(*page));
-		if (page == nullptr)
-			goto fail_user;
-		page->physical = phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH);
-		if (page->physical.ptr == nullptr) {
-			free_object(page, sizeof(*page));
-			goto fail_user;
-		}
-		struct vmm_entry one_page = { .ptr = stack->base + offset,
-			.size = PAGE_SIZE,
-			.flags = VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT |
-			VMM_ENTRY_USER_SUPER_BIT };
-		RESET_LIST_ITEM(&one_page.list);
-		map_pages(&page->physical, &one_page);
-		list_add(&page->list, &stack->pages);
-	}
 	return stack;
 
-fail_user:
-	while (stack->pages.next != &stack->pages) {
-		struct stack_page *page = list_pop_entry(&stack->pages, struct stack_page, list);
-		phy_mem_free(page->physical);
-		free_object(page, sizeof(*page));
-	}
-	vmm_free(stack->virtual_range->ptr);
 fail_stack:
 	free_object(stack, sizeof(*stack));
 	return nullptr;
@@ -116,15 +79,7 @@ void process_stack_destroy(struct process_stack *stack)
 	if (stack == nullptr)
 		return;
 	if (stack->user) {
-		void *address = stack->base;
-		while (stack->pages.next != &stack->pages) {
-			struct stack_page *page = list_pop_entry(&stack->pages, struct stack_page, list);
-			unmap_page(nullptr, address);
-			phy_mem_free(page->physical);
-			free_object(page, sizeof(*page));
-			address += PAGE_SIZE;
-		}
-		vmm_free(stack->virtual_range->ptr);
+		address_space_unmap(stack->space, stack->base);
 	} else {
 		allocator.free((fatptr_t){ .ptr = stack->base, .len = stack->size });
 	}
