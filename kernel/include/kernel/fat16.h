@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <kernel/storage.h>
+#include <kernel/block_device.h>
 
 typedef struct fat_BS{
 	uint8_t jmp_code[3]; // jump to boot code
@@ -63,22 +63,22 @@ typedef struct fat_dir_entry {
 } __attribute__((packed)) fat_dir_entry_t;
 
 struct fat16_file {
-	struct storage_device device;
+	struct block_device device;
 	fat_dir_entry_t entry;
 	fat16_layout_t layout;
 };
 
-fat_BS_t *read_fat_boot_section(struct storage_device dev);
+fat_BS_t *read_fat_boot_section(struct block_device dev);
 void fat16_compute_layout(const fat_BS_t *bpb, fat16_layout_t *out);
-uint16_t fat16_read_fat_entry(const struct storage_device *device, const fat16_layout_t *layout, uint16_t cluster);
+uint16_t fat16_read_fat_entry(const struct block_device *device, const fat16_layout_t *layout, uint16_t cluster);
 bool fat16_is_end_of_chain(uint16_t entry);
-bool fat16_read_root_dir(const struct storage_device *device, const fat16_layout_t *layout,
+bool fat16_read_root_dir(const struct block_device *device, const fat16_layout_t *layout,
 			 fat_dir_entry_t *entries, size_t max_entries);
-bool fat16_find_entry_by_name(const struct storage_device *device, const char *name,
+bool fat16_find_entry_by_name(const struct block_device *device, const char *name,
 			      fat_dir_entry_t *out_entry);
-bool fat16_read_file(const struct storage_device *device, const fat_dir_entry_t *entry,
+bool fat16_read_file(const struct block_device *device, const fat_dir_entry_t *entry,
 		     void *buffer, size_t buffer_size, size_t *out_bytes);
-bool fat16_file_open(const struct storage_device *device, const char *name,
+bool fat16_file_open(const struct block_device *device, const char *name,
 		     struct fat16_file *out_file);
 bool fat16_file_read_at(const struct fat16_file *file, uint32_t offset,
 			void *buffer, size_t buffer_size, size_t *out_bytes);

@@ -8,6 +8,7 @@ extern "C" {
 
 __attribute__((__noreturn__)) void abort(void);
 
+#if defined(__is_kernel)
 #define BIT(x) (8 * x)
 #define KIBI(x) (1024 * (x))
 #define MIBI(x) (1024 * (KIBI(x)))
@@ -18,6 +19,7 @@ struct fatptr {
 	void *ptr;
 };
 typedef struct fatptr fatptr_t;
+#endif
 
 #ifdef __cplusplus
 }

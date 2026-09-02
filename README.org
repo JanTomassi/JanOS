@@ -1,75 +1,49 @@
-* Jan OS
-This simple kernel is an exploration project that I am developing in
-my free time, the kernel is for x86 arch I do not know if I will ever move it
-to x86_64, the booting process is made with grub and the multiboot1
-specs.
+* JanOS
 
-** Current Feature
-The kernel support logging on serial and VGA text mode there is a
-common interface *display* to select witch output stream to use, for
-input device only ps2 is supported, all standard x86 interrupt are
-mapped and as a default behavior they log there call. There is support
-for physical and virtual page allocation but is only 4KiB no 4MiB page
-and the implementation of kmalloc(memory allocator) can only handle
-allocation of [1, 4096] byte
+JanOS is a freestanding 32-bit x86 operating system. GRUB loads the kernel
+through Multiboot2 and supplies the initial user application as a boot module.
 
-** Slab allocator
-The kernel now exposes a small slab allocator for fixed-size objects.
-Caches can be created with ~slab_create(name, obj_size, alignment,
-ctor, dtor)~ and are initialized from ~init_slab_allocator()~ during
-boot. Allocations use ~slab_alloc_obj(cache)~ / ~slab_free_obj(cache,
-fatptr)~ and return a ~fatptr_t~ pointing to the object with
-~len = obj_size~. A general-purpose allocator wrapper is available via
-~get_slab_allocator()~, which uses slab-backed allocations for objects
-up to a page and falls back to the general page allocator for larger
-requests. ~get_gpa_allocator()~ returns the original GPA allocator.
-Double-free and cross-cache frees are checked and logged alongside
-alignment issues.
-
-** Future Feature
-- [ ] Basic user space
-  - [ ] Context switching
-- [ ] Better GPA
-- [ ] Disk access
-  - [ ] ext2/4?
-  - [ ] FAT32
-- [ ] Multiprocessing
-  - [ ] Message passing
-  - [ ] Synchronization primitive
-- [ ] Video output
-  - [ ] Display custom shape
-  - [ ] Printing text as in VGA text mode
+The kernel currently includes higher-half paging, physical and virtual memory
+management, slab allocation, SMP discovery and startup, interrupts, PS/2 input,
+serial/VGA output, PCI, AHCI/ATA storage, FAT16, processes, static ELF loading,
+and a small syscall ABI. The bundled calculator runs in ring 3.
 
 ** Build
-*** Tools
-This tools are needed to compile the build environment. ~nasm~ is
-required for assembling the low-level stubs. The cross toolchain
-(~i686-elf-gcc~, ~i686-elf-ld~, etc.) is built by running
-~tools/get_tools.sh~, which installs into ~tools/build/bin~.
 
-- bash
-- make
-- gcc
-- nasm
-- tar
-- xz
+Build the cross-toolchain once:
 
-Enter in the directory tools and execute the bash script ~get_tools.sh~
-#+begin_src bash
-  cd tools && ./get_tools.sh
+#+begin_src sh
+cd tools
+./get_tools.sh
 #+end_src
-this will download and compile the tools needed for development except
-for ~nasm~, which should be installed separately.
 
-*** Project
-Running the build.sh script should be enough to build the kernel elf
-and make a UNIX like root structure in sysroot
+Configure and build JanOS with Meson and Ninja:
 
-** Run
-*** ISO
-To get an ISO run the iso.sh and it will output a JanOS.iso on the
-current directory.
+#+begin_src sh
+meson setup build --cross-file config/i686-elf.ini \
+  --prefix=/usr --libdir=lib32
+meson compile -C build
+meson test -C build --print-errorlogs
+meson compile -C build iso
+#+end_src
 
-*** QEMU
-If you want to use QEMU *(recommended)* run the qemu.sh script it will
-build create the iso and then run a temporary QEMU instance
+Run or debug the generated image:
+
+#+begin_src sh
+meson compile -C build run
+meson compile -C build debug
+#+end_src
+
+The debug target starts QEMU paused with a GDB server on port 1234. Optional
+disk paths are configured with ~qemu_disk~, ~qemu_sata_disk1~, and
+~qemu_sata_disk2~.
+
+Install the kernel and user SDK into a staging sysroot:
+
+#+begin_src sh
+DESTDIR="$PWD/dist/sysroot" meson install -C build
+#+end_src
+
+See ~docs/structure.md~ for subsystem ownership, ~docs/applications.md~ for
+building client applications with the JanOS C library, and ~docs/testing.md~
+for the staged host and QEMU test strategy.

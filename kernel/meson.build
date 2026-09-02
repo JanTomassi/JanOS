@@ -1,0 +1,64 @@
+kernel_inc = include_directories('include')
+
+kernel_sources = files(
+  'src/init/main.c',
+  'src/core/display.c',
+  'src/core/interrupt.c',
+  'src/mm/memblock.c',
+  'src/mm/mem_allocs.c',
+  'src/mm/allocator.c',
+  'src/mm/slab_allocator.c',
+  'src/process/process.c',
+  'src/process/address_space.c',
+  'src/process/stack.c',
+  'src/process/wait_queue.c',
+  'src/exec/elf_loader.c',
+  'src/exec/multiboot_exec.c',
+  'src/syscall/syscall.c',
+  'src/fs/fat16.c',
+  'src/drivers/storage/storage.c',
+  'src/drivers/storage/ahci.c',
+  'src/drivers/storage/ata_pio.c',
+  'src/drivers/bus/pci.c',
+  'src/drivers/input/ps2.c',
+  'src/drivers/console/serial.c',
+  'src/drivers/console/tty.c',
+  'src/drivers/console/tty/tty_text.c',
+  'src/drivers/console/tty/tty_frame.c',
+  'src/arch/i386/cpu/control_register.c',
+  'src/arch/i386/cpu/cpuid.c',
+  'src/arch/i386/cpu/smp.c',
+  'src/arch/i386/interrupt/idt.c',
+  'src/arch/i386/interrupt/irq.c',
+  'src/arch/i386/interrupt/pic.c',
+  'src/arch/i386/interrupt/ioapic.c',
+  'src/arch/i386/interrupt/lapic.c',
+  'src/arch/i386/mm/phy_mem.c',
+  'src/arch/i386/mm/vir_mem.c',
+  'src/arch/i386/mm/mmio.c',
+  'src/arch/i386/mm/dma.c',
+  'src/arch/i386/process/context.c',
+)
+
+kernel_asm = nasm_objects.process(files(
+  'src/arch/i386/boot/boot.s',
+  'src/arch/i386/boot/boot_ap.s',
+  'src/arch/i386/interrupt/isr.s',
+  'src/arch/i386/process/context_entry.s',
+))
+
+kernel_linker_script = meson.current_source_dir() / 'src/arch/i386/boot/linker.ld'
+
+janos_kernel = executable(
+  'JanOS.kernel',
+  kernel_sources,
+  kernel_asm,
+  include_directories: [kernel_inc, libc_inc, sdk_inc],
+  link_with: libk,
+  dependencies: libgcc,
+  c_args: ['-ffreestanding', '-D__is_kernel'],
+  link_args: ['-nostdlib', '-no-pie', '-Wl,-T,' + kernel_linker_script],
+  link_depends: files('src/arch/i386/boot/linker.ld'),
+  install: true,
+  install_dir: '/boot',
+)

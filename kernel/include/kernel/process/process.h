@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <list.h>
 #include <kernel/phy_mem.h>
-#include <kernel/process/arch/i386/context.h>
+#include <arch/i386/context.h>
 
 struct address_space;
 struct process_stack;

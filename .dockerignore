@@ -1,0 +1,11 @@
+.git
+build
+dist
+isodir
+sysroot
+tools/build
+tools/src
+*.d
+*.o
+*.a
+JanOS.*
