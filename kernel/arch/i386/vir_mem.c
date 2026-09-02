@@ -8,12 +8,16 @@
 #include <string.h>
 #include <list.h>
 
-#define page_directory_addr (0xFFFFF000)
-#define page_table_addr (0xFFC00000)
+#define page_directory_addr VMM_RECURSIVE_PD_ADDR
+#define page_table_addr VMM_RECURSIVE_PT_BASE
 
 MODULE("Virt Memory Manager");
 
 extern size_t HIGHER_HALF;
+
+static fatptr_t kernel_page_directory;
+
+static bool is_page_table_empty(size_t *pt);
 
 static void invalidate(const void *addr)
 {
@@ -22,11 +26,13 @@ static void invalidate(const void *addr)
 
 uintptr_t round_up_to_page(uintptr_t x)
 {
-	return (x) + (-(x) % PAGE_SIZE);
+	if (x > UINTPTR_MAX - (PAGE_SIZE - 1))
+		return 0;
+	return (x + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
 }
 uintptr_t round_down_to_page(uintptr_t x)
 {
-	return (x - 0xfff) + (-( x - 0xfff) % 0x1000);
+	return x & ~(PAGE_SIZE - 1);
 }
 
 
@@ -73,6 +79,12 @@ void *vmm_vir_addr(const void *phy_addr)
 
 void map_page(const void *phy_addr, const void *virt_addr, uint16_t virt_flags)
 {
+	if (((uintptr_t)phy_addr & (PAGE_SIZE - 1)) != 0 ||
+	    ((uintptr_t)virt_addr & (PAGE_SIZE - 1)) != 0)
+		BUG("map_page requires page-aligned addresses");
+	if ((uintptr_t)virt_addr >= VMM_RECURSIVE_PT_BASE)
+		BUG("map_page cannot modify recursive mapping window");
+
 	size_t pd_idx = (size_t)virt_addr >> 22;
 	size_t pt_idx = (size_t)virt_addr >> 12 & 0x03FF;
 
@@ -80,10 +92,14 @@ void map_page(const void *phy_addr, const void *virt_addr, uint16_t virt_flags)
 	size_t *pt = ((size_t *)page_table_addr) + (0x400 * pd_idx);
 
 	if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0) {
-		pd[pd_idx] = (size_t)phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH).ptr;
+		fatptr_t table = phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH);
+		if (table.ptr == nullptr)
+			panic("Failed to allocate page table\n");
+		pd[pd_idx] = (size_t)table.ptr;
 		pd[pd_idx] |= VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT |
 			((virt_flags & VMM_ENTRY_USER_SUPER_BIT) != 0 ? VMM_ENTRY_USER_SUPER_BIT : 0);
 		memset(pt, 0, PAGE_SIZE);
+		invalidate(pt);
 	} else if (pd[pd_idx] & VMM_ENTRY_PAGE_SIZE_BIT) {
 		const size_t huge = pd[pd_idx];
 		const size_t table = (size_t)phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH).ptr;
@@ -94,17 +110,44 @@ void map_page(const void *phy_addr, const void *virt_addr, uint16_t virt_flags)
 		for (size_t i = 0; i < 1024; i++)
 			pt[i] = ((huge & VMM_ENTRY_LOCATION_4M_LOW_BITS) + i * PAGE_SIZE) |
 				(huge & 0xFFF & ~VMM_ENTRY_PAGE_SIZE_BIT);
+		invalidate(pt);
 	}
 	if (virt_flags & VMM_ENTRY_USER_SUPER_BIT)
 		pd[pd_idx] |= VMM_ENTRY_USER_SUPER_BIT;
 
-	pt[pt_idx] = ((size_t)phy_addr) | (virt_flags & 0xFFF);
+	const size_t old_pte = pt[pt_idx];
+	const size_t new_pte = ((size_t)phy_addr) | (virt_flags & 0xFFF);
+	if ((old_pte & VMM_ENTRY_PRESENT_BIT) != 0 &&
+	    (old_pte & VMM_ENTRY_LOCATION_4K_BITS) != (new_pte & VMM_ENTRY_LOCATION_4K_BITS)) {
+		BUG("map_page would replace an existing mapping");
+	}
+	pt[pt_idx] = new_pte;
 
 	invalidate(virt_addr);
 }
 
+static bool mapping_present(const void *virt_addr)
+{
+	size_t pd_idx = (size_t)virt_addr >> 22;
+	size_t pt_idx = (size_t)virt_addr >> 12 & 0x03FF;
+	size_t *pd = (size_t *)page_directory_addr;
+	if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0)
+		return false;
+	if (pd[pd_idx] & VMM_ENTRY_PAGE_SIZE_BIT)
+		return true;
+	return (((size_t *)page_table_addr) + (0x400 * pd_idx))[pt_idx] &
+		VMM_ENTRY_PRESENT_BIT;
+}
+
 void map_pages(const fatptr_t *phy_mem, const struct vmm_entry *virt_mem)
 {
+	if (phy_mem == nullptr || virt_mem == nullptr)
+		BUG("map_pages requires non-null ranges");
+	if (((uintptr_t)phy_mem->ptr & (PAGE_SIZE - 1)) != 0 ||
+	    ((uintptr_t)virt_mem->ptr & (PAGE_SIZE - 1)) != 0 ||
+	    (phy_mem->len & (PAGE_SIZE - 1)) != 0 ||
+	    (virt_mem->size & (PAGE_SIZE - 1)) != 0)
+		BUG("map_pages requires page-aligned ranges");
 	if (phy_mem->len != virt_mem->size)
 		panic("Physical and Virtual size not equal:\n"
 		      " - phy_size: %x\n"
@@ -115,6 +158,12 @@ void map_pages(const fatptr_t *phy_mem, const struct vmm_entry *virt_mem)
 	void *phy_addr = phy_mem->ptr;
 
 	while (virt_addr < virt_mem->ptr + virt_mem->size) {
+		/* Boot paging starts with identity-backed huge pages.  A range handed
+		 * out by the VMM is free in the allocator even when that bootstrap
+		 * translation still exists, so remove only the translation here. */
+		void *existing = vmm_phy_addr(virt_addr);
+		if (mapping_present(virt_addr) && existing != phy_addr)
+			unmap_page(nullptr, virt_addr);
 		map_page(phy_addr, virt_addr, virt_mem->flags);
 
 		virt_addr += PAGE_SIZE;
@@ -145,6 +194,18 @@ void unmap_page(const void* phy_mem, const void *virt_addr)
 
 	if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0)
 		return;
+	if (pd[pd_idx] & VMM_ENTRY_PAGE_SIZE_BIT) {
+		const size_t huge = pd[pd_idx];
+		fatptr_t table = phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH);
+		if (table.ptr == nullptr)
+			panic("Failed to allocate page table while unmapping\n");
+		pd[pd_idx] = (size_t)table.ptr | VMM_ENTRY_READ_WRITE_BIT |
+			VMM_ENTRY_PRESENT_BIT | (huge & VMM_ENTRY_USER_SUPER_BIT);
+		for (size_t i = 0; i < 1024; i++)
+			pt[i] = ((huge & VMM_ENTRY_LOCATION_4M_LOW_BITS) + i * PAGE_SIZE) |
+				(huge & 0xFFF & ~VMM_ENTRY_PAGE_SIZE_BIT);
+		invalidate(pt);
+	}
 
 	pt[pt_idx] = 0;
 
@@ -163,6 +224,9 @@ void unmap_page(const void* phy_mem, const void *virt_addr)
 
 void unmap_pages(const fatptr_t *phy_mem, const struct vmm_entry *virt_mem)
 {
+	if (virt_mem == nullptr || ((uintptr_t)virt_mem->ptr & (PAGE_SIZE - 1)) != 0 ||
+	    (virt_mem->size & (PAGE_SIZE - 1)) != 0)
+		BUG("unmap_pages requires a page-aligned range");
 	if (phy_mem != nullptr){
 		phy_mem_free(*phy_mem);
 	}
@@ -176,6 +240,276 @@ void unmap_pages(const fatptr_t *phy_mem, const struct vmm_entry *virt_mem)
 	for (void *virt_addr = start_addr; virt_addr < end_addr; virt_addr += PAGE_SIZE) {
 		unmap_page(nullptr, virt_addr);
 	}
+}
+
+static struct vmm_entry *temporary_mapping(const fatptr_t *physical)
+{
+	struct vmm_entry *temporary = vmm_alloc(PAGE_SIZE,
+		VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
+	if (temporary == nullptr)
+		return nullptr;
+	map_pages(physical, temporary);
+	return temporary;
+}
+
+static void release_temporary_mapping(struct vmm_entry *temporary)
+{
+	if (temporary == nullptr)
+		return;
+	unmap_page(nullptr, temporary->ptr);
+	vmm_free(temporary->ptr);
+}
+
+static uint32_t current_page_directory(void)
+{
+	uint32_t directory;
+	__asm__ volatile("mov %%cr3, %0" : "=r"(directory) : : "memory");
+	return directory & VMM_ENTRY_LOCATION_4K_BITS;
+}
+
+bool vmm_page_directory_is_active(const fatptr_t *page_directory)
+{
+	return page_directory != nullptr && page_directory->ptr != nullptr &&
+		current_page_directory() == (uint32_t)(uintptr_t)page_directory->ptr;
+}
+
+bool vmm_page_directory_create(fatptr_t *page_directory)
+{
+	if (page_directory == nullptr || kernel_page_directory.ptr == nullptr)
+		return false;
+	fatptr_t directory = phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH);
+	if (directory.ptr == nullptr)
+		return false;
+	struct vmm_entry *mapped = temporary_mapping(&directory);
+	if (mapped == nullptr) {
+		phy_mem_free(directory);
+		return false;
+	}
+	uint32_t *new_pd = mapped->ptr;
+	memset(new_pd, 0, PAGE_SIZE);
+	uint32_t *kernel_pd = (uint32_t *)(uintptr_t)kernel_page_directory.ptr;
+	for (size_t i = 768; i < 1023; ++i)
+		new_pd[i] = kernel_pd[i] & ~VMM_ENTRY_USER_SUPER_BIT;
+	new_pd[1023] = (uint32_t)(uintptr_t)directory.ptr |
+		VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT;
+	release_temporary_mapping(mapped);
+	*page_directory = directory;
+	return true;
+}
+
+bool vmm_page_directory_destroy(fatptr_t page_directory)
+{
+	if (page_directory.ptr == nullptr || vmm_page_directory_is_active(&page_directory))
+		return false;
+	struct vmm_entry *mapped = temporary_mapping(&page_directory);
+	if (mapped == nullptr)
+		return false;
+	uint32_t *pd = mapped->ptr;
+	for (size_t i = 0; i < 768; ++i) {
+		if ((pd[i] & VMM_ENTRY_PRESENT_BIT) == 0)
+			continue;
+		if (pd[i] & VMM_ENTRY_PAGE_SIZE_BIT)
+			continue;
+		fatptr_t table = { .ptr = (void *)(uintptr_t)(pd[i] & VMM_ENTRY_LOCATION_4K_BITS),
+			.len = PAGE_SIZE };
+		pd[i] = 0;
+		phy_mem_free(table);
+	}
+	release_temporary_mapping(mapped);
+	phy_mem_free(page_directory);
+	return true;
+}
+
+bool vmm_page_directory_map(const fatptr_t *page_directory, const fatptr_t *physical,
+	                         uintptr_t virtual_address, uint16_t flags)
+{
+	if (page_directory == nullptr || physical == nullptr || page_directory->ptr == nullptr ||
+		physical->ptr == nullptr || physical->len != PAGE_SIZE ||
+		(virtual_address & (PAGE_SIZE - 1)) != 0 || virtual_address >= VMM_RECURSIVE_PT_BASE)
+		return false;
+	struct vmm_entry *pd_mapping = temporary_mapping(page_directory);
+	if (pd_mapping == nullptr)
+		return false;
+	uint32_t *pd = pd_mapping->ptr;
+	size_t pd_idx = virtual_address >> 22;
+	size_t pt_idx = (virtual_address >> 12) & 0x3ff;
+	fatptr_t table = { 0 };
+	bool new_table = false;
+	if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0) {
+		table = phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH);
+		if (table.ptr == nullptr) {
+			release_temporary_mapping(pd_mapping);
+			return false;
+		}
+		struct vmm_entry *table_mapping = temporary_mapping(&table);
+		if (table_mapping == nullptr) {
+			phy_mem_free(table);
+			release_temporary_mapping(pd_mapping);
+			return false;
+		}
+		memset(table_mapping->ptr, 0, PAGE_SIZE);
+		release_temporary_mapping(table_mapping);
+		pd[pd_idx] = (uint32_t)(uintptr_t)table.ptr | VMM_ENTRY_PRESENT_BIT |
+			VMM_ENTRY_READ_WRITE_BIT;
+		new_table = true;
+	} else if (pd[pd_idx] & VMM_ENTRY_PAGE_SIZE_BIT) {
+		release_temporary_mapping(pd_mapping);
+		return false;
+	}
+	if (flags & VMM_ENTRY_USER_SUPER_BIT)
+		pd[pd_idx] |= VMM_ENTRY_USER_SUPER_BIT;
+	table.ptr = (void *)(uintptr_t)(pd[pd_idx] & VMM_ENTRY_LOCATION_4K_BITS);
+	table.len = PAGE_SIZE;
+	struct vmm_entry *table_mapping = temporary_mapping(&table);
+	if (table_mapping == nullptr) {
+		if (new_table) {
+			pd[pd_idx] = 0;
+			phy_mem_free(table);
+		}
+		release_temporary_mapping(pd_mapping);
+		return false;
+	}
+	uint32_t *pt = table_mapping->ptr;
+	uint32_t old = pt[pt_idx];
+	uint32_t entry = (uint32_t)(uintptr_t)physical->ptr | (flags & 0xfff);
+	if ((old & VMM_ENTRY_PRESENT_BIT) != 0 &&
+		(old & VMM_ENTRY_LOCATION_4K_BITS) != (entry & VMM_ENTRY_LOCATION_4K_BITS)) {
+		release_temporary_mapping(table_mapping);
+		release_temporary_mapping(pd_mapping);
+		return false;
+	}
+	pt[pt_idx] = entry;
+	release_temporary_mapping(table_mapping);
+	release_temporary_mapping(pd_mapping);
+	if (vmm_page_directory_is_active(page_directory))
+		invalidate((void *)virtual_address);
+	return true;
+}
+
+bool vmm_page_directory_unmap(const fatptr_t *page_directory, uintptr_t virtual_address)
+{
+	if (page_directory == nullptr || page_directory->ptr == nullptr ||
+		(virtual_address & (PAGE_SIZE - 1)) != 0 || virtual_address >= VMM_RECURSIVE_PT_BASE)
+		return false;
+	struct vmm_entry *pd_mapping = temporary_mapping(page_directory);
+	if (pd_mapping == nullptr)
+		return false;
+	uint32_t *pd = pd_mapping->ptr;
+	size_t pd_idx = virtual_address >> 22;
+	size_t pt_idx = (virtual_address >> 12) & 0x3ff;
+	if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0 ||
+		(pd[pd_idx] & VMM_ENTRY_PAGE_SIZE_BIT)) {
+		release_temporary_mapping(pd_mapping);
+		return false;
+	}
+	fatptr_t table = { .ptr = (void *)(uintptr_t)(pd[pd_idx] & VMM_ENTRY_LOCATION_4K_BITS),
+		.len = PAGE_SIZE };
+	struct vmm_entry *table_mapping = temporary_mapping(&table);
+	if (table_mapping == nullptr) {
+		release_temporary_mapping(pd_mapping);
+		return false;
+	}
+	uint32_t *pt = table_mapping->ptr;
+	pt[pt_idx] = 0;
+	bool empty = is_page_table_empty(pt);
+	release_temporary_mapping(table_mapping);
+	if (empty) {
+		pd[pd_idx] = 0;
+		phy_mem_free(table);
+	}
+	release_temporary_mapping(pd_mapping);
+	if (vmm_page_directory_is_active(page_directory))
+		invalidate((void *)virtual_address);
+	return true;
+}
+
+bool vmm_page_directory_protect(const fatptr_t *page_directory,
+								uintptr_t virtual_address, uint16_t flags)
+{
+	if (page_directory == nullptr || page_directory->ptr == nullptr ||
+		(virtual_address & (PAGE_SIZE - 1)) != 0 || virtual_address >= VMM_RECURSIVE_PT_BASE)
+		return false;
+	struct vmm_entry *pd_mapping = temporary_mapping(page_directory);
+	if (pd_mapping == nullptr)
+		return false;
+	uint32_t *pd = pd_mapping->ptr;
+	size_t pd_idx = virtual_address >> 22;
+	size_t pt_idx = (virtual_address >> 12) & 0x3ff;
+	if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0 ||
+		(pd[pd_idx] & VMM_ENTRY_PAGE_SIZE_BIT)) {
+		release_temporary_mapping(pd_mapping);
+		return false;
+	}
+	fatptr_t table = { .ptr = (void *)(uintptr_t)(pd[pd_idx] & VMM_ENTRY_LOCATION_4K_BITS),
+		.len = PAGE_SIZE };
+	struct vmm_entry *table_mapping = temporary_mapping(&table);
+	if (table_mapping == nullptr) {
+		release_temporary_mapping(pd_mapping);
+		return false;
+	}
+	uint32_t *pte = &((uint32_t *)table_mapping->ptr)[pt_idx];
+	if ((*pte & VMM_ENTRY_PRESENT_BIT) == 0) {
+		release_temporary_mapping(table_mapping);
+		release_temporary_mapping(pd_mapping);
+		return false;
+	}
+	*pte = (*pte & VMM_ENTRY_LOCATION_4K_BITS) |
+		(flags & 0xfff) | VMM_ENTRY_PRESENT_BIT;
+	release_temporary_mapping(table_mapping);
+	release_temporary_mapping(pd_mapping);
+	if (vmm_page_directory_is_active(page_directory))
+		invalidate((void *)virtual_address);
+	return true;
+}
+
+bool vmm_page_directory_get_flags(const fatptr_t *page_directory,
+	                                uintptr_t virtual_address, uint16_t *flags)
+{
+	if (page_directory == nullptr || page_directory->ptr == nullptr || flags == nullptr ||
+	    (virtual_address & (PAGE_SIZE - 1)) != 0 || virtual_address >= VMM_RECURSIVE_PT_BASE)
+		return false;
+	struct vmm_entry *pd_mapping = temporary_mapping(page_directory);
+	if (pd_mapping == nullptr)
+		return false;
+	uint32_t *pd = pd_mapping->ptr;
+	size_t pd_idx = virtual_address >> 22;
+	size_t pt_idx = (virtual_address >> 12) & 0x3ff;
+	if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0 ||
+	    (pd[pd_idx] & VMM_ENTRY_PAGE_SIZE_BIT)) {
+		release_temporary_mapping(pd_mapping);
+		return false;
+	}
+	fatptr_t table = { .ptr = (void *)(uintptr_t)(pd[pd_idx] & VMM_ENTRY_LOCATION_4K_BITS),
+		.len = PAGE_SIZE };
+	struct vmm_entry *table_mapping = temporary_mapping(&table);
+	if (table_mapping == nullptr) {
+		release_temporary_mapping(pd_mapping);
+		return false;
+	}
+	uint32_t pte = ((uint32_t *)table_mapping->ptr)[pt_idx];
+	uint32_t effective = pte & 0xfff;
+	if ((pd[pd_idx] & VMM_ENTRY_USER_SUPER_BIT) == 0)
+		effective &= ~VMM_ENTRY_USER_SUPER_BIT;
+	if ((pd[pd_idx] & VMM_ENTRY_READ_WRITE_BIT) == 0)
+		effective &= ~VMM_ENTRY_READ_WRITE_BIT;
+	*flags = (uint16_t)effective;
+	release_temporary_mapping(table_mapping);
+	release_temporary_mapping(pd_mapping);
+	return (pte & VMM_ENTRY_PRESENT_BIT) != 0;
+}
+
+bool vmm_page_directory_activate(const fatptr_t *page_directory)
+{
+	if (page_directory == nullptr || page_directory->ptr == nullptr ||
+		((uintptr_t)page_directory->ptr & (PAGE_SIZE - 1)) != 0)
+		return false;
+	__asm__ volatile("mov %0, %%cr3" : : "r"(page_directory->ptr) : "memory");
+	return true;
+}
+
+const fatptr_t *vmm_kernel_page_directory(void)
+{
+	return kernel_page_directory.ptr == nullptr ? nullptr : &kernel_page_directory;
 }
 
 static void invalidate_low_range(void)
@@ -440,8 +774,8 @@ static struct list_head *vir_mem_find_prev_used_chunk(struct vmm_entry *to_alloc
 
 struct vmm_entry *vmm_alloc(size_t req_size, uint8_t flags)
 {
-	if (req_size > 0 && req_size & 0xfff)
-		BUG("Virtual Memory allocation must be page aligned: %d", req_size & 0xfff);
+	if (req_size == 0 || (req_size & (PAGE_SIZE - 1)) != 0)
+		BUG("Virtual memory allocation must be non-zero and page aligned");
 
 	struct vmm_entry *free_chunk = nullptr;
 
@@ -472,8 +806,13 @@ struct vmm_entry *vmm_alloc(size_t req_size, uint8_t flags)
 		.flags = flags,
 	};
 
-	free_chunk->ptr += req_size;
-	free_chunk->size -= req_size;
+	if (free_chunk->size == req_size) {
+		list_rm(&free_chunk->list);
+		vmm_entry_free(free_chunk);
+	} else {
+		free_chunk->ptr += req_size;
+		free_chunk->size -= req_size;
+	}
 
 	list_add(&tag->list, vir_mem_find_prev_used_chunk(tag)->prev);
 
@@ -484,17 +823,14 @@ struct vmm_entry *vmm_alloc(size_t req_size, uint8_t flags)
 	return tag;
 }
 
-static struct vmm_entry *vir_mem_find_prev_free_chunk(struct vmm_entry *to_free)
+static struct list_head *vir_mem_find_free_insert_pos(uintptr_t address)
 {
-	struct vmm_entry *prev_chunk = nullptr;
-
 	list_for_each(&vmm_free_list) {
 		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
-
-		if (prev_chunk == nullptr || (prev_chunk->ptr > cur->ptr && prev_chunk->ptr < to_free->ptr))
-			prev_chunk = cur;
+		if ((uintptr_t)cur->ptr > address)
+			return it->prev;
 	}
-	return prev_chunk;
+	return vmm_free_list.prev;
 }
 
 static void vir_mem_free_coalesce(struct vmm_entry *mid)
@@ -516,11 +852,15 @@ static void vir_mem_free_coalesce(struct vmm_entry *mid)
 
 void vmm_free(const void *ptr)
 {
+	if (ptr == nullptr || ((uintptr_t)ptr & (PAGE_SIZE - 1)) != 0)
+		BUG("vmm_free requires a page-aligned allocation address");
+
 	list_for_each(&vmm_used_list) {
 		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
 
 		if (cur->ptr == ptr) {
-			list_mv(&cur->list, &vir_mem_find_prev_free_chunk(cur)->list);
+			list_rm(&cur->list);
+			list_add(&cur->list, vir_mem_find_free_insert_pos((uintptr_t)cur->ptr));
 			vir_mem_free_coalesce(cur);
 			break;
 		}
@@ -541,15 +881,52 @@ void vmm_release_init(void)
 	for (struct list_head *it = vmm_used_list.next; it != &vmm_used_list;) {
 		struct list_head *next = it->next;
 		struct vmm_entry *entry = list_entry(it, struct vmm_entry, list);
-		if ((uintptr_t)entry->ptr >= start && (uintptr_t)entry->ptr < end) {
-			for (uintptr_t page = round_down_to_page((uintptr_t)entry->ptr);
-			     page < round_up_to_page((uintptr_t)entry->ptr + entry->size);
+		uintptr_t entry_start = (uintptr_t)entry->ptr;
+		uintptr_t entry_end = entry_start + entry->size;
+		uintptr_t release_start = entry_start > start ? entry_start : start;
+		uintptr_t release_end = entry_end < end ? entry_end : end;
+
+		if (release_start < release_end) {
+			for (uintptr_t page = release_start; page < release_end;
 			     page += PAGE_SIZE) {
 				void *physical = vmm_phy_addr((void *)page);
 				if (physical != nullptr)
 					unmap_page(physical, (void *)page);
 			}
-			list_mv(&entry->list, vmm_free_list.prev);
+
+			struct vmm_entry *free_entry = vmm_entry_alloc();
+			if (free_entry == nullptr)
+				panic("Failed to allocate reclaimed VMM range\n");
+			*free_entry = (struct vmm_entry){
+				.ptr = (void *)release_start,
+				.size = release_end - release_start,
+			};
+			RESET_LIST_ITEM(&free_entry->list);
+			list_add(&free_entry->list,
+				 vir_mem_find_free_insert_pos(release_start));
+			vir_mem_free_coalesce(free_entry);
+
+			if (release_start == entry_start && release_end == entry_end) {
+				list_rm(&entry->list);
+				vmm_entry_free(entry);
+			} else if (release_start == entry_start) {
+				entry->ptr = (void *)release_end;
+				entry->size = entry_end - release_end;
+			} else if (release_end == entry_end) {
+				entry->size = release_start - entry_start;
+			} else {
+				struct vmm_entry *right = vmm_entry_alloc();
+				if (right == nullptr)
+					panic("Failed to split reclaimed VMM range\n");
+				*right = (struct vmm_entry){
+					.ptr = (void *)release_end,
+					.size = entry_end - release_end,
+					.flags = entry->flags,
+				};
+				RESET_LIST_ITEM(&right->list);
+				entry->size = release_start - entry_start;
+				list_add(&right->list, &entry->list);
+			}
 		}
 		it = next;
 	}
@@ -655,6 +1032,8 @@ static void vmm_init_used_range(void *ptr, size_t size, uint8_t flags)
 {
 	if (size == 0)
 		return;
+	if (((uintptr_t)ptr & (PAGE_SIZE - 1)) != 0 || (size & (PAGE_SIZE - 1)) != 0)
+		panic("Unaligned VMM used range during init\n");
 
 	struct vmm_entry *tag = vmm_entry_alloc();
 	if (tag == nullptr)
@@ -682,7 +1061,7 @@ static void vmm_init_used_list(const struct multiboot_tag_elf_sections *elf_tag,
 		if ((elf_sec[i].sh_flags & ELF_SHF_ALLOC) == 0 || (void*)elf_sec[i].sh_addr < (void*)&HIGHER_HALF)
 			continue;
 
-		size_t elf_s = elf_sec[i].sh_addr;
+		size_t elf_s = round_down_to_page(elf_sec[i].sh_addr);
 		size_t elf_e = round_up_to_page(elf_sec[i].sh_addr + elf_sec[i].sh_size);
 		uint8_t flags = (elf_sec[i].sh_flags & ELF_SHF_WRITE) * VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT;
 
@@ -697,25 +1076,29 @@ static void vmm_init_used_list(const struct multiboot_tag_elf_sections *elf_tag,
 
 void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm_entry *preserved_entries, size_t preserved_entry_count)
 {
+	kernel_page_directory = (fatptr_t){
+		.ptr = (void *)(uintptr_t)current_page_directory(), .len = PAGE_SIZE };
 	struct vmm_entry init_vmm_entry[16 * sizeof(struct vmm_entry)] = { 0 };
 	const size_t init_vmm_capacity = sizeof(init_vmm_entry) / sizeof(init_vmm_entry[0]);
 	size_t init_vmm_entris_used = 0;
 	LIST_HEAD(init_vmm_free_list);
 
 	struct vmm_entry init_entry = {
-		.ptr = (void *)&HIGHER_HALF,
-		.size = SIZE_MAX - (size_t)&HIGHER_HALF,
+		.ptr = (void *)round_up_to_page((uintptr_t)&HIGHER_HALF),
+		.size = VMM_RECURSIVE_PT_BASE - round_up_to_page((uintptr_t)&HIGHER_HALF),
 		.flags = 0,
 	};
+	if (init_entry.size == 0 || (uintptr_t)init_entry.ptr >= VMM_RECURSIVE_PT_BASE)
+		panic("Invalid higher-half VMM range\n");
 	RESET_LIST_ITEM(&init_entry.list);
 
 	init_vmm_entry[init_vmm_entris_used] = init_entry;
 	list_add(&init_vmm_entry[0].list, &init_vmm_free_list);
 	init_vmm_entris_used++;
 
-	const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)elf_tag->sections;
-	const char *elf_sec_str = (char *)elf_sec[elf_tag->shndx].sh_addr;
-	for (size_t i = 0; i < elf_tag->num; i++) {
+	const Elf32_Shdr *elf_sec = elf_tag == nullptr ? nullptr : (const Elf32_Shdr *)elf_tag->sections;
+	const char *elf_sec_str = elf_tag == nullptr ? nullptr : (char *)elf_sec[elf_tag->shndx].sh_addr;
+	for (size_t i = 0; elf_tag != nullptr && i < elf_tag->num; i++) {
 #ifdef DEBUG
 		mprint("Section (%s): [Address: %x, Size: %x, Type: %x, flags: %x]\n", &elf_sec_str[elf_sec[i].sh_name], elf_sec[i].sh_addr, elf_sec[i].sh_size,
 		       elf_sec[i].sh_type, elf_sec[i].sh_flags);
@@ -728,6 +1111,14 @@ void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm
 			continue;
 		}
 
+		uintptr_t reserve_start = round_down_to_page(elf_sec[i].sh_addr);
+		uintptr_t reserve_end = round_up_to_page(elf_sec[i].sh_addr + elf_sec[i].sh_size);
+		if (reserve_end <= reserve_start || reserve_start < (uintptr_t)init_entry.ptr ||
+		    reserve_start >= VMM_RECURSIVE_PT_BASE)
+			continue;
+		if (reserve_end > VMM_RECURSIVE_PT_BASE)
+			reserve_end = VMM_RECURSIVE_PT_BASE;
+
 		for (struct list_head *it = init_vmm_free_list.next;
 		     it != &init_vmm_free_list;) {
 			struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
@@ -738,28 +1129,24 @@ void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm
 			 * the two found entry or remove it
 			 */
 
-			void *cur_s = cur->ptr;
-			void *cur_e = cur->ptr + cur->size;
-
-			void *elf_s = (void *)elf_sec[i].sh_addr;
-			void *elf_e = (void *)elf_sec[i].sh_addr + elf_sec[i].sh_size;
-
-			if (elf_s > cur_e || cur_s >= elf_e) {
+			uintptr_t cur_s = (uintptr_t)cur->ptr;
+			uintptr_t cur_e = cur_s + cur->size;
+			if (reserve_start >= cur_e || cur_s >= reserve_end) {
 				it = next;
 				continue;
 			}
 
-			void *range_s = (void *)round_down_to_page((size_t)cur_s > (size_t)elf_s ? (size_t)cur_s : (size_t)elf_s);
-			void *range_e = (void *)round_up_to_page((size_t)cur_e < (size_t)elf_e ? (size_t)cur_e : (size_t)elf_e);
+			uintptr_t range_s = cur_s > reserve_start ? cur_s : reserve_start;
+			uintptr_t range_e = cur_e < reserve_end ? cur_e : reserve_end;
 
 			struct vmm_entry left_entry = {
-				.ptr = cur_s,
+				.ptr = (void *)cur_s,
 				.size = range_s - cur_s,
 			};
 			RESET_LIST_ITEM(&left_entry.list);
 
 			struct vmm_entry right_entry = {
-				.ptr = range_e,
+				.ptr = (void *)range_e,
 				.size = cur_e - range_e,
 			};
 			RESET_LIST_ITEM(&right_entry.list);
@@ -787,8 +1174,14 @@ void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm
 		if (init_vmm_entris_used >= init_vmm_capacity)
 			panic("Not enough space to reserve preserved virtual ranges\n");
 
-		uintptr_t range_s = (uintptr_t)preserved_entries[i].ptr;
-		uintptr_t range_e = (uintptr_t)preserved_entries[i].ptr + preserved_entries[i].size;
+		uintptr_t range_s = round_down_to_page((uintptr_t)preserved_entries[i].ptr);
+		uintptr_t range_e = round_up_to_page((uintptr_t)preserved_entries[i].ptr + preserved_entries[i].size);
+		if (range_s < (uintptr_t)init_entry.ptr)
+			range_s = (uintptr_t)init_entry.ptr;
+		if (range_e > VMM_RECURSIVE_PT_BASE)
+			range_e = VMM_RECURSIVE_PT_BASE;
+		if (range_s >= range_e)
+			continue;
 
 		for (struct list_head *it = init_vmm_free_list.next;
 		     it != &init_vmm_free_list;) {
@@ -803,8 +1196,8 @@ void vmm_init(const struct multiboot_tag_elf_sections *elf_tag, const struct vmm
 				continue;
 			}
 
-			uintptr_t inter_s = round_down_to_page((uintptr_t)(cur_s > range_s ? cur_s : range_s));
-			uintptr_t inter_e = round_up_to_page((uintptr_t)(cur_e < range_e ? cur_e : range_e));
+			uintptr_t inter_s = cur_s > range_s ? cur_s : range_s;
+			uintptr_t inter_e = cur_e < range_e ? cur_e : range_e;
 
 			struct vmm_entry left_entry = {
 				.ptr = (void*)cur_s,

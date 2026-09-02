@@ -4,11 +4,13 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <kernel/multiboot.h>
+#include <kernel/process/arch/i386/context.h>
 
 struct cpu_info {
 	uint8_t apic_id;
 	volatile bool online;
 	void *stack_top;
+	struct i386_cpu_state tss_state;
 };
 
 struct madt_ioapic_info {

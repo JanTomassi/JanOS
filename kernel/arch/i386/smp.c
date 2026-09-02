@@ -491,6 +491,9 @@ void ap_main(void)
 	__asm__ volatile("lidt %0" : : "m"(bsp_idtr));
 
 	if (idx < MAX_CPUS) {
+		if (!i386_tss_init_cpu(&cpus[idx].tss_state,
+		                       (uintptr_t)cpus[idx].stack_top))
+			panic("SMP: failed to initialize AP TSS\n");
 		spin_lock(&cpu_lock);
 		__atomic_store_n(&cpus[idx].online, true, __ATOMIC_RELEASE);
 		spin_unlock(&cpu_lock);

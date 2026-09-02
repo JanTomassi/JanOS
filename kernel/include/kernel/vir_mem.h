@@ -25,6 +25,8 @@
 #define VMM_ENTRY_LOCATION_4M_HIGHT_BITS (0xff << 13)
 
 #define PAGE_SIZE (4096)
+#define VMM_RECURSIVE_PT_BASE ((uintptr_t)0xFFC00000)
+#define VMM_RECURSIVE_PD_ADDR ((uintptr_t)0xFFFFF000)
 uintptr_t round_up_to_page(uintptr_t x);
 uintptr_t round_down_to_page(uintptr_t x);
 
@@ -59,6 +61,20 @@ void map_pages(const fatptr_t *physaddr, const struct vmm_entry *virt_mem);
 void map_page(const void *phy_addr, const void *virt_addr, const uint16_t virt_flags);
 void unmap_page(const void* phy_mem, const void *virt_addr);
 void unmap_pages(const fatptr_t *phy_mem, const struct vmm_entry *virt_mem);
+
+/* Page-directory operations used by process address spaces. */
+bool vmm_page_directory_create(fatptr_t *page_directory);
+bool vmm_page_directory_destroy(fatptr_t page_directory);
+bool vmm_page_directory_map(const fatptr_t *page_directory, const fatptr_t *physical,
+                            uintptr_t virtual_address, uint16_t flags);
+bool vmm_page_directory_unmap(const fatptr_t *page_directory, uintptr_t virtual_address);
+bool vmm_page_directory_protect(const fatptr_t *page_directory,
+                                  uintptr_t virtual_address, uint16_t flags);
+bool vmm_page_directory_get_flags(const fatptr_t *page_directory,
+                                  uintptr_t virtual_address, uint16_t *flags);
+bool vmm_page_directory_activate(const fatptr_t *page_directory);
+bool vmm_page_directory_is_active(const fatptr_t *page_directory);
+const fatptr_t *vmm_kernel_page_directory(void);
 
 struct vmm_entry *vmm_alloc(size_t req_size, uint8_t flags);
 void vmm_free(const void *ptr);

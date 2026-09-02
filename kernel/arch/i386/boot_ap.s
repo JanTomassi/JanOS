@@ -97,7 +97,7 @@ ap_trampoline_gdt:
 ap_trampoline_gdt_end:
 
 ap_trampoline_gdtr:
-	dw ap_trampoline_gdt_end - ap_trampoline_gdt
+	dw ap_trampoline_gdt_end - ap_trampoline_gdt - 1
 	dd 0x1000 + (ap_trampoline_gdt - ap_trampoline_start)  ; absolute linear base (now correctly 0x1000 + offset)
 
 align 4, db 0

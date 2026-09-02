@@ -8,6 +8,7 @@
 #define I386_KERNEL_DATA_SELECTOR 0x10u
 #define I386_USER_CODE_SELECTOR   0x18u
 #define I386_USER_DATA_SELECTOR   0x20u
+#define I386_TSS_SELECTOR          0x28u
 
 #define I386_EFLAGS_RESERVED      0x00000002u
 #define I386_EFLAGS_INTERRUPT_ENABLE 0x00000200u
@@ -49,8 +50,13 @@ struct i386_cpu_state {
 	struct i386_tss tss;
 };
 
-/* Append a TSS descriptor to the current GDT and load TR (selector 0x28). */
+/* Append a TSS descriptor to the current GDT and load TR on this CPU. */
 bool i386_tss_install(struct i386_cpu_state *state, uintptr_t kernel_stack_top);
+
+/* Initialize or update the TSS associated with the current CPU. */
+bool i386_tss_init_cpu(struct i386_cpu_state *state, uintptr_t kernel_stack_top);
+bool i386_tss_set_kernel_stack(struct i386_cpu_state *state,
+	                             uintptr_t kernel_stack_top);
 
 /* Initialize the BSP TSS from the currently running process's kernel stack. */
 bool i386_tss_init_bsp(void);
@@ -87,3 +93,7 @@ bool i386_context_init_user(struct i386_context *context, uintptr_t entry,
 /* Both entry points perform the same controlled kernel-to-user transition. */
 [[noreturn]] void i386_context_enter_user(const struct i386_context *context);
 [[noreturn]] void i386_context_return_user(const struct i386_context *context);
+
+/* Leave an exiting process's stack before invoking its deferred cleanup. */
+[[noreturn]] void i386_reaper_enter(uintptr_t stack_top,
+                                    void (*cleanup)(void *), void *argument);

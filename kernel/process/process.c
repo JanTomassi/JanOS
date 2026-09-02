@@ -1,6 +1,7 @@
 #include <kernel/process/process.h>
 
 #include <kernel/allocator.h>
+#include <kernel/display.h>
 #include <kernel/process/address_space.h>
 #include <kernel/process/stack.h>
 #include <kernel/process/wait_queue.h>
@@ -18,6 +19,7 @@ struct process {
 	struct process_stack *user_stack;
 	uintptr_t user_entry;
 	void *user_stack_pointer;
+	struct i386_context initial_context;
 	struct list_head all;
 	struct list_head children;
 	struct list_head sibling;
@@ -31,6 +33,10 @@ static process_pid_t next_pid = 1;
 static bool initialized;
 static allocator_t allocator;
 static struct process *current_process;
+
+/* This stack is never owned by a process and survives every process exit. */
+static uint8_t reaper_stack[PROCESS_DEFAULT_KERNEL_STACK_SIZE]
+	__attribute__((aligned(16)));
 
 static void ensure_initialized(void)
 {
@@ -119,21 +125,56 @@ bool process_start(struct process *process, uintptr_t entry, int argc,
 	if (process == nullptr || entry < PAGE_SIZE || entry >= 0xc0000000u)
 		return false;
 	ensure_initialized();
-	void *user_stack_pointer = nullptr;
-	if (!process_user_stack_layout(process->user_stack, argc, argv,
-	                               &user_stack_pointer))
-		return false;
-
 	spin_lock(&process_lock);
 	if (current_process != nullptr || process->state != PROCESS_NEW) {
 		spin_unlock(&process_lock);
 		return false;
 	}
+	spin_unlock(&process_lock);
+	void *user_stack_pointer = nullptr;
+	if (!process_user_stack_layout(process->user_stack, argc, argv,
+	                               &user_stack_pointer))
+		return false;
+	const fatptr_t *page_directory = process_page_directory(process);
+	struct i386_context context;
+	if (page_directory == nullptr || page_directory->ptr == nullptr ||
+		!i386_context_init_user(&context, entry, (uintptr_t)user_stack_pointer,
+			(uintptr_t)page_directory->ptr, I386_EFLAGS_USER_DEFAULT))
+		return false;
+	uint32_t old_cr3;
+	__asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3) : : "memory");
+	if (!address_space_activate(process->space))
+		return false;
+
+	spin_lock(&process_lock);
+	if (current_process != nullptr || process->state != PROCESS_NEW) {
+		spin_unlock(&process_lock);
+		__asm__ volatile("mov %0, %%cr3" : : "r"(old_cr3) : "memory");
+		return false;
+	}
 	process->user_entry = entry;
 	process->user_stack_pointer = user_stack_pointer;
+	process->initial_context = context;
 	process->state = PROCESS_RUNNING;
 	current_process = process;
 	spin_unlock(&process_lock);
+	if (!i386_tss_init_bsp()) {
+		spin_lock(&process_lock);
+		current_process = nullptr;
+		process->state = PROCESS_NEW;
+		spin_unlock(&process_lock);
+		__asm__ volatile("mov %0, %%cr3" : : "r"(old_cr3) : "memory");
+		return false;
+	}
+	return true;
+}
+
+bool process_initial_context(const struct process *process,
+							 struct i386_context *context)
+{
+	if (process == nullptr || context == nullptr || process->state != PROCESS_RUNNING)
+		return false;
+	*context = process->initial_context;
 	return true;
 }
 
@@ -228,20 +269,8 @@ int process_exit_status(const struct process *process)
 	return process == nullptr ? 0 : process->status;
 }
 
-void process_exit(struct process *process, int status)
+static void process_reap(struct process *process)
 {
-	if (process == nullptr)
-		return;
-	if (process->waiting_on != nullptr) {
-		list_rm(&process->wait_link);
-		process->waiting_on = nullptr;
-	}
-	process->status = status;
-	process_set_state(process, PROCESS_ZOMBIE);
-	spin_lock(&process_lock);
-	if (current_process == process)
-		current_process = nullptr;
-	spin_unlock(&process_lock);
 	process_stack_destroy(process->user_stack);
 	process_stack_destroy(process->kernel_stack);
 	address_space_destroy(process->space);
@@ -252,9 +281,70 @@ void process_exit(struct process *process, int status)
 	process->user_stack_pointer = nullptr;
 }
 
-void process_exit_current(int status)
+[[noreturn]] static void process_reaper_cleanup(void *argument)
 {
-	process_exit(process_current(), status);
+	struct process *process = argument;
+	process_reap(process);
+	for (;;)
+		__asm__ volatile("hlt");
+}
+
+void process_exit(struct process *process, int status)
+{
+	if (process == nullptr)
+		return;
+	if (process == process_current()) {
+		process_exit_current(status);
+		return;
+	}
+	spin_lock(&process_lock);
+	if (process->state == PROCESS_DEAD || process->state == PROCESS_ZOMBIE) {
+		spin_unlock(&process_lock);
+		return;
+	}
+	if (process->waiting_on != nullptr) {
+		list_rm(&process->wait_link);
+		process->waiting_on = nullptr;
+	}
+	process->status = status;
+	process->state = PROCESS_ZOMBIE;
+	spin_unlock(&process_lock);
+	process_reap(process);
+}
+
+[[noreturn]] void process_exit_current(int status)
+{
+	ensure_initialized();
+	spin_lock(&process_lock);
+	struct process *process = current_process;
+	if (process == nullptr) {
+		spin_unlock(&process_lock);
+		__asm__ volatile("cli");
+		for (;;)
+			__asm__ volatile("hlt");
+	}
+	if (process->state == PROCESS_ZOMBIE || process->state == PROCESS_DEAD) {
+		spin_unlock(&process_lock);
+		__asm__ volatile("cli");
+		for (;;)
+			__asm__ volatile("hlt");
+	}
+	process->status = status;
+	process->state = PROCESS_ZOMBIE;
+	if (process->waiting_on != nullptr) {
+		list_rm(&process->wait_link);
+		process->waiting_on = nullptr;
+	}
+	current_process = nullptr;
+	spin_unlock(&process_lock);
+
+	const fatptr_t *kernel_page_directory = vmm_kernel_page_directory();
+	if (kernel_page_directory == nullptr ||
+		!vmm_page_directory_activate(kernel_page_directory) ||
+		!i386_tss_set_bsp_kernel_stack((uintptr_t)reaper_stack + sizeof(reaper_stack)))
+		panic("Unable to enter process reaper\n");
+	i386_reaper_enter((uintptr_t)reaper_stack + sizeof(reaper_stack),
+	                  process_reaper_cleanup, process);
 }
 
 struct process *process_find_child(const struct process *parent, process_pid_t pid)

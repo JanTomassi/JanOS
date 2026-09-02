@@ -53,6 +53,26 @@ struct mbi_info{
 	uintptr_t kernel_end_addr;
 };
 
+#define MEMBLOCK_PAGE_SIZE 4096u
+
+__init static bool next_multiboot_tag(const uint8_t *info_end,
+	                              const struct multiboot_tag *tag,
+	                              const struct multiboot_tag **next)
+{
+	uintptr_t address = (uintptr_t)tag;
+	uintptr_t end = (uintptr_t)info_end;
+	if (address > end || end - address < MULTIBOOT_TAG_HEADER_SIZE ||
+	    tag->size < MULTIBOOT_TAG_HEADER_SIZE || end - address < tag->size)
+		return false;
+
+	uint32_t aligned_size = (tag->size + (MULTIBOOT_TAG_ALIGN - 1)) &
+		~(MULTIBOOT_TAG_ALIGN - 1);
+	if (aligned_size < tag->size || end - address < aligned_size)
+		return false;
+	*next = (const struct multiboot_tag *)(address + aligned_size);
+	return true;
+}
+
 __initdata struct memblock block = {0};
 extern uint8_t HIGHER_HALF;
 const uintptr_t HIGHER_HALF_ADDR = (uintptr_t)&HIGHER_HALF;
@@ -365,29 +385,74 @@ __init static void parse_madt(void *phys_addr)
 
 __init struct mbi_info init_memblock_from_mbi(uintptr_t mbi_addr){
 	struct mbi_info res = {.kernel_start_addr = -1, .kernel_end_addr = 0};
+	uint32_t mbi_size = *(uint32_t *)mbi_addr;
+	if (mbi_size < MULTIBOOT_INFO_HEADER_SIZE ||
+	    mbi_addr > UINTPTR_MAX - mbi_size)
+		panic("Invalid Multiboot information size\n");
+	const uint8_t *info_end = (const uint8_t *)(mbi_addr + mbi_size);
 
 	// Filling the memblock with what ram is accessible
-	for (struct multiboot_tag *tag = (struct multiboot_tag *)(mbi_addr + 8);
-	     tag->type != MULTIBOOT_TAG_TYPE_END;
-	     tag = (struct multiboot_tag *)((multiboot_uint8_t *)tag + ((tag->size + 7) & ~7))) {
+	const struct multiboot_tag *tag =
+		(const struct multiboot_tag *)(mbi_addr + MULTIBOOT_INFO_HEADER_SIZE);
+	bool found_end = false;
+	while ((uintptr_t)tag < (uintptr_t)info_end) {
+		const struct multiboot_tag *next;
+		if (!next_multiboot_tag(info_end, tag, &next))
+			panic("Invalid Multiboot tag\n");
+		if (tag->type == MULTIBOOT_TAG_TYPE_END) {
+			if (tag->size != MULTIBOOT_TAG_HEADER_SIZE)
+				panic("Invalid Multiboot end tag\n");
+			found_end = true;
+			break;
+		}
+
+		if (tag->type == MULTIBOOT_TAG_TYPE_MODULE) {
+			const struct multiboot_tag_module *module =
+				(const struct multiboot_tag_module *)tag;
+			if (tag->size < sizeof(*module) || module->mod_start >= module->mod_end)
+				panic("Invalid Multiboot module\n");
+			uintptr_t start = (uintptr_t)module->mod_start &
+				~(MEMBLOCK_PAGE_SIZE - 1);
+			uintptr_t end = ((uintptr_t)module->mod_end + MEMBLOCK_PAGE_SIZE - 1) &
+				~(MEMBLOCK_PAGE_SIZE - 1);
+			if (end == 0 || end <= start)
+				panic("Invalid Multiboot module range\n");
+			memblock_reserve(start, end - start);
+		}
+
 		if (tag->type == MULTIBOOT_TAG_TYPE_MMAP) {
 			res.mmap_tag = (struct multiboot_tag_mmap *)tag;
-			multiboot_memory_map_t *mmap;
-			for (mmap = res.mmap_tag->entries; (multiboot_uint8_t *)mmap < (multiboot_uint8_t *)tag + tag->size;
-			     mmap = (multiboot_memory_map_t *)((unsigned long)mmap + res.mmap_tag->entry_size))
-				if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE){
+			if (tag->size < sizeof(*res.mmap_tag) ||
+			    res.mmap_tag->entry_size < sizeof(multiboot_memory_map_t))
+				panic("Invalid Multiboot memory map\n");
+			size_t mmap_offset = sizeof(*res.mmap_tag);
+			while (mmap_offset < tag->size) {
+				if (tag->size - mmap_offset < res.mmap_tag->entry_size)
+					panic("Truncated Multiboot memory map entry\n");
+				multiboot_memory_map_t *mmap =
+					(multiboot_memory_map_t *)((uint8_t *)tag + mmap_offset);
+				if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE)
 					memblock_add(mmap->addr, mmap->len);
-				}else if(mmap->type == MULTIBOOT_MEMORY_RESERVED){
+				else if (mmap->type == MULTIBOOT_MEMORY_RESERVED)
 					memblock_remove(mmap->addr, mmap->len);
-				}
+				mmap_offset += res.mmap_tag->entry_size;
+			}
 		}
+		tag = next;
 	}
+	if (!found_end)
+		panic("Missing Multiboot end tag\n");
 
-	for (struct multiboot_tag *tag = (struct multiboot_tag *)(mbi_addr + 8); tag->type != MULTIBOOT_TAG_TYPE_END;
-	     tag = (struct multiboot_tag *)((multiboot_uint8_t *)tag + ((tag->size + 7) & ~7))) {
+	tag = (const struct multiboot_tag *)(mbi_addr + MULTIBOOT_INFO_HEADER_SIZE);
+	while ((uintptr_t)tag < (uintptr_t)info_end && tag->type != MULTIBOOT_TAG_TYPE_END) {
+		const struct multiboot_tag *next;
+		if (!next_multiboot_tag(info_end, tag, &next))
+			panic("Invalid Multiboot tag\n");
 		switch (tag->type) {
 		case MULTIBOOT_TAG_TYPE_ACPI_OLD:
 		case MULTIBOOT_TAG_TYPE_ACPI_NEW: {
+			if (tag->size < sizeof(struct multiboot_tag_new_acpi))
+				break;
 			res.acpi_tag = tag;
 			struct rsdp_descriptor *rsdp = (struct rsdp_descriptor *)(((struct multiboot_tag_new_acpi *)res.acpi_tag)->rsdp);
 			memblock_reserve((size_t)rsdp, sizeof(struct rsdp_descriptor));
@@ -414,7 +479,14 @@ __init struct mbi_info init_memblock_from_mbi(uintptr_t mbi_addr){
 		}
 			break;
 		case MULTIBOOT_TAG_TYPE_ELF_SECTIONS: {
+			if (tag->size < sizeof(struct multiboot_tag_elf_sections))
+				break;
 			res.elf_sec_tag = (struct multiboot_tag_elf_sections *)tag;
+			if (res.elf_sec_tag->entsize != sizeof(Elf32_Shdr) ||
+			    res.elf_sec_tag->shndx >= res.elf_sec_tag->num ||
+			    res.elf_sec_tag->num > (tag->size - sizeof(*res.elf_sec_tag)) /
+			    res.elf_sec_tag->entsize)
+				break;
 			const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)res.elf_sec_tag->sections;
 
 			Elf32_Shdr string_sec = elf_sec[res.elf_sec_tag->shndx];
@@ -449,6 +521,7 @@ __init struct mbi_info init_memblock_from_mbi(uintptr_t mbi_addr){
 		}
 			break;
 		}
+		tag = next;
 
 	}
 

@@ -123,7 +123,7 @@ void __mprintf(char *m, ...)
 {
 	va_list ap;
 	va_start(ap, m);
-	spin_lock(&print_lock);
+	uint32_t flags = spin_lock_irqsave(&print_lock);
 	if (enabled) {
 		disps[current].puts("[");
 		disps[current].puts(m);
@@ -131,7 +131,7 @@ void __mprintf(char *m, ...)
 	}
 	char *fmt = va_arg(ap, char *);
 	__kprintf_va_list(fmt, ap);
-	spin_unlock(&print_lock);
+	spin_unlock_irqrestore(&print_lock, flags);
 	va_end(ap);
 }
 
@@ -141,9 +141,9 @@ int kprintf(const char *str, ...)
 		return 0;
 	va_list ap;
 	va_start(ap, str);
-	spin_lock(&print_lock);
+	uint32_t flags = spin_lock_irqsave(&print_lock);
 	__kprintf_va_list((char *)str, ap);
-	spin_unlock(&print_lock);
+	spin_unlock_irqrestore(&print_lock, flags);
 	va_end(ap);
 	return 1;
 }

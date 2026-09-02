@@ -11,6 +11,11 @@ struct elf_load_ops {
 	 * kernel-accessible pointer to it. It may reject addresses above user space. */
 	void *(*map)(uintptr_t address, size_t size, uint32_t flags, void *context);
 	void (*unmap)(uintptr_t address, size_t size, void *context);
+	/* These callbacks must access an inactive address space through safe
+	 * kernel mappings, rather than dereferencing its user virtual addresses. */
+	bool (*copy)(uintptr_t address, const void *source, size_t size, void *context);
+	bool (*zero)(uintptr_t address, size_t size, void *context);
+	bool (*protect)(uintptr_t address, size_t size, uint32_t flags, void *context);
 	void *context;
 };
 

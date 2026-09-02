@@ -199,104 +199,22 @@ struct mbi_info{
 	struct multiboot_tag_elf_sections *elf_sec_tag;
 	struct multiboot_tag *acpi_tag;
 };
-struct mbi_info get_mbi_info(uintptr_t mbi_addr){
-	struct mbi_info res = { 0 };
-
-	for (struct multiboot_tag *tag = (struct multiboot_tag *)(mbi_addr + 8); tag->type != MULTIBOOT_TAG_TYPE_END;
-	     tag = (struct multiboot_tag *)((multiboot_uint8_t *)tag + ((tag->size + 7) & ~7))) {
-		kprintf("Tag %d, Size %x\n", tag->type, tag->size);
-		switch (tag->type) {
-		case MULTIBOOT_TAG_TYPE_CMDLINE:
-			kprintf("Command line = %s\n", ((struct multiboot_tag_string *)tag)->string);
-			break;
-		case MULTIBOOT_TAG_TYPE_BOOT_LOADER_NAME:
-			kprintf("Boot loader name = %s\n", ((struct multiboot_tag_string *)tag)->string);
-			break;
-		case MULTIBOOT_TAG_TYPE_MODULE:
-			kprintf("Module at %x-%x. Command line %s\n", ((struct multiboot_tag_module *)tag)->mod_start,
-				((struct multiboot_tag_module *)tag)->mod_end, ((struct multiboot_tag_module *)tag)->cmdline);
-			break;
-		case MULTIBOOT_TAG_TYPE_BASIC_MEMINFO:
-			kprintf("mem_lower = %uKB, mem_upper = %uKB\n", ((struct multiboot_tag_basic_meminfo *)tag)->mem_lower,
-				((struct multiboot_tag_basic_meminfo *)tag)->mem_upper);
-			break;
-		case MULTIBOOT_TAG_TYPE_BOOTDEV:
-			kprintf("Boot device %x,%u,%u\n", ((struct multiboot_tag_bootdev *)tag)->biosdev, ((struct multiboot_tag_bootdev *)tag)->slice,
-				((struct multiboot_tag_bootdev *)tag)->part);
-			break;
-		case MULTIBOOT_TAG_TYPE_ACPI_OLD:
-		case MULTIBOOT_TAG_TYPE_ACPI_NEW:
-			res.acpi_tag = tag;
-			break;
-		case MULTIBOOT_TAG_TYPE_MMAP: {
-			res.mmap_tag = (struct multiboot_tag_mmap *)tag;
-			multiboot_memory_map_t *mmap;
-			kprintf("mmap\n");
-			for (mmap = res.mmap_tag->entries; (multiboot_uint8_t *)mmap < (multiboot_uint8_t *)tag + tag->size;
-			     mmap = (multiboot_memory_map_t *)((unsigned long)mmap + res.mmap_tag->entry_size))
-				kprintf(" base_addr = %x:%x,"
-					" length = %x:%x, type = %x\n",
-					(unsigned)(mmap->addr >> 32), (unsigned)(mmap->addr & 0xffffffff), (unsigned)(mmap->len >> 32),
-					(unsigned)(mmap->len & 0xffffffff), (unsigned)mmap->type);
-		} break;
-		case MULTIBOOT_TAG_TYPE_ELF_SECTIONS: {
-			res.elf_sec_tag = (struct multiboot_tag_elf_sections *)tag;
-			const Elf32_Shdr *elf_sec = (const Elf32_Shdr *)res.elf_sec_tag->sections;
-			const char *elf_sec_str = (char *)(elf_sec[res.elf_sec_tag->shndx].sh_addr);
-			for (size_t i = 0; i < res.elf_sec_tag->num; i++) {
-				kprintf("Section (%s): [Address: %x, Size: %x]\n", &elf_sec_str[elf_sec[i].sh_name], elf_sec[i].sh_addr, elf_sec[i].sh_size);
-				if ((elf_sec[i].sh_flags & 0x2) == 0 || elf_sec[i].sh_addr < (size_t)&HIGHER_HALF)
-					continue;
-
-				size_t section_end = round_up_to_page(elf_sec[i].sh_addr + elf_sec[i].sh_size);
-			}
-		} break;
-		case MULTIBOOT_TAG_TYPE_FRAMEBUFFER: {
-			unsigned i;
-			struct multiboot_tag_framebuffer *tagfb = (struct multiboot_tag_framebuffer *)tag;
-			void *fb = (void *)(unsigned long)tagfb->common.framebuffer_addr;
-
-			switch (tagfb->common.framebuffer_type) {
-			case MULTIBOOT_FRAMEBUFFER_TYPE_INDEXED: {
-				unsigned best_distance, distance;
-				struct multiboot_color *palette;
-
-				palette = tagfb->framebuffer_palette;
-
-				best_distance = 4 * 256 * 256;
-
-				for (i = 0; i < tagfb->framebuffer_palette_num_colors; i++) {
-					distance = (0xff - palette[i].blue) * (0xff - palette[i].blue) + palette[i].red * palette[i].red +
-						   palette[i].green * palette[i].green;
-					if (distance < best_distance) {
-						best_distance = distance;
-					}
-				}
-			}
-				break;
-
-			case MULTIBOOT_FRAMEBUFFER_TYPE_RGB:
-				break;
-
-			case MULTIBOOT_FRAMEBUFFER_TYPE_EGA_TEXT:
-				break;
-
-			default:
-				break;
-			}
-			break;
-		}break;
-		}
-	}
-	return res;
-}
-
-static struct mbi_info find_mbi_info(uintptr_t mbi_addr)
+static struct mbi_info find_mbi_info(uintptr_t mbi_addr, size_t mbi_size)
 {
 	struct mbi_info res = { 0 };
-	for (struct multiboot_tag *tag = (struct multiboot_tag *)(mbi_addr + 8);
-	     tag->type != MULTIBOOT_TAG_TYPE_END;
-	     tag = (struct multiboot_tag *)((uint8_t *)tag + ((tag->size + 7) & ~7))) {
+	const uint8_t *end = (const uint8_t *)(mbi_addr + mbi_size);
+	const struct multiboot_tag *tag =
+		(const struct multiboot_tag *)(mbi_addr + MULTIBOOT_INFO_HEADER_SIZE);
+	while ((uintptr_t)tag < (uintptr_t)end) {
+		if ((uintptr_t)end - (uintptr_t)tag < MULTIBOOT_TAG_HEADER_SIZE ||
+		    tag->size < MULTIBOOT_TAG_HEADER_SIZE ||
+		    (uintptr_t)end - (uintptr_t)tag < tag->size)
+			panic("Invalid Multiboot tag\n");
+		if (tag->type == MULTIBOOT_TAG_TYPE_END) {
+			if (tag->size != MULTIBOOT_TAG_HEADER_SIZE)
+				panic("Invalid Multiboot end tag\n");
+			break;
+		}
 		switch (tag->type) {
 		case MULTIBOOT_TAG_TYPE_MMAP:
 			res.mmap_tag = (struct multiboot_tag_mmap *)tag;
@@ -311,6 +229,11 @@ static struct mbi_info find_mbi_info(uintptr_t mbi_addr)
 		default:
 			break;
 		}
+		uint32_t aligned_size = (tag->size + MULTIBOOT_TAG_ALIGN - 1) &
+			~(MULTIBOOT_TAG_ALIGN - 1);
+		if (aligned_size < tag->size || (uintptr_t)end - (uintptr_t)tag < aligned_size)
+			panic("Invalid Multiboot tag alignment\n");
+		tag = (const struct multiboot_tag *)((const uint8_t *)tag + aligned_size);
 	}
 	return res;
 }
@@ -345,7 +268,7 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 
 	phy_mem_init();
 
-	struct mbi_info mbi_info = find_mbi_info(mbi_addr);
+	struct mbi_info mbi_info = find_mbi_info(mbi_addr, mbi_size);
 	const size_t mbi_copy_size = round_up_to_page(mbi_size);
 	fatptr_t mbi_copy_phys = phy_mem_alloc(mbi_copy_size, PHY_MEM_ALLOC_HIGH);
 	if (mbi_copy_phys.ptr == nullptr)
@@ -394,13 +317,12 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	vmm_init(mbi_info.elf_sec_tag, nullptr, 0);
 	init_kmalloc();
 	init_slab_allocator();
-	vmm_finish_init(mbi_info.elf_sec_tag, nullptr, 0);
 	struct vmm_entry *mbi_copy_virt = vmm_alloc(mbi_copy_size,
 		VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
 	if (mbi_copy_virt == nullptr)
 		panic("Failed to allocate virtual Multiboot copy\n");
 	map_pages(&mbi_copy_phys, mbi_copy_virt);
-	mbi_info = find_mbi_info((uintptr_t)mbi_copy_virt->ptr);
+	mbi_info = find_mbi_info((uintptr_t)mbi_copy_virt->ptr, mbi_size);
 
 	/* allocator_t gpa_alloc = get_gpa_allocator(); */
 	/* gpa_test(gpa_alloc); */
@@ -423,7 +345,6 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 
 	idt_init();
 	smp_init(mbi_info.acpi_tag);
-	vmm_release_init();
 
 	/* struct madt_ioapic_info ioapic_desc = { 0 }; */
 	/* struct madt_irq_override overrides[16] = { 0 }; */
@@ -470,13 +391,16 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	if (!syscall_register_console_handlers())
 		panic("Failed to register console syscalls\n");
 
-	/* User-process launch remains disabled until the active VMM mapping
-	 * contract is replaced with a process-owned page directory. */
+	struct process_exec_result calc;
+	if (!process_exec_multiboot_calc(mbi_copy_virt->ptr, mbi_size, &calc))
+		panic("Failed to launch calc\n");
+
+	/* IRQ0 still targets the legacy exception vector until a scheduler is added. */
+	pic_mask_irq(0);
 	__asm__ volatile("sti");
+	i386_context_enter_user(&calc.context);
 
 	/* storage_init(); */
-
-	/* __asm__ volatile("sti"); */
 
 	/* struct storage_device device; */
 	/* if (!storage_get_device(1, &device)) { */

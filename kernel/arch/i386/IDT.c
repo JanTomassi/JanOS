@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <kernel/display.h>
+#include <kernel/process/arch/i386/context.h>
 #include <kernel/syscall.h>
 
 #define GATE_TYPE_TASK (0x5)
@@ -35,7 +36,7 @@ void idt_set_descriptor(uint8_t vector, void *isr, uint8_t flags)
 	idt_entry_t *descriptor = &idt[vector];
 
 	descriptor->isr_low = (uint32_t)isr & 0xFFFF;
-	descriptor->kernel_cs = 0x08; // this value can be whatever offset your kernel code selector is in your GDT
+	descriptor->kernel_cs = I386_KERNEL_CODE_SELECTOR;
 	descriptor->attributes = flags;
 	descriptor->isr_high = (uint32_t)isr >> 16;
 	descriptor->reserved = 0;

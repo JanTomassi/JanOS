@@ -29,9 +29,4 @@ static inline calc_int32_t user_write(int fd, const void *buffer, calc_size_t le
 	return user_syscall3(USER_SYS_WRITE, (calc_uint32_t)fd, (calc_uint32_t)buffer, length);
 }
 
-static inline void user_exit(int status)
-{
-	(void)user_syscall3(USER_SYS_EXIT, (calc_uint32_t)status, 0, 0);
-	for (;;)
-		__asm__ volatile("hlt");
-}
+[[noreturn]] void user_exit(int status);

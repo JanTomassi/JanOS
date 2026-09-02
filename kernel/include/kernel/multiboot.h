@@ -41,6 +41,8 @@
 /*  Flags set in the ’flags’ member of the multiboot header. */
 
 #define MULTIBOOT_TAG_ALIGN 8
+#define MULTIBOOT_INFO_HEADER_SIZE 8
+#define MULTIBOOT_TAG_HEADER_SIZE 8
 #define MULTIBOOT_TAG_TYPE_END 0
 #define MULTIBOOT_TAG_TYPE_CMDLINE 1	      /*  */
 #define MULTIBOOT_TAG_TYPE_BOOT_LOADER_NAME 2 /*  */

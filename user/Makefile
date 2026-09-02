@@ -12,8 +12,8 @@ all: calc
 
 calc: $(PROGRAM)
 
-$(PROGRAM): calc/start.o calc/calc.o calc/repl.o calc/linker.ld
-	$(LD) $(USER_LDFLAGS) -T calc/linker.ld -o $@ calc/start.o calc/calc.o calc/repl.o $(LIBGCC)
+$(PROGRAM): calc/start.o calc/calc.o calc/repl.o calc/syscall.o calc/linker.ld
+	$(LD) $(USER_LDFLAGS) -T calc/linker.ld -o $@ calc/start.o calc/calc.o calc/repl.o calc/syscall.o $(LIBGCC)
 
 calc/%.o: calc/%.c calc/calc.h calc/syscall.h
 	$(CC) $(USER_CFLAGS) -std=c2x -c $< -o $@

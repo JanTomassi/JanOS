@@ -4,6 +4,29 @@
 
 typedef void (*irq_handler_t)(uint8_t irq_line, void *context);
 
+/* All software entry paths normalize to this frame before calling C. */
+struct i386_trap_frame {
+	uint32_t vector;
+	uint32_t gs;
+	uint32_t fs;
+	uint32_t es;
+	uint32_t ds;
+	uint32_t edi;
+	uint32_t esi;
+	uint32_t ebp;
+	uint32_t pusha_esp;
+	uint32_t ebx;
+	uint32_t edx;
+	uint32_t ecx;
+	uint32_t eax;
+	uint32_t error_code;
+	uint32_t eip;
+	uint32_t cs;
+	uint32_t eflags;
+	uint32_t useresp;
+	uint32_t ss;
+};
+
 bool irq_register_handler(uint8_t irq_line, irq_handler_t handler, void *context);
 bool irq_unregister_handler(uint8_t irq_line, irq_handler_t handler, void *context);
 /**
@@ -90,3 +113,5 @@ void irq_unmask(uint8_t irq);
 void irq_ack(uint8_t irq);
 void irq_prepare(uint8_t irq);
 void irq_set_shared(uint8_t irq, bool shared);
+
+void exception_dispatch(struct i386_trap_frame *frame);
