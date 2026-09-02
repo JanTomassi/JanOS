@@ -8,6 +8,8 @@
 #include <kernel/spinlock.h>
 #include <kernel/vir_mem.h>
 #include <list.h>
+#include <arch/i386/smp.h>
+#include <kernel/scheduler.h>
 
 struct process {
 	process_pid_t pid;
@@ -20,11 +22,16 @@ struct process {
 	uintptr_t user_entry;
 	void *user_stack_pointer;
 	struct i386_context initial_context;
+	struct i386_context saved_context;
 	struct list_head all;
 	struct list_head children;
 	struct list_head sibling;
 	struct list_head wait_link;
 	struct wait_queue *waiting_on;
+	struct list_head run_link;
+	bool queued;
+	uint8_t owner_cpu;
+	uint8_t cpu_affinity;
 };
 
 static LIST_HEAD(processes);
@@ -32,7 +39,6 @@ static spinlock_t process_lock = { 0 };
 static process_pid_t next_pid = 1;
 static bool initialized;
 static allocator_t allocator;
-static struct process *current_process;
 
 /* This stack is never owned by a process and survives every process exit. */
 static uint8_t reaper_stack[PROCESS_DEFAULT_KERNEL_STACK_SIZE]
@@ -77,7 +83,8 @@ void process_system_init(void)
 struct process *process_current(void)
 {
 	ensure_initialized();
-	return current_process;
+	struct cpu_info *cpu = smp_current_cpu();
+	return cpu == nullptr ? nullptr : cpu->current_process;
 }
 
 struct process *process_create(struct process *parent)
@@ -86,11 +93,17 @@ struct process *process_create(struct process *parent)
 	struct process *process = allocator.alloc(sizeof(*process)).ptr;
 	if (process == nullptr)
 		return nullptr;
-	*process = (struct process){ .state = PROCESS_NEW, .parent = parent };
+	*process = (struct process){
+		.state = PROCESS_NEW,
+		.parent = parent,
+		.owner_cpu = PROCESS_CPU_UNASSIGNED,
+		.cpu_affinity = PROCESS_CPU_UNASSIGNED,
+	};
 	RESET_LIST_ITEM(&process->all);
 	RESET_LIST_ITEM(&process->children);
 	RESET_LIST_ITEM(&process->sibling);
 	RESET_LIST_ITEM(&process->wait_link);
+	RESET_LIST_ITEM(&process->run_link);
 	process->space = address_space_create();
 	process->kernel_stack = process_kernel_stack_create(PROCESS_DEFAULT_KERNEL_STACK_SIZE);
 	process->user_stack = process_user_stack_create(process->space,
@@ -126,7 +139,8 @@ bool process_start(struct process *process, uintptr_t entry, int argc,
 		return false;
 	ensure_initialized();
 	spin_lock(&process_lock);
-	if (current_process != nullptr || process->state != PROCESS_NEW) {
+	struct cpu_info *cpu = smp_current_cpu();
+	if (cpu == nullptr || process->state != PROCESS_NEW) {
 		spin_unlock(&process_lock);
 		return false;
 	}
@@ -141,31 +155,33 @@ bool process_start(struct process *process, uintptr_t entry, int argc,
 		!i386_context_init_user(&context, entry, (uintptr_t)user_stack_pointer,
 			(uintptr_t)page_directory->ptr, I386_EFLAGS_USER_DEFAULT))
 		return false;
-	uint32_t old_cr3;
-	__asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3) : : "memory");
-	if (!address_space_activate(process->space))
-		return false;
-
 	spin_lock(&process_lock);
-	if (current_process != nullptr || process->state != PROCESS_NEW) {
+	if (process->state != PROCESS_NEW) {
 		spin_unlock(&process_lock);
-		__asm__ volatile("mov %0, %%cr3" : : "r"(old_cr3) : "memory");
 		return false;
 	}
 	process->user_entry = entry;
 	process->user_stack_pointer = user_stack_pointer;
 	process->initial_context = context;
-	process->state = PROCESS_RUNNING;
-	current_process = process;
+	process->saved_context = context;
+	if (cpu->current_process == nullptr) {
+		process->state = PROCESS_RUNNING;
+		process->owner_cpu = smp_current_cpu_index();
+		process->cpu_affinity = process->owner_cpu;
+		cpu->current_process = process;
+	} else {
+		process->state = PROCESS_READY;
+	}
 	spin_unlock(&process_lock);
-	if (!i386_tss_init_bsp()) {
+	if (cpu->current_process == process && !i386_tss_init_bsp()) {
 		spin_lock(&process_lock);
-		current_process = nullptr;
+		cpu->current_process = nullptr;
 		process->state = PROCESS_NEW;
 		spin_unlock(&process_lock);
-		__asm__ volatile("mov %0, %%cr3" : : "r"(old_cr3) : "memory");
 		return false;
 	}
+	if (process->state == PROCESS_READY)
+		scheduler_process_ready(process);
 	return true;
 }
 
@@ -174,7 +190,7 @@ bool process_initial_context(const struct process *process,
 {
 	if (process == nullptr || context == nullptr || process->state != PROCESS_RUNNING)
 		return false;
-	*context = process->initial_context;
+	*context = process->saved_context;
 	return true;
 }
 
@@ -184,7 +200,7 @@ void process_destroy(struct process *process)
 		return;
 	ensure_initialized();
 	spin_lock(&process_lock);
-	if (process == current_process || process->state == PROCESS_DEAD ||
+	if (process == process_current() || process->state == PROCESS_DEAD ||
 	    process->children.next != &process->children ||
 	    process->waiting_on != nullptr) {
 		spin_unlock(&process_lock);
@@ -245,6 +261,16 @@ void *process_user_stack_pointer(const struct process *process)
 enum process_state process_get_state(const struct process *process)
 {
 	return process == nullptr ? PROCESS_DEAD : process->state;
+}
+
+uint8_t process_owner_cpu(const struct process *process)
+{
+	return process == nullptr ? PROCESS_CPU_UNASSIGNED : process->owner_cpu;
+}
+
+uint8_t process_cpu_affinity(const struct process *process)
+{
+	return process == nullptr ? PROCESS_CPU_UNASSIGNED : process->cpu_affinity;
 }
 
 bool process_set_state(struct process *process, enum process_state state)
@@ -316,7 +342,8 @@ void process_exit(struct process *process, int status)
 {
 	ensure_initialized();
 	spin_lock(&process_lock);
-	struct process *process = current_process;
+	struct cpu_info *cpu = smp_current_cpu();
+	struct process *process = cpu == nullptr ? nullptr : cpu->current_process;
 	if (process == nullptr) {
 		spin_unlock(&process_lock);
 		__asm__ volatile("cli");
@@ -335,7 +362,7 @@ void process_exit(struct process *process, int status)
 		list_rm(&process->wait_link);
 		process->waiting_on = nullptr;
 	}
-	current_process = nullptr;
+	cpu->current_process = nullptr;
 	spin_unlock(&process_lock);
 
 	const fatptr_t *kernel_page_directory = vmm_kernel_page_directory();
@@ -389,10 +416,61 @@ bool process_wake(struct process *process, struct wait_queue *queue)
 		return false;
 	list_rm(&process->wait_link);
 	process->waiting_on = nullptr;
-	return process_set_state(process, PROCESS_READY);
+	bool result = process_set_state(process, PROCESS_READY);
+	if (result)
+		scheduler_process_ready(process);
+	return result;
 }
 
 struct process *process_from_wait_link(struct list_head *link)
 {
 	return link == nullptr ? nullptr : list_entry(link, struct process, wait_link);
+}
+
+void process_save_context(struct process *process, const struct i386_context *context)
+{
+	if (process != nullptr && context != nullptr)
+		process->saved_context = *context;
+}
+
+bool process_load_context(const struct process *process, struct i386_context *context)
+{
+	if (process == nullptr || context == nullptr)
+		return false;
+	*context = process->saved_context;
+	return true;
+}
+
+struct list_head *process_run_link(struct process *process)
+{
+	return process == nullptr ? nullptr : &process->run_link;
+}
+
+struct process *process_from_run_link(struct list_head *link)
+{
+	return link == nullptr ? nullptr : list_entry(link, struct process, run_link);
+}
+
+bool process_is_queued(const struct process *process)
+{
+	return process != nullptr && process->queued;
+}
+
+void process_set_queued(struct process *process, bool queued)
+{
+	if (process != nullptr)
+		process->queued = queued;
+}
+
+bool process_set_affinity(struct process *process, uint8_t cpu)
+{
+	if (process == nullptr || cpu >= 16)
+		return false;
+	process->cpu_affinity = cpu;
+	return true;
+}
+
+struct wait_queue *process_waiting_queue(const struct process *process)
+{
+	return process == nullptr ? nullptr : process->waiting_on;
 }

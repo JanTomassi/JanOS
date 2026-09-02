@@ -3,6 +3,7 @@
 #include <kernel/interrupt.h>
 #include <kernel/spinlock.h>
 #include <stddef.h>
+#include <kernel/scheduler.h>
 
 #define IRQ_LINE_COUNT 16
 #define IRQ_HANDLER_SLOTS 32
@@ -117,7 +118,7 @@ bool irq_unregister_handler(uint8_t irq_line, irq_handler_t handler, void *conte
 	return false;
 }
 
-static void irq_dispatch(uint8_t vector)
+static void irq_dispatch(uint8_t vector, struct i386_trap_frame *frame)
 {
 	if (vector < IRQ_1)
 		return;
@@ -141,12 +142,14 @@ static void irq_dispatch(uint8_t vector)
 
 	for (size_t i = 0; i < count; i++)
 		handlers[i](irq_line, contexts[i]);
+	if (irq_line == 0)
+		scheduler_tick(frame);
 }
 
 #define DEFINE_IRQ_DISPATCH(vector)       \
-	void isr_##vector##_handler(void) \
+	void isr_##vector##_handler(struct i386_trap_frame *frame) \
 	{                                 \
-		irq_dispatch(vector);      \
+		irq_dispatch(vector, frame);      \
 	}
 
 DEFINE_IRQ_DISPATCH(32)

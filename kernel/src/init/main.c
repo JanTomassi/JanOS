@@ -33,6 +33,8 @@
 #include <arch/i386/context.h>
 #include <arch/i386/tty/tty_frame.h>
 #include <kernel/syscall.h>
+#include <kernel/scheduler.h>
+#include <arch/i386/port.h>
 #include <string.h>
 
 extern void idt_init(void);
@@ -45,6 +47,17 @@ static void pit_tick_handler(uint8_t irq_line, void *context)
 	(void)irq_line;
 	(void)context;
 	++GLOBAL_TICK;
+}
+
+static void pit_init(void)
+{
+	/* 100 Hz keeps the scheduler independent of the storage interrupt rate. */
+	outb(0x43, 0x36);
+	const uint16_t divisor = 1193182u / 100u;
+	outb(0x40, (uint8_t)divisor);
+	outb(0x40, (uint8_t)(divisor >> 8));
+	if (!irq_register_handler(0, pit_tick_handler, nullptr))
+		panic("Failed to register PIT handler\n");
 }
 
 static void imcr_route_to_apic(void)
@@ -376,6 +389,7 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	}
 
 	process_system_init();
+	scheduler_init();
 	syscall_init();
 	if (!syscall_register_console_handlers())
 		panic("Failed to register console syscalls\n");
@@ -406,8 +420,7 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	kprintf("startup: pid=%u entry=%x state=%u\n", process_pid(calc.process),
 		process_user_entry(calc.process), process_get_state(calc.process));
 
-	/* IRQ0 still targets the legacy exception vector until a scheduler is added. */
-	pic_mask_irq(0);
+	pit_init();
 	__asm__ volatile("sti");
 	i386_context_enter_user(&calc.context);
 

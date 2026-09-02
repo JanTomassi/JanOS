@@ -9,6 +9,7 @@
 #include <kernel/spinlock.h>
 #include <kernel/vir_mem.h>
 #include <kernel/interrupt.h>
+#include <kernel/scheduler.h>
 #include <arch/i386/control_register.h>
 #include <string.h>
 #include <stddef.h>
@@ -118,6 +119,10 @@ static void register_cpu(uint8_t apic_id)
 		cpus[cpu_count].apic_id = apic_id;
 		cpus[cpu_count].online = false;
 		cpus[cpu_count].stack_top = nullptr;
+		cpus[cpu_count].current_process = nullptr;
+		cpus[cpu_count].idle_process = nullptr;
+		cpus[cpu_count].scheduler_stack = nullptr;
+		cpus[cpu_count].interrupt_nesting = 0;
 		cpu_count++;
 		mprint("Registered CPU with APIC ID %u\n", apic_id);
 	}
@@ -459,6 +464,23 @@ struct cpu_info *smp_get_cpus(size_t *count)
 	return cpus;
 }
 
+struct cpu_info *smp_current_cpu(void)
+{
+	uint8_t apic_id = lapic_get_id();
+	for (size_t i = 0; i < cpu_count; ++i)
+		if (cpus[i].apic_id == apic_id)
+			return &cpus[i];
+	return cpu_count > 0 ? &cpus[0] : nullptr;
+}
+
+uint8_t smp_current_cpu_index(void)
+{
+	struct cpu_info *cpu = smp_current_cpu();
+	if (cpu == nullptr)
+		return 0xFFu;
+	return (uint8_t)(cpu - cpus);
+}
+
 void *smp_get_stack_top(uint8_t apic_id)
 {
 	for (size_t i = 0; i < cpu_count; i++) {
@@ -502,8 +524,7 @@ void ap_main(void)
 		spin_unlock(&report_lock);
 	}
 
-	for (;;)
-		__asm__ volatile("hlt");
+	scheduler_idle();
 }
 
 bool smp_get_ioapic_info(struct madt_ioapic_info *info)
