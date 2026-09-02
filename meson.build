@@ -42,9 +42,9 @@ subdir('apps')
 mkdisk = find_program('tools/mkdisk.sh', native: true)
 calc_disk = custom_target(
   'calc-disk',
-  input: calc_app,
+  input: [calc_app, files('data/janos.psf2')],
   output: 'calc-disk.img',
-  command: [sh, mkdisk, '@OUTPUT@', '@INPUT@'],
+  command: [sh, mkdisk, '@OUTPUT@', '@INPUT0@', '@INPUT1@'],
   build_by_default: false,
 )
 

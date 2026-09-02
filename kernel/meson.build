@@ -16,6 +16,7 @@ kernel_sources = files(
   'src/exec/multiboot_exec.c',
   'src/syscall/syscall.c',
   'src/fs/fat16.c',
+  'src/fs/psf2.c',
   'src/drivers/storage/storage.c',
   'src/drivers/storage/ahci.c',
   'src/drivers/storage/ata_pio.c',

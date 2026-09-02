@@ -14,6 +14,7 @@
 #include <kernel/storage.h>
 #include <kernel/block_device.h>
 #include <kernel/fat16.h>
+#include <kernel/psf2.h>
 #include <kernel/memblock.h>
 
 #include <arch/i386/ata_pio.h>
@@ -30,6 +31,7 @@
 #include "../exec/multiboot_exec.h"
 #include <kernel/process/process.h>
 #include <arch/i386/context.h>
+#include <arch/i386/tty/tty_frame.h>
 #include <kernel/syscall.h>
 #include <string.h>
 
@@ -251,6 +253,7 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	uint8_t serial_dpy_reg = DISPLAY_MAX_DISPS;
 	if (serial_dpy.putc != nullptr || serial_dpy.puts != nullptr) {
 		serial_dpy_reg = display_register(serial_dpy);
+		display_set_debug(serial_dpy_reg);
 		display_setcurrent(serial_dpy_reg);
 	}
 
@@ -347,6 +350,30 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 
 	ps2_init();
 	block_device_init();
+
+	/* The framebuffer keeps the built-in font unless a valid FAT16 font is found. */
+	void *font_data = nullptr;
+	size_t font_size = 0;
+	bool loaded_font = false;
+	for (size_t i = 0; i < block_device_count() && !loaded_font; ++i) {
+		struct block_device font_device;
+		if (!block_device_get(i, &font_device) || font_device.backend != BLOCK_DEVICE_BACKEND_AHCI)
+			continue;
+		loaded_font = psf2_load_from_device(&font_device, "JANOS.PSF", &font_data, &font_size);
+	}
+	if (loaded_font && !tty_frame_set_font(font_data, font_size)) {
+		get_gpa_allocator().free((fatptr_t){ .ptr = font_data, .len = font_size });
+		loaded_font = false;
+	}
+	if (loaded_font) {
+		const uint8_t *font = font_data;
+		kprintf("Framebuffer font: FAT16 PSF2 size=%u width=%u height=%u glyphs=%u glyph_size=%u\n",
+			(unsigned)font_size, (unsigned)*(const uint32_t *)(font + 28),
+			(unsigned)*(const uint32_t *)(font + 24), (unsigned)*(const uint32_t *)(font + 16),
+			(unsigned)*(const uint32_t *)(font + 20));
+	} else {
+		kprintf("Framebuffer font: built-in fallback\n");
+	}
 
 	process_system_init();
 	syscall_init();
