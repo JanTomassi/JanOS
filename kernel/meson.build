@@ -16,6 +16,7 @@ kernel_sources = files(
   'src/exec/elf_loader.c',
   'src/exec/multiboot_exec.c',
   'src/syscall/syscall.c',
+  'src/ipc/ipc.c',
   'src/fs/fat16.c',
   'src/fs/psf2.c',
   'src/drivers/storage/storage.c',

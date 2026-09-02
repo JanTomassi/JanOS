@@ -17,6 +17,23 @@ launch_contract_test = executable(
   override_options: ['c_std=c11'],
 )
 
+scheduler_alternation_test = executable(
+  'scheduler-alternation-test',
+  'scheduler_alternation_test.c',
+  native: true,
+  c_args: ['-Wall', '-Wextra', '-Werror'],
+  override_options: ['c_std=c11'],
+)
+
+ipc_state_test = executable(
+  'ipc-state-test',
+  'ipc_state_test.c',
+  native: true,
+  include_directories: sdk_inc,
+  c_args: ['-Wall', '-Wextra', '-Werror'],
+  override_options: ['c_std=c11'],
+)
+
 test('calc', calc_test, suite: 'host')
 test(
   'launch-contract',
@@ -25,3 +42,5 @@ test(
   depends: calc_app,
   suite: 'host',
 )
+test('scheduler-alternation', scheduler_alternation_test, suite: 'host')
+test('ipc-state', ipc_state_test, suite: 'host')
