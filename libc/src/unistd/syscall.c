@@ -23,6 +23,11 @@ ssize_t write(int fd, const void *buffer, size_t length)
 		(uint32_t)(uintptr_t)buffer, (uint32_t)length);
 }
 
+int sched_yield(void)
+{
+	return syscall3(JANOS_SYS_YIELD, 0, 0, 0);
+}
+
 _Noreturn void _Exit(int status)
 {
 	(void)syscall3(JANOS_SYS_EXIT, (uint32_t)status, 0, 0);

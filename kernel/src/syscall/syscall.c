@@ -4,6 +4,7 @@
 #include <kernel/process/address_space.h>
 #include <kernel/tty.h>
 #include <kernel/vir_mem.h>
+#include <kernel/scheduler.h>
 
 struct syscall_slot {
 	syscall_handler_t handler;
@@ -95,6 +96,13 @@ static int32_t syscall_exit_handler(syscall_frame *frame, void *context)
 	return 0;
 }
 
+static int32_t syscall_yield_handler(syscall_frame *frame, void *context)
+{
+	(void)context;
+	scheduler_yield(frame);
+	return 0;
+}
+
 void syscall_init(void)
 {
 	for (size_t i = 0; i < JANOS_SYS_MAX; ++i)
@@ -127,6 +135,7 @@ bool syscall_register_console_handlers(void)
 	    slots[JANOS_SYS_EXIT].handler != nullptr)
 		return false;
 	return syscall_register(JANOS_SYS_READ, syscall_read_handler, nullptr) &&
+		syscall_register(JANOS_SYS_YIELD, syscall_yield_handler, nullptr) &&
 		syscall_register(JANOS_SYS_WRITE, syscall_write_handler, nullptr) &&
 		syscall_register(JANOS_SYS_EXIT, syscall_exit_handler, nullptr);
 }

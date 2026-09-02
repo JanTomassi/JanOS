@@ -106,7 +106,7 @@ bool irq_unregister_handler(uint8_t irq_line, irq_handler_t handler, void *conte
 #define IRQ_15 46
 #define IRQ_16 47
 
-#define DEFINE_IRQ(num) void isr_##num##_handler(void)
+#define DEFINE_IRQ(num) void isr_##num##_handler(struct i386_trap_frame *frame)
 
 void irq_mask(uint8_t irq);
 void irq_unmask(uint8_t irq);

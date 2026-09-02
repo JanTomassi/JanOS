@@ -12,6 +12,7 @@ kernel_sources = files(
   'src/process/address_space.c',
   'src/process/stack.c',
   'src/process/wait_queue.c',
+  'src/process/scheduler.c',
   'src/exec/elf_loader.c',
   'src/exec/multiboot_exec.c',
   'src/syscall/syscall.c',
