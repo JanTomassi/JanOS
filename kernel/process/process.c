@@ -5,6 +5,7 @@
 #include <kernel/process/stack.h>
 #include <kernel/process/wait_queue.h>
 #include <kernel/spinlock.h>
+#include <kernel/vir_mem.h>
 #include <list.h>
 
 struct process {
@@ -15,6 +16,8 @@ struct process {
 	struct address_space *space;
 	struct process_stack *kernel_stack;
 	struct process_stack *user_stack;
+	uintptr_t user_entry;
+	void *user_stack_pointer;
 	struct list_head all;
 	struct list_head children;
 	struct list_head sibling;
@@ -27,6 +30,7 @@ static spinlock_t process_lock = { 0 };
 static process_pid_t next_pid = 1;
 static bool initialized;
 static allocator_t allocator;
+static struct process *current_process;
 
 static void ensure_initialized(void)
 {
@@ -62,6 +66,12 @@ static process_pid_t allocate_pid_locked(void)
 void process_system_init(void)
 {
 	ensure_initialized();
+}
+
+struct process *process_current(void)
+{
+	ensure_initialized();
+	return current_process;
 }
 
 struct process *process_create(struct process *parent)
@@ -103,13 +113,38 @@ fail:
 	return nullptr;
 }
 
+bool process_start(struct process *process, uintptr_t entry, int argc,
+                   const char *const argv[])
+{
+	if (process == nullptr || entry < PAGE_SIZE || entry >= 0xc0000000u)
+		return false;
+	ensure_initialized();
+	void *user_stack_pointer = nullptr;
+	if (!process_user_stack_layout(process->user_stack, argc, argv,
+	                               &user_stack_pointer))
+		return false;
+
+	spin_lock(&process_lock);
+	if (current_process != nullptr || process->state != PROCESS_NEW) {
+		spin_unlock(&process_lock);
+		return false;
+	}
+	process->user_entry = entry;
+	process->user_stack_pointer = user_stack_pointer;
+	process->state = PROCESS_RUNNING;
+	current_process = process;
+	spin_unlock(&process_lock);
+	return true;
+}
+
 void process_destroy(struct process *process)
 {
 	if (process == nullptr)
 		return;
 	ensure_initialized();
 	spin_lock(&process_lock);
-	if (process->state == PROCESS_DEAD || process->children.next != &process->children ||
+	if (process == current_process || process->state == PROCESS_DEAD ||
+	    process->children.next != &process->children ||
 	    process->waiting_on != nullptr) {
 		spin_unlock(&process_lock);
 		return;
@@ -140,6 +175,12 @@ struct address_space *process_address_space(const struct process *process)
 	return process == nullptr ? nullptr : process->space;
 }
 
+const fatptr_t *process_page_directory(const struct process *process)
+{
+	return process == nullptr ? nullptr :
+		address_space_page_directory(process->space);
+}
+
 struct process_stack *process_kernel_stack(const struct process *process)
 {
 	return process == nullptr ? nullptr : process->kernel_stack;
@@ -148,6 +189,16 @@ struct process_stack *process_kernel_stack(const struct process *process)
 struct process_stack *process_user_stack(const struct process *process)
 {
 	return process == nullptr ? nullptr : process->user_stack;
+}
+
+uintptr_t process_user_entry(const struct process *process)
+{
+	return process == nullptr ? 0 : process->user_entry;
+}
+
+void *process_user_stack_pointer(const struct process *process)
+{
+	return process == nullptr ? nullptr : process->user_stack_pointer;
 }
 
 enum process_state process_get_state(const struct process *process)
@@ -187,12 +238,23 @@ void process_exit(struct process *process, int status)
 	}
 	process->status = status;
 	process_set_state(process, PROCESS_ZOMBIE);
+	spin_lock(&process_lock);
+	if (current_process == process)
+		current_process = nullptr;
+	spin_unlock(&process_lock);
 	process_stack_destroy(process->user_stack);
 	process_stack_destroy(process->kernel_stack);
 	address_space_destroy(process->space);
 	process->user_stack = nullptr;
 	process->kernel_stack = nullptr;
 	process->space = nullptr;
+	process->user_entry = 0;
+	process->user_stack_pointer = nullptr;
+}
+
+void process_exit_current(int status)
+{
+	process_exit(process_current(), status);
 }
 
 struct process *process_find_child(const struct process *parent, process_pid_t pid)

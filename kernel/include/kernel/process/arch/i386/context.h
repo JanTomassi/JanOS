@@ -52,6 +52,12 @@ struct i386_cpu_state {
 /* Append a TSS descriptor to the current GDT and load TR (selector 0x28). */
 bool i386_tss_install(struct i386_cpu_state *state, uintptr_t kernel_stack_top);
 
+/* Initialize the BSP TSS from the currently running process's kernel stack. */
+bool i386_tss_init_bsp(void);
+
+/* Update ESP0 after the BSP switches to another process. */
+bool i386_tss_set_bsp_kernel_stack(uintptr_t kernel_stack_top);
+
 /*
  * A complete software context for entering a 32-bit user address space.
  * The first eight fields are in pusha order; the remaining fields form the

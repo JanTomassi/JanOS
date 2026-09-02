@@ -81,7 +81,8 @@ void map_page(const void *phy_addr, const void *virt_addr, uint16_t virt_flags)
 
 	if ((pd[pd_idx] & VMM_ENTRY_PRESENT_BIT) == 0) {
 		pd[pd_idx] = (size_t)phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH).ptr;
-		pd[pd_idx] |= VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT;
+		pd[pd_idx] |= VMM_ENTRY_READ_WRITE_BIT | VMM_ENTRY_PRESENT_BIT |
+			((virt_flags & VMM_ENTRY_USER_SUPER_BIT) != 0 ? VMM_ENTRY_USER_SUPER_BIT : 0);
 		memset(pt, 0, PAGE_SIZE);
 	} else if (pd[pd_idx] & VMM_ENTRY_PAGE_SIZE_BIT) {
 		const size_t huge = pd[pd_idx];
@@ -94,6 +95,8 @@ void map_page(const void *phy_addr, const void *virt_addr, uint16_t virt_flags)
 			pt[i] = ((huge & VMM_ENTRY_LOCATION_4M_LOW_BITS) + i * PAGE_SIZE) |
 				(huge & 0xFFF & ~VMM_ENTRY_PAGE_SIZE_BIT);
 	}
+	if (virt_flags & VMM_ENTRY_USER_SUPER_BIT)
+		pd[pd_idx] |= VMM_ENTRY_USER_SUPER_BIT;
 
 	pt[pt_idx] = ((size_t)phy_addr) | (virt_flags & 0xFFF);
 

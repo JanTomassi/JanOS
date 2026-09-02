@@ -8,6 +8,7 @@ struct process_stack;
 
 #define PROCESS_DEFAULT_KERNEL_STACK_SIZE (16 * 1024)
 #define PROCESS_DEFAULT_USER_STACK_SIZE (16 * 1024)
+#define PROCESS_DEFAULT_USER_STACK_TOP 0xbfffe000u
 
 struct process_stack *process_kernel_stack_create(size_t size);
 struct process_stack *process_user_stack_create(struct address_space *space,

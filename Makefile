@@ -32,15 +32,17 @@ clean:
 	rm -f TAGS JanOS.iso
 	rm -rf sysroot isodir
 
-JanOS.iso: build
+JanOS.iso: build user
 	mkdir -p isodir isodir/boot isodir/boot/grub
 	cp sysroot/boot/JanOS.kernel isodir/boot/JanOS.kernel
+	cp user/calc/calc isodir/boot/calc
 
 	echo "set timeout=1"                     > isodir/boot/grub/grub.cfg
 	echo "insmod all_video"                  >> isodir/boot/grub/grub.cfg
 	echo "insmod acpi"                  	 >> isodir/boot/grub/grub.cfg
 	echo 'menuentry "JanOS" {'               >> isodir/boot/grub/grub.cfg
 	echo "    multiboot2 /boot/JanOS.kernel" >> isodir/boot/grub/grub.cfg
+	echo "    module2 /boot/calc calc"        >> isodir/boot/grub/grub.cfg
 	echo "}"                                 >> isodir/boot/grub/grub.cfg
 
 	grub-mkrescue -o JanOS.iso isodir

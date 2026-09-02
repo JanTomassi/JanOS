@@ -15,11 +15,17 @@ operator   := + | - | * | /
 Integers are signed 32-bit values. Overflow, division by zero, malformed
 tokens, trailing input, and excessive nesting are errors.
 
-Run the host parser tests with =make user-test=. Run =make user= to build a
-static i386 ELF artifact using the declared syscall numbers and register ABI.
+Run the host parser and launch-contract tests with =make user-test=. The tests
+cover the Polish evaluator, syscall numbers 1/3/4, and the built ELF's i386
+=ET_EXEC= shape, static launch property, global =_start= symbol, and entry
+address. Run =make user= to build =calc/calc=, a static i386 ELF artifact using
+the declared syscall numbers and register ABI. =make JanOS.iso= packages this
+ELF as the Multiboot2 module named =calc=; its module command line is available
+to the kernel as =calc=.
 
 The kernel currently has no syscall entry/registered handlers, user address
 space launch path, or filesystem-to-process integration. Consequently the ELF
-is not included in the ISO and cannot run under the current kernel. A shell is
-not provided because the repository has no supported user-binary execution
-path or file-descriptor/filesystem API to implement it against.
+is packaged for Multiboot inspection only and cannot run under the current
+kernel. A shell is not provided because the repository has no supported
+user-binary execution path or file-descriptor/filesystem API to implement it
+against.
