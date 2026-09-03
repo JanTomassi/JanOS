@@ -1,6 +1,5 @@
 #include <kernel/multiboot.h>
 
-#include <kernel/tty.h>
 #include <kernel/serial.h>
 #include <kernel/display.h>
 #include <kernel/elf32.h>
@@ -14,7 +13,7 @@
 #include <kernel/storage.h>
 #include <kernel/block_device.h>
 #include <kernel/fat16.h>
-#include <kernel/psf2.h>
+#include <kernel/framebuffer_boot.h>
 #include <kernel/memblock.h>
 
 #include <arch/i386/ata_pio.h>
@@ -24,22 +23,22 @@
 #include <arch/i386/lapic.h>
 #include <arch/i386/pic.h>
 #include <arch/i386/ps2.h>
-#include <arch/i386/mmio.h>
 #include <arch/i386/irq.h>
 #include <arch/i386/smp.h>
 #include <arch/i386/port.h>
 #include "../exec/multiboot_exec.h"
 #include <kernel/process/process.h>
 #include <arch/i386/context.h>
-#include <arch/i386/tty/tty_frame.h>
 #include <kernel/syscall.h>
 #include <kernel/scheduler.h>
 #include <arch/i386/port.h>
 #include <string.h>
+#ifdef JANOS_KERNEL_TESTS
+#include <kernel/test.h>
+#endif
 
 extern void idt_init(void);
 extern void init_kmalloc(void);
-extern void *HIGHER_HALF;
 
 size_t GLOBAL_TICK = 0;
 static void pit_tick_handler(uint8_t irq_line, void *context)
@@ -58,6 +57,25 @@ static void pit_init(void)
 	outb(0x40, (uint8_t)(divisor >> 8));
 	if (!irq_register_handler(0, pit_tick_handler, nullptr))
 		panic("Failed to register PIT handler\n");
+}
+
+static bool find_application_disk(struct block_device *out_device)
+{
+	if (out_device == nullptr)
+		return false;
+	if (block_device_find("sata1", out_device) &&
+	    fat16_find_entry_by_name(out_device, "calc", &(fat_dir_entry_t){ 0 }))
+		return true;
+	for (size_t i = 0; i < block_device_count(); ++i) {
+		struct block_device candidate;
+		fat_dir_entry_t entry;
+		if (!block_device_get(i, &candidate) ||
+		    !fat16_find_entry_by_name(&candidate, "calc", &entry))
+			continue;
+		*out_device = candidate;
+		return true;
+	}
+	return false;
 }
 
 static void imcr_route_to_apic(void)
@@ -211,11 +229,10 @@ void gpa_test(allocator_t gpa_alloc){
 	}
 }
 
-struct mbi_info{
+struct mbi_info {
 	struct multiboot_tag_mmap *mmap_tag;
 	struct multiboot_tag_elf_sections *elf_sec_tag;
-	struct multiboot_tag *acpi_tag;
-	struct multiboot_tag_framebuffer *framebuffer_tag;
+	const struct multiboot_tag *acpi_tag;
 };
 static struct mbi_info find_mbi_info(uintptr_t mbi_addr, size_t mbi_size)
 {
@@ -243,10 +260,6 @@ static struct mbi_info find_mbi_info(uintptr_t mbi_addr, size_t mbi_size)
 		case MULTIBOOT_TAG_TYPE_ACPI_OLD:
 		case MULTIBOOT_TAG_TYPE_ACPI_NEW:
 			res.acpi_tag = tag;
-			break;
-		case MULTIBOOT_TAG_TYPE_FRAMEBUFFER:
-			if (tag->size >= sizeof(struct multiboot_tag_framebuffer_common))
-				res.framebuffer_tag = (struct multiboot_tag_framebuffer *)tag;
 			break;
 		default:
 			break;
@@ -298,16 +311,6 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 		panic("Failed to allocate Multiboot copy\n");
 	memcpy(mbi_copy_phys.ptr, (const void *)mbi_addr, mbi_size);
 	memset((uint8_t *)mbi_copy_phys.ptr + mbi_size, 0, mbi_copy_size - mbi_size);
-	const uintptr_t mbi_offset = mbi_addr & (PAGE_SIZE - 1);
-	const uintptr_t mbi_high_addr = (uintptr_t)&HIGHER_HALF + (mbi_addr - mbi_offset);
-	const size_t mbi_alloc_size = round_up_to_page(mbi_offset + mbi_size);
-	const struct vmm_entry preserved_entries[] = {
-		{
-			.ptr = (void *)mbi_high_addr,
-			.size = mbi_alloc_size,
-			.flags = VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT,
-		},
-	};
 
 	section_divisor("Virtual memory init");
 	vmm_init(mbi_info.elf_sec_tag, nullptr, 0);
@@ -319,25 +322,9 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 		panic("Failed to allocate virtual Multiboot copy\n");
 	map_pages(&mbi_copy_phys, mbi_copy_virt);
 	mbi_info = find_mbi_info((uintptr_t)mbi_copy_virt->ptr, mbi_size);
-	if (mbi_info.framebuffer_tag != nullptr &&
-	    mbi_info.framebuffer_tag->common.framebuffer_type == MULTIBOOT_FRAMEBUFFER_TYPE_RGB) {
-		const struct multiboot_tag_framebuffer_common *fb = &mbi_info.framebuffer_tag->common;
-		if (fb->framebuffer_addr <= 0xffffffffu) {
-			struct mmio_region region = mmio_map((uintptr_t)fb->framebuffer_addr,
-				(size_t)fb->framebuffer_pitch * fb->framebuffer_height);
-			if (region.virt != nullptr) {
-				display_t framebuffer = tty_initialize((size_t)region.virt, fb->framebuffer_pitch,
-					fb->framebuffer_width, fb->framebuffer_height, fb->framebuffer_bpp, false);
-				if (framebuffer.putc != nullptr) {
-					uint8_t framebuffer_reg = display_register(framebuffer);
-					display_setcurrent(framebuffer_reg);
-				}
-			}
-		}
-	}
 
 	idt_init();
-	smp_init(mbi_info.acpi_tag);
+	smp_init((struct multiboot_tag *)mbi_info.acpi_tag);
 
 	struct madt_ioapic_info ioapic_info;
 	if (smp_get_ioapic_info(&ioapic_info)) {
@@ -364,65 +351,48 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	ps2_init();
 	block_device_init();
 
-	/* The framebuffer keeps the built-in font unless a valid FAT16 font is found. */
-	void *font_data = nullptr;
-	size_t font_size = 0;
-	bool loaded_font = false;
-	for (size_t i = 0; i < block_device_count() && !loaded_font; ++i) {
-		struct block_device font_device;
-		if (!block_device_get(i, &font_device) || font_device.backend != BLOCK_DEVICE_BACKEND_AHCI)
-			continue;
-		loaded_font = psf2_load_from_device(&font_device, "JANOS.PSF", &font_data, &font_size);
-	}
-	if (loaded_font && !tty_frame_set_font(font_data, font_size)) {
-		get_gpa_allocator().free((fatptr_t){ .ptr = font_data, .len = font_size });
-		loaded_font = false;
-	}
-	if (loaded_font) {
-		const uint8_t *font = font_data;
-		kprintf("Framebuffer font: FAT16 PSF2 size=%u width=%u height=%u glyphs=%u glyph_size=%u\n",
-			(unsigned)font_size, (unsigned)*(const uint32_t *)(font + 28),
-			(unsigned)*(const uint32_t *)(font + 24), (unsigned)*(const uint32_t *)(font + 16),
-			(unsigned)*(const uint32_t *)(font + 20));
-	} else {
-		kprintf("Framebuffer font: built-in fallback\n");
-	}
-
 	process_system_init();
 	scheduler_init();
 	syscall_init();
 	if (!syscall_register_console_handlers())
 		panic("Failed to register console syscalls\n");
+	pit_init();
+#ifdef JANOS_KERNEL_TESTS
+	kernel_test_boot(mbi_copy_virt->ptr, mbi_size);
+#endif
+
+	__asm__ volatile("sti");
+
+	struct block_device application_disk;
+	if (!find_application_disk(&application_disk))
+		panic("No FAT16 application disk found\n");
+
+	struct i386_context initial_context;
+	bool framebuffer_started = framebuffer_boot_services(mbi_copy_virt->ptr, mbi_size,
+		&application_disk,
+		&initial_context);
+	if (!framebuffer_started)
+		kprintf("Framebuffer services unavailable\n");
+	else
+		framebuffer_console_enable();
 
 	struct process_exec_result calc;
-	struct block_device application_disk;
-	bool loaded_from_disk = false;
-	if (block_device_find("sata1", &application_disk)) {
-		loaded_from_disk = process_exec_block_device_calc(&application_disk, &calc);
-	}
-	for (size_t i = 0; i < block_device_count(); ++i) {
-		if (!block_device_get(i, &application_disk))
-			continue;
-		if (application_disk.backend != BLOCK_DEVICE_BACKEND_AHCI)
-			continue;
-		if (loaded_from_disk)
-			continue;
-		if (process_exec_block_device_calc(&application_disk, &calc)) {
-			loaded_from_disk = true;
-			break;
-		}
-	}
-	if (!loaded_from_disk && !process_exec_multiboot_calc(mbi_copy_virt->ptr, mbi_size, &calc)) {
-		panic("Failed to launch calc from Multiboot\n");
-	}
-	if (loaded_from_disk)
-		kprintf("Loaded calc from FAT16 block device %s\n", application_disk.name);
+	const char *calc_argv[] = { "calc", nullptr };
+	if (!process_exec_block_device_app(&application_disk, "calc", 1,
+		calc_argv, &calc))
+		panic("Failed to load calc from FAT16 application disk\n");
+	size_t cpu_count;
+	struct cpu_info *cpus = smp_get_cpus(&cpu_count);
+	if (cpu_count > 1 && cpus[1].online)
+		(void)scheduler_set_affinity(calc.process, 1);
+	kprintf("Loaded calc from FAT16 block device %s\n", application_disk.name);
 	kprintf("startup: pid=%u entry=%x state=%u\n", process_pid(calc.process),
 		process_user_entry(calc.process), process_get_state(calc.process));
 
-	pit_init();
-	__asm__ volatile("sti");
-	i386_context_enter_user(&calc.context);
+	if (framebuffer_started && !framebuffer_boot_clear())
+		panic("Failed to queue framebuffer clear request\n");
+
+	i386_context_enter_user(framebuffer_started ? &initial_context : &calc.context);
 
 	kprintf("Finish init\n");
 }

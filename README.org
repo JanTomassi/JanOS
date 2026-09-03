@@ -1,12 +1,18 @@
 * JanOS
 
-JanOS is a freestanding 32-bit x86 operating system. GRUB loads the kernel
-through Multiboot2 and supplies the initial user application as a boot module.
+JanOS is a freestanding 32-bit x86 operating system. GRUB loads only the kernel
+through Multiboot2. The kernel discovers the FAT16 application disk and loads
+the userspace services and applications from it.
 
 The kernel currently includes higher-half paging, physical and virtual memory
 management, slab allocation, SMP discovery and startup, interrupts, PS/2 input,
 serial/VGA output, PCI, AHCI/ATA storage, FAT16, processes, static ELF loading,
 and a small syscall ABI. The bundled calculator runs in ring 3.
+
+Kernel diagnostics continue to use serial independently of the userspace
+framebuffer service. The application disk contains `calc`, `fbserver`,
+`fbclient`, `pingpong`, and the PSF2 font, so disk boot displays userspace
+output while serial remains available for debugging and automated tests.
 
 ** Build
 
@@ -24,7 +30,7 @@ meson setup build --cross-file config/i686-elf.ini \
   --prefix=/usr --libdir=lib32
 meson compile -C build
 meson test -C build --print-errorlogs
-meson compile -C build iso
+meson compile -C build calc-disk iso
 #+end_src
 
 Run or debug the generated image:
@@ -45,5 +51,29 @@ DESTDIR="$PWD/dist/sysroot" meson install -C build
 #+end_src
 
 See ~docs/structure.md~ for subsystem ownership, ~docs/applications.md~ for
-building client applications with the JanOS C library, and ~docs/testing.md~
-for the staged host and QEMU test strategy.
+building client applications with the JanOS C library, ~docs/boot-loading.md~
+for the disk and retained Multiboot loading paths, and ~docs/testing.md~ for
+the staged host and QEMU test strategy.
+
+** Kernel Navigation
+
+Build an Emacs TAGS file containing only kernel C, header, and assembly files:
+
+#+begin_src sh
+./tools/mktags.sh
+meson compile -C build tags
+#+end_src
+
+Use the search helper for declaration-oriented lookups. Searches are restricted
+to ~kernel/include~ and ~kernel/src~, so the vendored toolchain and userspace
+code do not add noise:
+
+#+begin_src sh
+./tools/ksearch.sh function scheduler_init
+./tools/ksearch.sh variable slots
+./tools/ksearch.sh struct process
+./tools/ksearch.sh typedef syscall_handler_t
+./tools/ksearch.sh enum phy_mem_alloc_mode
+./tools/ksearch.sh macro SCHEDULER_QUANTUM
+./tools/ksearch.sh symbol process_current
+#+end_src

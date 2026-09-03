@@ -13,10 +13,15 @@ struct queue {
 
 static bool valid(const struct janos_ipc_message *message)
 {
-	return message != 0 && message->header.length <= JANOS_IPC_PAYLOAD_SIZE &&
+	uint32_t kinds;
+	if (message == 0)
+		return false;
+	kinds = message->header.flags & (JANOS_IPC_REQUEST | JANOS_IPC_REPLY |
+		JANOS_IPC_NOTIFICATION);
+	return message->header.length <= JANOS_IPC_PAYLOAD_SIZE &&
 		message->header.flags != 0 &&
 		(message->header.flags & ~(JANOS_IPC_REQUEST | JANOS_IPC_REPLY |
-		JANOS_IPC_NOTIFICATION)) == 0;
+		JANOS_IPC_NOTIFICATION)) == 0 && (kinds & (kinds - 1)) == 0;
 }
 
 static bool valid_handle(uint32_t handle)
@@ -65,6 +70,8 @@ int main(void)
 	assert(!valid(&message));
 	message.header.length = 3;
 	message.header.flags = 0x80;
+	assert(!valid(&message));
+	message.header.flags = JANOS_IPC_REQUEST | JANOS_IPC_REPLY;
 	assert(!valid(&message));
 	struct janos_ipc_message received;
 	message.header.flags = JANOS_IPC_REQUEST;

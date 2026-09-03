@@ -325,8 +325,12 @@ static void ensure_initialized(void)
 
 slab_cache_t *slab_create(const char *name, size_t obj_size, size_t align, slab_ctor_t ctor, slab_dtor_t dtor)
 {
+	uint32_t lock_flags = allocator_lock_acquire();
 	if (obj_size == 0)
+	{
+		allocator_lock_release(lock_flags);
 		return nullptr;
+	}
 
 	size_t real_align = align == 0 ? sizeof(void *) : align;
 	if (real_align < sizeof(void *))
@@ -337,12 +341,16 @@ slab_cache_t *slab_create(const char *name, size_t obj_size, size_t align, slab_
 		aligned_size = sizeof(struct slab_object);
 
 	size_t objs_per_slab = PAGE_SIZE / aligned_size;
-	if (objs_per_slab == 0)
+	if (objs_per_slab == 0) {
+		allocator_lock_release(lock_flags);
 		return nullptr;
+	}
 
 	slab_cache_t *cache = mem_gpa_alloc(sizeof(*cache)).ptr;
-	if (cache == nullptr)
+	if (cache == nullptr) {
+		allocator_lock_release(lock_flags);
 		return nullptr;
+	}
 
 	cache->name = name;
 	cache->obj_size = aligned_size;
@@ -360,6 +368,7 @@ slab_cache_t *slab_create(const char *name, size_t obj_size, size_t align, slab_
 	RESET_LIST_ITEM(&cache->list);
 
 	list_add(&cache->list, slab_caches.prev);
+	allocator_lock_release(lock_flags);
 	return cache;
 }
 
@@ -371,6 +380,7 @@ fatptr_t slab_alloc_obj(slab_cache_t *cache)
 
 	if (!slab_initialized)
 		ensure_initialized();
+	uint32_t lock_flags = allocator_lock_acquire();
 
 	struct slab *target = nullptr;
 
@@ -380,7 +390,10 @@ fatptr_t slab_alloc_obj(slab_cache_t *cache)
 
 		target = slab_new_slab(cache);
 		if (target == nullptr)
+		{
+			allocator_lock_release(lock_flags);
 			return (fatptr_t){ .ptr = nullptr, .len = 0 };
+		}
 
 		cache->reserve_free = save_reserve_free;
 	}
@@ -393,12 +406,16 @@ fatptr_t slab_alloc_obj(slab_cache_t *cache)
 	if (target == nullptr)
 		target = slab_new_slab(cache);
 
-	if (target == nullptr)
+	if (target == nullptr) {
+		allocator_lock_release(lock_flags);
 		return (fatptr_t){ .ptr = nullptr, .len = 0 };
+	}
 
 	void *obj = slab_take_obj(target);
-	if (obj == nullptr)
+	if (obj == nullptr) {
+		allocator_lock_release(lock_flags);
 		return (fatptr_t){ .ptr = nullptr, .len = 0 };
+	}
 
 	cache->free_objs -= 1;
 	if (cache->ctor != nullptr)
@@ -411,28 +428,34 @@ fatptr_t slab_alloc_obj(slab_cache_t *cache)
 	else if (list_is_first(&target->list, &cache->empty))
 		list_mv(&target->list, &cache->partial);
 
-	return (fatptr_t){ .ptr = obj, .len = cache->obj_size };
+	fatptr_t result = (fatptr_t){ .ptr = obj, .len = cache->obj_size };
+	allocator_lock_release(lock_flags);
+	return result;
 }
 
 bool slab_free_obj(slab_cache_t *cache, fatptr_t obj)
 {
 	if (cache == nullptr || obj.ptr == nullptr)
 		return false;
+	uint32_t lock_flags = allocator_lock_acquire();
 
 	struct slab *slab = slab_find_for_ptr(cache, obj.ptr);
 	if (slab == nullptr) {
 		mprint("slab: cross-cache free rejected (%x)\n", obj.ptr);
+		allocator_lock_release(lock_flags);
 		return false;
 	}
 
 	const size_t offset = (size_t)((uint8_t *)obj.ptr - (uint8_t *)slab->mem);
 	if (offset % cache->obj_size != 0) {
 		mprint("slab: unaligned free (%x)\n", obj.ptr);
+		allocator_lock_release(lock_flags);
 		return false;
 	}
 
 	if (slab_in_free_list(slab, obj.ptr)) {
 		mprint("slab: double free detected (%x)\n", obj.ptr);
+		allocator_lock_release(lock_flags);
 		return false;
 	}
 
@@ -448,12 +471,14 @@ bool slab_free_obj(slab_cache_t *cache, fatptr_t obj)
 			cache->free_objs -= slab->capacity;
 			slab_release_slab(slab);
 		}
+		allocator_lock_release(lock_flags);
 		return true;
 	}
 
 	if (list_is_first(&slab->list, &cache->full))
 		list_mv(&slab->list, &cache->partial);
 
+	allocator_lock_release(lock_flags);
 	return true;
 }
 
@@ -461,6 +486,7 @@ void slab_destroy(slab_cache_t *cache)
 {
 	if (cache == nullptr)
 		return;
+	uint32_t lock_flags = allocator_lock_acquire();
 
 	list_rm(&cache->list);
 
@@ -478,6 +504,7 @@ void slab_destroy(slab_cache_t *cache)
 	}
 
 	mem_gpa_free((fatptr_t){ .ptr = cache, .len = sizeof(*cache) });
+	allocator_lock_release(lock_flags);
 }
 
 void init_slab_allocator(void)
@@ -536,8 +563,12 @@ static void slab_init_bootstrap_cache(slab_cache_t *cache, struct slab *slab, co
 void slab_init_tag_caches(mem_malloc_tag_t *malloc_tags, size_t malloc_tag_count, mem_phy_mem_tag_t *phy_tags, size_t phy_tag_count,
 			  mem_phy_mem_link_t *phy_links, size_t phy_link_count)
 {
+	uint32_t lock_flags = allocator_lock_acquire();
 	if (tag_caches_ready)
+	{
+		allocator_lock_release(lock_flags);
 		return;
+	}
 
 	if (malloc_tags == nullptr || phy_tags == nullptr || phy_links == nullptr)
 		BUG("tag slab buffers must not be null");
@@ -558,12 +589,14 @@ void slab_init_tag_caches(mem_malloc_tag_t *malloc_tags, size_t malloc_tag_count
 	slab_set_cache_reserve(&phy_mem_tag_cache, 10);
 	slab_set_cache_reserve(&phy_mem_link_cache, 10);
 	tag_caches_ready = true;
+	allocator_lock_release(lock_flags);
 }
 
 void slab_set_cache_reserve(slab_cache_t *cache, size_t reserve_free)
 {
 	if (cache == nullptr)
 		return;
+	uint32_t lock_flags = allocator_lock_acquire();
 
 	cache->reserve_free = reserve_free;
 	while (cache->free_objs < cache->reserve_free) {
@@ -573,6 +606,7 @@ void slab_set_cache_reserve(slab_cache_t *cache, size_t reserve_free)
 	}
 	if (cache->free_objs < cache->reserve_free)
 		BUG("slab cache reserve unmet");
+	allocator_lock_release(lock_flags);
 }
 
 slab_cache_t *slab_get_malloc_tag_cache(void)
@@ -592,34 +626,47 @@ slab_cache_t *slab_get_phy_mem_link_cache(void)
 
 static fatptr_t slab_general_alloc(size_t req)
 {
+	uint32_t lock_flags = allocator_lock_acquire();
 	if (!slab_initialized)
 		ensure_initialized();
 
-	if (req == 0)
+	if (req == 0) {
+		allocator_lock_release(lock_flags);
 		return (fatptr_t){ .ptr = nullptr, .len = 0 };
+	}
 
-	if (req > PAGE_SIZE)
-		return mem_gpa_alloc(req);
+	if (req > PAGE_SIZE) {
+		fatptr_t result = mem_gpa_alloc(req);
+		allocator_lock_release(lock_flags);
+		return result;
+	}
 
 	slab_cache_t *cache = slab_find_or_create_cache(align_up(req, sizeof(void *)));
-	return slab_alloc_obj(cache);
+	fatptr_t result = slab_alloc_obj(cache);
+	allocator_lock_release(lock_flags);
+	return result;
 }
 
 static void slab_general_free(fatptr_t fatptr)
 {
+	uint32_t lock_flags = allocator_lock_acquire();
 	if (!slab_initialized)
 		ensure_initialized();
 
-	if (fatptr.ptr == nullptr || fatptr.len == 0)
+	if (fatptr.ptr == nullptr || fatptr.len == 0) {
+		allocator_lock_release(lock_flags);
 		return;
+	}
 
 	if (fatptr.len > PAGE_SIZE) {
 		mem_gpa_free(fatptr);
+		allocator_lock_release(lock_flags);
 		return;
 	}
 
 	slab_cache_t *cache = slab_find_or_create_cache(align_up(fatptr.len, sizeof(void *)));
 	slab_free_obj(cache, fatptr);
+	allocator_lock_release(lock_flags);
 }
 
 allocator_t get_slab_allocator(void)

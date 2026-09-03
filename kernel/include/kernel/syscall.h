@@ -13,6 +13,7 @@ enum syscall_error {
 	SYSCALL_EFAULT = 14,
 	SYSCALL_ESRCH = 3,
 	SYSCALL_ENOSYS = 38,
+	SYSCALL_EIPC_BLOCKED = 0x7fff,
 };
 
 #define SYSCALL_VECTOR 0x80

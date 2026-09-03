@@ -3,25 +3,27 @@
 * Goal
 
 Add a block-device subsystem that exposes SATA disks through a generic kernel
-interface, reads a FAT16 filesystem, loads the ~calc~ ELF from the filesystem,
-and starts it as the first user process.
+interface, reads a FAT16 filesystem, loads the userspace services and
+applications from the filesystem, and starts them as processes.
 
-The existing Multiboot module path is useful as a fallback during migration, but
-the normal SATA image should eventually contain the application at the root as
-the file ~CALC~. The FAT16 volume is unpartitioned and starts at LBA 0.
+The normal SATA image contains the root files ~CALC~, ~FBSERVER~, ~FBCLIENT~,
+~PINGPONG~, and ~JANOS.PSF~. The FAT16 volume is unpartitioned and starts at
+LBA 0. Multiboot application modules are retained only for future reference and
+dedicated legacy experiments; they are not part of the production boot path.
 
 * Current State
 
 - AHCI probing, port initialization, DMA setup, and sector transfers already
   exist under ~kernel/src/drivers/storage/~.
-- ~kernel/src/drivers/storage/storage.c~ currently exposes a backend-tagged
-  structure rather than a generic block device.
-- FAT16 support exists under ~kernel/src/fs/fat16.c~ and currently reads from
-  ~struct storage_device~.
+- ~kernel/src/drivers/storage/storage.c~ exposes the current backend-tagged
+  ~struct block_device~ registry.
+- FAT16 support exists under ~kernel/src/fs/fat16.c~ and reads through the block
+  device API.
 - ~elf32_load_fat16()~ already connects FAT16 file reads to the ELF loader.
-- Storage initialization is currently commented out and appears after the
-  non-returning transition to userspace in ~kernel/src/init/main.c~.
-- The current calculator is loaded from a GRUB Multiboot module, not a disk.
+- Storage initialization and FAT16 application lookup occur before the first
+  userspace transition in ~kernel/src/init/main.c~.
+- The production calculator, framebuffer services, and font are loaded from the
+  generated FAT16 disk.
 - Existing raw disk files are not a reproducible source of the application
   image and must not be required for a clean checkout.
 
@@ -32,23 +34,22 @@ QEMU SATA disk
   -> PCI AHCI controller
   -> AHCI port
   -> block_device
-  -> FAT16 root directory entry CALC
-  -> ELF image
+  -> FAT16 root directory entries
+  -> ELF images and PSF2 font
   -> address-space mappings
-  -> process and user stack
-  -> ring-3 calc process
+  -> userspace services and applications
 #+end_example
 
 The boot order must be:
 
-1. Multiboot and early memory initialization.
+1. Multiboot metadata and early memory initialization.
 2. Physical, virtual, GPA, and slab allocators.
 3. IDT, IRQ, APIC, and SMP initialization.
 4. Block-device/SATA initialization.
-5. FAT16 lookup of ~calc~.
-6. Process and syscall initialization.
+5. Process and syscall initialization.
+6. FAT16 lookup of the application files.
 7. ELF loading from FAT16.
-8. Process start and entry into userspace.
+8. Service/process start and entry into userspace.
 
 * Phase 1: Generic Block Device API
 
@@ -132,16 +133,18 @@ Add a build-time FAT16 image generator under ~tools/~. It should:
 - use fixed image size and geometry;
 - use a fixed volume ID and label;
 - use deterministic timestamps and file ordering;
-- copy the Meson-built ~calc~ ELF to the root as ~CALC~;
+- copy the Meson-built application ELFs to the root as ~CALC~, ~FBSERVER~,
+  ~FBCLIENT~, and ~PINGPONG~;
+- copy the PSF2 font to the root as ~JANOS.PSF~;
 - write the output under the Meson build directory;
 - verify that the resulting image is a valid FAT16 volume.
 
 The generated dependency graph should be:
 
 #+begin_example
-calc ELF + image generator -> build/test-disk.img
-kernel + grub.cfg         -> build/JanOS.iso
-ISO + test-disk.img       -> QEMU SATA run
+application ELFs + font + image generator -> build/calc-disk.img
+kernel + grub.cfg                         -> build/JanOS.iso
+ISO + calc-disk.img                       -> QEMU SATA run
 #+end_example
 
 Do not depend on untracked root-level raw images for the normal build.
@@ -151,7 +154,7 @@ Do not depend on untracked root-level raw images for the normal build.
 Add a general disk-backed process execution helper, for example:
 
 #+begin_src c
-bool process_exec_block_device_file(const struct block_device *device,
+bool process_exec_block_device_app(const struct block_device *device,
                                     const char *name,
                                     int argc, const char *const argv[],
                                     struct process_exec_result *result);
@@ -159,11 +162,11 @@ bool process_exec_block_device_file(const struct block_device *device,
 
 It should:
 
-1. Open ~CALC~ through FAT16.
+1. Open the requested root-directory ELF through FAT16.
 2. Read the complete ELF image.
 3. Pass it to ~elf32_load()~.
 4. Create the process and address space.
-5. Build ~argv = { "calc", NULL }~.
+5. Build the caller-provided ~argv~.
 6. Start the process.
 7. Return the initial i386 context to the caller.
 
@@ -179,7 +182,7 @@ AHCI port rather than assuming list index 0.
 The production boot path becomes:
 
 #+begin_src c
-storage_init();
+    block_device_init();
 struct block_device *device = storage_find_named("sata1");
 if (device == nullptr)
     panic("application disk unavailable");
@@ -188,13 +191,14 @@ process_system_init();
 syscall_init();
 syscall_register_console_handlers();
 
-process_exec_block_device_file(device, "calc", 1,
+process_exec_block_device_app(device, "calc", 1,
                                (const char *[]) { "calc", nullptr }, &calc);
 i386_context_enter_user(&calc.context);
 #+end_src
 
-Remove ~module2 /boot/calc calc~ from the disk-backed test ISO once this path
-works. Keep a separate Multiboot fallback target while debugging migration.
+The production GRUB entry contains only ~multiboot2 /boot/JanOS.kernel~. Keep
+the separate Multiboot loader documented in ~docs/boot-loading.md~ for future
+reference, but do not use it as a runtime fallback.
 
 * Phase 7: QEMU Configuration
 

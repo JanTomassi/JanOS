@@ -4,16 +4,23 @@
 #include <kernel/vir_mem.h>
 #include <list.h>
 #include <string.h>
+#include <kernel/spinlock.h>
+
+#define USER_ADDRESS_START 0x00100000u
+#define USER_ADDRESS_LIMIT 0xc0000000u
 
 struct address_mapping {
 	struct address_space *space;
 	struct vmm_entry *virtual_range;
 	struct list_head physical_pages;
 	struct list_head list;
+	bool borrowed;
+	uintptr_t borrowed_physical;
 };
 
 struct address_page {
 	fatptr_t physical;
+	bool owned;
 	struct list_head list;
 };
 
@@ -35,6 +42,43 @@ static struct address_mapping *find_mapping(struct address_space *space,
 	return nullptr;
 }
 
+static bool mapping_overlaps(const struct address_space *space, uintptr_t start,
+	                            uintptr_t end);
+
+static bool find_free_address(const struct address_space *space, size_t size,
+	                           uintptr_t *address)
+{
+	if (space == nullptr || address == nullptr || size == 0)
+		return false;
+	uintptr_t candidate = round_up_to_page(space->next_user_address);
+	for (;;) {
+		if (candidate < USER_ADDRESS_START || candidate >= USER_ADDRESS_LIMIT ||
+			size > USER_ADDRESS_LIMIT - candidate)
+			return false;
+		uintptr_t end = candidate + size;
+		uintptr_t next = candidate;
+		bool overlap = false;
+		list_for_each(&space->mappings) {
+			const struct address_mapping *mapping =
+				list_entry(it, const struct address_mapping, list);
+			uintptr_t mapping_start = (uintptr_t)mapping->virtual_range->ptr;
+			uintptr_t mapping_end = mapping_start + mapping->virtual_range->size;
+			if (candidate < mapping_end && mapping_start < end) {
+				overlap = true;
+				if (mapping_end > next)
+					next = mapping_end;
+			}
+		}
+		if (!overlap) {
+			*address = candidate;
+			return true;
+		}
+		candidate = round_up_to_page(next);
+		if (candidate == 0)
+			return false;
+	}
+}
+
 static bool copy_bytes(struct address_space *space, uintptr_t address,
 					 const void *source, size_t size, bool zero)
 {
@@ -49,21 +93,30 @@ static bool copy_bytes(struct address_space *space, uintptr_t address,
 		size_t chunk = PAGE_SIZE - in_page;
 		if (chunk > size)
 			chunk = size;
-		struct address_page *page = nullptr;
-		size_t index = 0;
-		list_for_each(&mapping->physical_pages) {
-			if (index++ == page_index) {
-				page = list_entry(it, struct address_page, list);
-				break;
+		fatptr_t physical;
+		if (mapping->borrowed) {
+			physical = (fatptr_t){
+				.ptr = (void *)(mapping->borrowed_physical + page_index * PAGE_SIZE),
+				.len = PAGE_SIZE,
+			};
+		} else {
+			struct address_page *page = nullptr;
+			size_t index = 0;
+			list_for_each(&mapping->physical_pages) {
+				if (index++ == page_index) {
+					page = list_entry(it, struct address_page, list);
+					break;
+				}
 			}
+			if (page == nullptr)
+				return false;
+			physical = page->physical;
 		}
-		if (page == nullptr)
-			return false;
 		struct vmm_entry *temporary = vmm_alloc(PAGE_SIZE,
 			VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
 		if (temporary == nullptr)
 			return false;
-		map_pages(&page->physical, temporary);
+		map_pages(&physical, temporary);
 		if (zero)
 			memset((uint8_t *)temporary->ptr + in_page, 0, chunk);
 		else
@@ -78,11 +131,10 @@ static bool copy_bytes(struct address_space *space, uintptr_t address,
 	return true;
 }
 
-#define USER_ADDRESS_START 0x00100000u
-#define USER_ADDRESS_LIMIT 0xc0000000u
-
 static allocator_t object_allocator;
 static bool allocator_ready;
+/* Temporary mappings use shared kernel page tables and must be serialized. */
+static spinlock_t address_space_lock = { 0 };
 
 static void ensure_allocator(void)
 {
@@ -136,8 +188,8 @@ bool address_space_map(struct address_space *space, size_t size, uint16_t flags,
 	    (size & (PAGE_SIZE - 1)) != 0)
 		return false;
 
-	uintptr_t candidate = round_up_to_page(space->next_user_address);
-	if (candidate < USER_ADDRESS_START || size > USER_ADDRESS_LIMIT - candidate)
+	uintptr_t candidate;
+	if (!find_free_address(space, size, &candidate))
 		return false;
 	if (!address_space_map_at(space, candidate, size, flags, address))
 		return false;
@@ -159,15 +211,17 @@ static bool mapping_overlaps(const struct address_space *space, uintptr_t start,
 	return false;
 }
 
-bool address_space_map_at(struct address_space *space, uintptr_t address,
-                          size_t size, uint16_t flags, void **mapped)
+static bool address_space_map_at_kind(struct address_space *space, uintptr_t address,
+	                                    uintptr_t physical_address, size_t size,
+	                                    uint16_t flags, bool borrowed, void **mapped)
 {
 	if (space == nullptr || mapped == nullptr || size == 0 ||
-	    (address & (PAGE_SIZE - 1)) != 0 || (size & (PAGE_SIZE - 1)) != 0 ||
-	    (flags & VMM_ENTRY_USER_SUPER_BIT) == 0 ||
-	    address < PAGE_SIZE || address >= USER_ADDRESS_LIMIT ||
-	    size > USER_ADDRESS_LIMIT - address ||
-	    mapping_overlaps(space, address, address + size))
+		(address & (PAGE_SIZE - 1)) != 0 || (size & (PAGE_SIZE - 1)) != 0 ||
+		(flags & VMM_ENTRY_USER_SUPER_BIT) == 0 || address < PAGE_SIZE ||
+		address >= USER_ADDRESS_LIMIT || size > USER_ADDRESS_LIMIT - address ||
+		(borrowed && ((physical_address & (PAGE_SIZE - 1)) != 0 ||
+			physical_address < PAGE_SIZE || size > UINTPTR_MAX - physical_address)) ||
+		mapping_overlaps(space, address, address + size))
 		return false;
 
 	struct address_mapping *mapping = object_alloc(sizeof(*mapping));
@@ -184,16 +238,35 @@ bool address_space_map_at(struct address_space *space, uintptr_t address,
 		.flags = flags | VMM_ENTRY_PRESENT_BIT,
 	};
 	mapping->space = space;
+	mapping->borrowed = borrowed;
+	mapping->borrowed_physical = physical_address;
 	RESET_LIST_ITEM(&mapping->virtual_range->list);
 	*mapped = mapping->virtual_range->ptr;
 	RESET_LIST_ITEM(&mapping->physical_pages);
 	struct address_page *page = nullptr;
 	size_t mapped_pages = 0;
 	for (size_t offset = 0; offset < size; offset += PAGE_SIZE) {
+		if (borrowed) {
+			fatptr_t physical = {
+				.ptr = (void *)(physical_address + offset),
+				.len = PAGE_SIZE,
+			};
+			struct vmm_entry one_page = { .ptr = (void *)(address + offset),
+				.size = PAGE_SIZE, .flags = flags | VMM_ENTRY_PRESENT_BIT };
+			RESET_LIST_ITEM(&one_page.list);
+			if (!vmm_page_directory_map(&space->page_directory, &physical,
+				address + offset, one_page.flags))
+				goto fail;
+			++mapped_pages;
+			continue;
+		}
 		page = object_alloc(sizeof(*page));
 		if (page == nullptr)
 			goto fail;
-		page->physical = phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH);
+		page->physical = borrowed
+			? (fatptr_t){ .ptr = (void *)(physical_address + offset), .len = PAGE_SIZE }
+			: phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH);
+		page->owned = !borrowed;
 		if (page->physical.ptr == nullptr)
 			goto fail;
 		struct vmm_entry one_page = { .ptr = (void *)(address + offset), .size = PAGE_SIZE,
@@ -211,7 +284,7 @@ bool address_space_map_at(struct address_space *space, uintptr_t address,
 	return true;
 
 fail:
-	if (page != nullptr && page->physical.ptr != nullptr)
+	if (page != nullptr && page->owned && page->physical.ptr != nullptr)
 		phy_mem_free(page->physical);
 	if (page != nullptr)
 		object_free(page, sizeof(*page));
@@ -221,12 +294,43 @@ fail:
 	while (mapping->physical_pages.next != &mapping->physical_pages) {
 		struct address_page *old = list_pop_entry(&mapping->physical_pages,
 			struct address_page, list);
-		phy_mem_free(old->physical);
+		if (old->owned)
+			phy_mem_free(old->physical);
 		object_free(old, sizeof(*old));
 	}
 	object_free(mapping->virtual_range, sizeof(*mapping->virtual_range));
 	object_free(mapping, sizeof(*mapping));
 	return false;
+}
+
+bool address_space_map_at(struct address_space *space, uintptr_t address,
+	                          size_t size, uint16_t flags, void **mapped)
+{
+	return address_space_map_at_kind(space, address, 0, size, flags, false, mapped);
+}
+
+bool address_space_map_borrowed_at(struct address_space *space, uintptr_t address,
+	                                  uintptr_t physical_address, size_t size,
+	                                  uint16_t flags, void **mapped)
+{
+	return address_space_map_at_kind(space, address, physical_address, size,
+	                                flags, true, mapped);
+}
+
+bool address_space_map_borrowed(struct address_space *space, uintptr_t physical_address,
+                               size_t size, uint16_t flags, void **mapped)
+{
+	if (space == nullptr || mapped == nullptr || size == 0 ||
+	    (size & (PAGE_SIZE - 1)) != 0)
+		return false;
+	uintptr_t candidate;
+	if (!find_free_address(space, size, &candidate))
+		return false;
+	if (!address_space_map_borrowed_at(space, candidate, physical_address, size,
+	                                  flags, mapped))
+		return false;
+	space->next_user_address = candidate + size;
+	return true;
 }
 
 bool address_space_protect(struct address_space *space, uintptr_t address,
@@ -249,33 +353,42 @@ bool address_space_protect(struct address_space *space, uintptr_t address,
 bool address_space_validate(const struct address_space *space, uintptr_t address,
 	                           size_t size, uint16_t required_flags)
 {
+	uint32_t irq_flags = spin_lock_irqsave(&address_space_lock);
 	if (space == nullptr || size == 0 || address < PAGE_SIZE ||
 	    address >= USER_ADDRESS_LIMIT || size > USER_ADDRESS_LIMIT - address)
-		return size == 0;
+		goto invalid;
 	uintptr_t page = round_down_to_page(address);
 	uintptr_t end = round_up_to_page(address + size);
 	if (end == 0 || end > USER_ADDRESS_LIMIT)
-		return false;
+		goto invalid;
 	for (; page < end; page += PAGE_SIZE) {
 		if (find_mapping((struct address_space *)space, page) == nullptr)
-			return false;
-		uint16_t flags;
-		if (!vmm_page_directory_get_flags(&space->page_directory, page, &flags) ||
-		    (flags & required_flags) != required_flags)
-			return false;
+			goto invalid;
+		uint16_t page_flags;
+		if (!vmm_page_directory_get_flags(&space->page_directory, page, &page_flags) ||
+		    (page_flags & required_flags) != required_flags)
+			goto invalid;
 	}
+	spin_unlock_irqrestore(&address_space_lock, irq_flags);
 	return true;
+
+invalid:
+	spin_unlock_irqrestore(&address_space_lock, irq_flags);
+	return size == 0;
 }
 
 bool address_space_copy_from(struct address_space *space, void *destination,
 	                           uintptr_t address, size_t size)
 {
-	if (space == nullptr || destination == nullptr || size == 0)
+	uint32_t irq_flags = spin_lock_irqsave(&address_space_lock);
+	if (space == nullptr || destination == nullptr || size == 0) {
+		spin_unlock_irqrestore(&address_space_lock, irq_flags);
 		return size == 0;
+	}
 	while (size != 0) {
 		struct address_mapping *mapping = find_mapping(space, address);
 		if (mapping == nullptr)
-			return false;
+			goto invalid;
 		uintptr_t start = (uintptr_t)mapping->virtual_range->ptr;
 		size_t offset = address - start;
 		size_t page_index = offset / PAGE_SIZE;
@@ -283,21 +396,30 @@ bool address_space_copy_from(struct address_space *space, void *destination,
 		size_t chunk = PAGE_SIZE - in_page;
 		if (chunk > size)
 			chunk = size;
-		struct address_page *page = nullptr;
-		size_t index = 0;
-		list_for_each(&mapping->physical_pages) {
-			if (index++ == page_index) {
-				page = list_entry(it, struct address_page, list);
-				break;
+		fatptr_t physical;
+		if (mapping->borrowed) {
+			physical = (fatptr_t){
+				.ptr = (void *)(mapping->borrowed_physical + page_index * PAGE_SIZE),
+				.len = PAGE_SIZE,
+			};
+		} else {
+			struct address_page *page = nullptr;
+			size_t index = 0;
+			list_for_each(&mapping->physical_pages) {
+				if (index++ == page_index) {
+					page = list_entry(it, struct address_page, list);
+					break;
+				}
 			}
+			if (page == nullptr)
+				goto invalid;
+			physical = page->physical;
 		}
-		if (page == nullptr)
-			return false;
 		struct vmm_entry *temporary = vmm_alloc(PAGE_SIZE,
 			VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
 		if (temporary == nullptr)
-			return false;
-		map_pages(&page->physical, temporary);
+			goto invalid;
+		map_pages(&physical, temporary);
 		memcpy(destination, (uint8_t *)temporary->ptr + in_page, chunk);
 		unmap_page(nullptr, temporary->ptr);
 		vmm_free(temporary->ptr);
@@ -305,19 +427,30 @@ bool address_space_copy_from(struct address_space *space, void *destination,
 		address += chunk;
 		size -= chunk;
 	}
+	spin_unlock_irqrestore(&address_space_lock, irq_flags);
 	return true;
+
+invalid:
+	spin_unlock_irqrestore(&address_space_lock, irq_flags);
+	return false;
 }
 
 bool address_space_copy_to(struct address_space *space, uintptr_t address,
-						   const void *source, size_t size)
+							   const void *source, size_t size)
 {
-	return space != nullptr && (source != nullptr || size == 0) &&
+	uint32_t irq_flags = spin_lock_irqsave(&address_space_lock);
+	bool result = space != nullptr && (source != nullptr || size == 0) &&
 		copy_bytes(space, address, source, size, false);
+	spin_unlock_irqrestore(&address_space_lock, irq_flags);
+	return result;
 }
 
 bool address_space_zero(struct address_space *space, uintptr_t address, size_t size)
 {
-	return space != nullptr && copy_bytes(space, address, nullptr, size, true);
+	uint32_t irq_flags = spin_lock_irqsave(&address_space_lock);
+	bool result = space != nullptr && copy_bytes(space, address, nullptr, size, true);
+	spin_unlock_irqrestore(&address_space_lock, irq_flags);
+	return result;
 }
 
 bool address_space_unmap(struct address_space *space, void *address)
@@ -331,13 +464,14 @@ bool address_space_unmap(struct address_space *space, void *address)
 			continue;
 		list_rm(&mapping->list);
 		uintptr_t mapped = (uintptr_t)address;
+		for (size_t offset = 0; offset < mapping->virtual_range->size; offset += PAGE_SIZE)
+			(void)vmm_page_directory_unmap(&space->page_directory, mapped + offset);
 		while (mapping->physical_pages.next != &mapping->physical_pages) {
-			struct address_page *page = list_pop_entry(&mapping->physical_pages,
-				struct address_page, list);
-			(void)vmm_page_directory_unmap(&space->page_directory, mapped);
-			phy_mem_free(page->physical);
+		struct address_page *page = list_pop_entry(&mapping->physical_pages,
+			struct address_page, list);
+			if (page->owned)
+				phy_mem_free(page->physical);
 			object_free(page, sizeof(*page));
-			mapped += PAGE_SIZE;
 		}
 		object_free(mapping->virtual_range, sizeof(*mapping->virtual_range));
 		object_free(mapping, sizeof(*mapping));

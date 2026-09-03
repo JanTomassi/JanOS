@@ -9,7 +9,7 @@ Meson build directory.
 | `kernel/src/core` | Architecture-neutral kernel services |
 | `kernel/src/mm` | Generic memory allocators and early memory management |
 | `kernel/src/process` | Processes, address spaces, stacks, and wait queues |
-| `kernel/src/exec` | ELF and boot-module executable loading |
+| `kernel/src/exec` | FAT16 ELF loading and retained Multiboot reference loader |
 | `kernel/src/syscall` | Kernel syscall dispatch and handlers |
 | `kernel/src/fs` | Filesystem implementations |
 | `kernel/src/drivers` | Bus, input, storage, and console drivers |
@@ -29,8 +29,10 @@ Meson build directory.
 
 ```text
 shared C sources -> libk.a -> JanOS.kernel
-                 -> libc.a + crt0.o -> calc
-JanOS.kernel + calc + grub.cfg -> JanOS.iso
+                  -> libc.a + crt0.o -> calc
+kernel + grub.cfg -> JanOS.iso
+apps + font + image generator -> build/calc-disk.img
+JanOS.iso + calc-disk.img -> QEMU
 ```
 
 Meson uses the native compiler for host tests and `i686-elf-gcc` for all JanOS

@@ -5,6 +5,10 @@
 #include <kernel/interrupt.h>
 #include <kernel/spinlock.h>
 #include <kernel/tty.h>
+#include <kernel/display.h>
+#include <kernel/syscall.h>
+#include <kernel/scheduler.h>
+#include <kernel/process/wait_queue.h>
 
 #include <arch/i386/irq.h>
 #include <arch/i386/ps2.h>
@@ -47,6 +51,7 @@ static size_t edit_length;
 static char input_buffer[CONSOLE_INPUT_SIZE];
 static size_t input_read;
 static size_t input_write;
+static struct wait_queue console_readers;
 
 static bool input_push(char ch)
 {
@@ -72,6 +77,7 @@ static void console_key_event(struct key_event event)
 	if (!event.pressed)
 		return;
 
+	bool wake_readers = false;
 	uint32_t flags = spin_lock_irqsave(&console_lock);
 	if (event.key_code == KEY_CODE_BACKSPACE) {
 		if (edit_length != 0) {
@@ -82,6 +88,7 @@ static void console_key_event(struct key_event event)
 		for (size_t i = 0; i < edit_length; i++)
 			input_push(edit_line[i]);
 		input_push('\n');
+		wake_readers = true;
 		edit_length = 0;
 		edit_line[0] = '\0';
 		kprintf("\n");
@@ -106,6 +113,11 @@ static void console_key_event(struct key_event event)
 		}
 	}
 	spin_unlock_irqrestore(&console_lock, flags);
+	if (wake_readers) {
+		struct process *reader;
+		while ((reader = wait_queue_pop(&console_readers)) != nullptr)
+			scheduler_wake(reader);
+	}
 }
 
 static void ps2_irq_handler(uint8_t irq_line, void *context)
@@ -128,10 +140,11 @@ static void ps2_irq_handler(uint8_t irq_line, void *context)
 
 void ps2_init(void)
 {
+	wait_queue_init(&console_readers);
 	irq_register_handler(1, ps2_irq_handler, nullptr);
 }
 
-size_t console_read(char *buffer, size_t length)
+int32_t console_read(char *buffer, size_t length, struct i386_trap_frame *frame)
 {
 	if (buffer == nullptr || length == 0)
 		return 0;
@@ -155,22 +168,15 @@ size_t console_read(char *buffer, size_t length)
 			return count;
 		}
 		spin_unlock(&console_lock);
-		/* Keep interrupts disabled until the immediately following sti;hlt. */
-		if ((flags & (1u << 9)) != 0)
-			__asm__ volatile("sti; hlt" : : : "memory");
-		else
-			__asm__ volatile("pause" : : : "memory");
 		local_irq_restore(flags);
+		if (scheduler_block_current(&console_readers, frame))
+			return -SYSCALL_EIPC_BLOCKED;
 	}
 }
 
 size_t console_write(const char *buffer, size_t length)
 {
-	if (buffer == nullptr)
-		return 0;
-	for (size_t i = 0; i < length; i++)
-		kprintf("%c", buffer[i]);
-	return length;
+	return display_write(buffer, length);
 }
 
 static void update_mod_key(struct key_event event)

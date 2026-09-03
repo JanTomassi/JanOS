@@ -6,13 +6,13 @@
 /* Selectors installed by arch/i386/boot.s. */
 #define I386_KERNEL_CODE_SELECTOR 0x08u
 #define I386_KERNEL_DATA_SELECTOR 0x10u
-#define I386_USER_CODE_SELECTOR   0x18u
-#define I386_USER_DATA_SELECTOR   0x20u
-#define I386_TSS_SELECTOR          0x28u
+#define I386_USER_CODE_SELECTOR 0x18u
+#define I386_USER_DATA_SELECTOR 0x20u
+#define I386_TSS_SELECTOR 0x28u
 
-#define I386_EFLAGS_RESERVED      0x00000002u
+#define I386_EFLAGS_RESERVED 0x00000002u
 #define I386_EFLAGS_INTERRUPT_ENABLE 0x00000200u
-#define I386_EFLAGS_USER_DEFAULT  (I386_EFLAGS_RESERVED | I386_EFLAGS_INTERRUPT_ENABLE)
+#define I386_EFLAGS_USER_DEFAULT (I386_EFLAGS_RESERVED | I386_EFLAGS_INTERRUPT_ENABLE)
 
 struct i386_tss {
 	uint32_t previous_task;
@@ -56,8 +56,7 @@ bool i386_tss_install(struct i386_cpu_state *state, uintptr_t kernel_stack_top);
 /* Initialize or update the TSS associated with the current CPU. */
 bool i386_tss_init_cpu(struct i386_cpu_state *state, uintptr_t kernel_stack_top);
 bool i386_tss_init_current(void);
-bool i386_tss_set_kernel_stack(struct i386_cpu_state *state,
-	                             uintptr_t kernel_stack_top);
+bool i386_tss_set_kernel_stack(struct i386_cpu_state *state, uintptr_t kernel_stack_top);
 
 /* Update the TSS loaded on the CPU executing this call. */
 bool i386_tss_set_current_kernel_stack(uintptr_t kernel_stack_top);
@@ -91,13 +90,11 @@ struct i386_context {
 };
 
 /* Build a context with validated ring-3 selectors and a sanitized EFLAGS. */
-bool i386_context_init_user(struct i386_context *context, uintptr_t entry,
-	uintptr_t user_stack, uintptr_t page_directory, uint32_t eflags);
+bool i386_context_init_user(struct i386_context *context, uintptr_t entry, uintptr_t user_stack, uintptr_t page_directory, uint32_t eflags);
 
 /* Both entry points perform the same controlled kernel-to-user transition. */
 [[noreturn]] void i386_context_enter_user(const struct i386_context *context);
 [[noreturn]] void i386_context_return_user(const struct i386_context *context);
 
 /* Leave an exiting process's stack before invoking its deferred cleanup. */
-[[noreturn]] void i386_reaper_enter(uintptr_t stack_top,
-                                    void (*cleanup)(void *), void *argument);
+[[noreturn]] void i386_reaper_enter(uintptr_t stack_top, void (*cleanup)(void *), void *argument);

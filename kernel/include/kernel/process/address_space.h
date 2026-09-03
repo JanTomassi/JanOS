@@ -22,6 +22,12 @@ bool address_space_map(struct address_space *space, size_t size, uint16_t flags,
 /* Map a page-aligned range at exactly address in this address space. */
 bool address_space_map_at(struct address_space *space, uintptr_t address,
                           size_t size, uint16_t flags, void **mapped);
+/* Map existing physical pages without transferring their ownership. */
+bool address_space_map_borrowed(struct address_space *space, uintptr_t physical_address,
+                                size_t size, uint16_t flags, void **mapped);
+bool address_space_map_borrowed_at(struct address_space *space, uintptr_t address,
+                                   uintptr_t physical_address, size_t size,
+                                   uint16_t flags, void **mapped);
 bool address_space_protect(struct address_space *space, uintptr_t address,
                             size_t size, uint16_t flags);
 bool address_space_validate(const struct address_space *space, uintptr_t address,

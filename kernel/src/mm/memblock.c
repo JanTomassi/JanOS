@@ -443,6 +443,32 @@ __init struct mbi_info init_memblock_from_mbi(uintptr_t mbi_addr){
 	if (!found_end)
 		panic("Missing Multiboot end tag\n");
 
+	/* Exclude framebuffer memory after all available-memory entries exist. */
+	tag = (const struct multiboot_tag *)(mbi_addr + MULTIBOOT_INFO_HEADER_SIZE);
+	while ((uintptr_t)tag < (uintptr_t)info_end && tag->type != MULTIBOOT_TAG_TYPE_END) {
+		const struct multiboot_tag *next;
+		if (!next_multiboot_tag(info_end, tag, &next))
+			panic("Invalid Multiboot tag\n");
+		if (tag->type == MULTIBOOT_TAG_TYPE_FRAMEBUFFER) {
+			const struct multiboot_tag_framebuffer_common *framebuffer =
+				(const struct multiboot_tag_framebuffer_common *)tag;
+			if (tag->size < sizeof(*framebuffer))
+				panic("Invalid Multiboot framebuffer tag\n");
+			uint64_t address = framebuffer->framebuffer_addr;
+			uint64_t bytes = (uint64_t)framebuffer->framebuffer_pitch *
+				framebuffer->framebuffer_height;
+			uint64_t end = address + bytes;
+			if (bytes != 0 && end > address && address <= UINT32_MAX &&
+				end <= UINT64_C(0x100000000)) {
+				uint64_t start = address & ~(uint64_t)(MEMBLOCK_PAGE_SIZE - 1);
+				uint64_t excluded_end = (end + MEMBLOCK_PAGE_SIZE - 1) &
+					~(uint64_t)(MEMBLOCK_PAGE_SIZE - 1);
+				memblock_remove((size_t)start, (size_t)(excluded_end - start));
+			}
+		}
+		tag = next;
+	}
+
 	tag = (const struct multiboot_tag *)(mbi_addr + MULTIBOOT_INFO_HEADER_SIZE);
 	while ((uintptr_t)tag < (uintptr_t)info_end && tag->type != MULTIBOOT_TAG_TYPE_END) {
 		const struct multiboot_tag *next;

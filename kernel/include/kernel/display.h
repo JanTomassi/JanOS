@@ -48,3 +48,4 @@ void display_set_debug(uint8_t);
 display_t *display_getcurrent();
 void __mprintf(char *m, ...);
 int kprintf(const char *str, ...);
+size_t display_write(const char *buffer, size_t length);

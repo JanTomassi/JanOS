@@ -19,8 +19,7 @@ static void skip_space(struct parser *parser)
 	}
 }
 
-static enum calc_status parse_expression(struct parser *parser, unsigned depth,
-		calc_int32_t *result)
+static enum calc_status parse_expression(struct parser *parser, unsigned depth, calc_int32_t *result)
 {
 	skip_space(parser);
 	if (parser->position == parser->length)
@@ -29,9 +28,8 @@ static enum calc_status parse_expression(struct parser *parser, unsigned depth,
 		return CALC_ERR_DEPTH;
 
 	char token = parser->input[parser->position];
-	int minus_is_number = token == '-' && parser->position + 1 < parser->length &&
-		parser->input[parser->position + 1] >= '0' &&
-		parser->input[parser->position + 1] <= '9';
+	int minus_is_number = token == '-' && parser->position + 1 < parser->length && parser->input[parser->position + 1] >= '0' &&
+			      parser->input[parser->position + 1] <= '9';
 	if ((token == '+' || token == '-' || token == '*' || token == '/') && !minus_is_number) {
 		++parser->position;
 		calc_int32_t left, right;
@@ -43,9 +41,15 @@ static enum calc_status parse_expression(struct parser *parser, unsigned depth,
 			return status;
 		long long value;
 		switch (token) {
-		case '+': value = (long long)left + right; break;
-		case '-': value = (long long)left - right; break;
-		case '*': value = (long long)left * right; break;
+		case '+':
+			value = (long long)left + right;
+			break;
+		case '-':
+			value = (long long)left - right;
+			break;
+		case '*':
+			value = (long long)left * right;
+			break;
 		case '/':
 			if (right == 0)
 				return CALC_ERR_DIV_ZERO;
@@ -53,7 +57,8 @@ static enum calc_status parse_expression(struct parser *parser, unsigned depth,
 				return CALC_ERR_OVERFLOW;
 			value = left / right;
 			break;
-		default: return CALC_ERR_TOKEN;
+		default:
+			return CALC_ERR_TOKEN;
 		}
 		if (value < INT32_MIN || value > INT32_MAX)
 			return CALC_ERR_OVERFLOW;
@@ -66,8 +71,7 @@ static enum calc_status parse_expression(struct parser *parser, unsigned depth,
 		negative = 1;
 		++parser->position;
 	}
-	if (parser->position == parser->length ||
-		parser->input[parser->position] < '0' || parser->input[parser->position] > '9')
+	if (parser->position == parser->length || parser->input[parser->position] < '0' || parser->input[parser->position] > '9')
 		return CALC_ERR_TOKEN;
 	calc_uint32_t magnitude = 0;
 	calc_uint32_t limit = negative ? 2147483648u : 2147483647u;
@@ -86,8 +90,7 @@ static enum calc_status parse_expression(struct parser *parser, unsigned depth,
 		if (c != ' ' && c != '\t' && c != '\r' && c != '\n')
 			return CALC_ERR_TOKEN;
 	}
-	*result = negative ? (magnitude == 2147483648u ? INT32_MIN : -(calc_int32_t)magnitude)
-				  : (calc_int32_t)magnitude;
+	*result = negative ? (magnitude == 2147483648u ? INT32_MIN : -(calc_int32_t)magnitude) : (calc_int32_t)magnitude;
 	return CALC_OK;
 }
 
@@ -108,13 +111,21 @@ enum calc_status calc_eval(const char *input, calc_size_t length, calc_int32_t *
 const char *calc_status_string(enum calc_status status)
 {
 	switch (status) {
-	case CALC_ERR_EMPTY: return "empty expression";
-	case CALC_ERR_TOKEN: return "invalid token";
-	case CALC_ERR_OPERAND: return "expected operand";
-	case CALC_ERR_TRAILING: return "trailing input";
-	case CALC_ERR_DEPTH: return "expression too deep";
-	case CALC_ERR_DIV_ZERO: return "division by zero";
-	case CALC_ERR_OVERFLOW: return "integer overflow";
-	default: return "unknown error";
+	case CALC_ERR_EMPTY:
+		return "empty expression";
+	case CALC_ERR_TOKEN:
+		return "invalid token";
+	case CALC_ERR_OPERAND:
+		return "expected operand";
+	case CALC_ERR_TRAILING:
+		return "trailing input";
+	case CALC_ERR_DEPTH:
+		return "expression too deep";
+	case CALC_ERR_DIV_ZERO:
+		return "division by zero";
+	case CALC_ERR_OVERFLOW:
+		return "integer overflow";
+	default:
+		return "unknown error";
 	}
 }

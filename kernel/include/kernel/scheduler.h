@@ -10,6 +10,8 @@ struct wait_queue;
 void scheduler_init(void);
 void scheduler_process_ready(struct process *process);
 void scheduler_tick(struct i386_trap_frame *frame);
+void scheduler_lapic_timer(struct i386_trap_frame *frame);
+void scheduler_ipi(struct i386_trap_frame *frame);
 void scheduler_yield(struct i386_trap_frame *frame);
 bool scheduler_block_current(struct wait_queue *queue, struct i386_trap_frame *frame);
 bool scheduler_wake(struct process *process);

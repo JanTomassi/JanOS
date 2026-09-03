@@ -37,3 +37,4 @@ struct cpu_info *smp_current_cpu(void);
 uint8_t smp_current_cpu_index(void);
 bool smp_get_ioapic_info(struct madt_ioapic_info *info);
 size_t smp_get_irq_overrides(struct madt_irq_override *out, size_t max);
+void smp_send_scheduler_ipi(uint8_t cpu);

@@ -1,4 +1,5 @@
 #include <kernel/display.h>
+#include <kernel/framebuffer_boot.h>
 #include <kernel/spinlock.h>
 #include <string.h>
 
@@ -149,8 +150,12 @@ void __mprintf(char *m, ...)
 		disps[current].puts(m);
 		disps[current].puts("]: ");
 	}
+	framebuffer_console_write("[", 1);
+	framebuffer_console_write(m, strlen(m));
+	framebuffer_console_write("]: ", 3);
 	char *fmt = va_arg(ap, char *);
 	print_to_displays(fmt, ap);
+	framebuffer_console_flush();
 	spin_unlock_irqrestore(&print_lock, flags);
 	va_end(ap);
 }
@@ -163,9 +168,28 @@ int kprintf(const char *str, ...)
 	va_start(ap, str);
 	uint32_t flags = spin_lock_irqsave(&print_lock);
 	print_to_displays((char *)str, ap);
+	framebuffer_console_flush();
 	spin_unlock_irqrestore(&print_lock, flags);
 	va_end(ap);
 	return 1;
+}
+
+size_t display_write(const char *buffer, size_t length)
+{
+	if (buffer == nullptr)
+		return 0;
+	uint32_t flags = spin_lock_irqsave(&print_lock);
+	if (enabled) {
+		if (debug_display < _last_register && debug_display != current)
+			for (size_t i = 0; i < length; ++i)
+				disps[debug_display].putc(buffer[i]);
+		for (size_t i = 0; i < length; ++i)
+			disps[current].putc(buffer[i]);
+	}
+	framebuffer_console_write(buffer, length);
+	framebuffer_console_flush();
+	spin_unlock_irqrestore(&print_lock, flags);
+	return length;
 }
 
 static void print_formatted(display_t *display, char *str, va_list ap)
@@ -179,6 +203,7 @@ static void print_formatted(display_t *display, char *str, va_list ap)
 			case 's':
 				s = va_arg(ap, char *);
 				display->puts(s);
+				framebuffer_console_write(s, strlen(s));
 				i++;
 				continue;
 			case 'u': {
@@ -186,6 +211,7 @@ static void print_formatted(display_t *display, char *str, va_list ap)
 				char str[32] = { 0 };
 				unumber_to_str(c, str, 32);
 				display->puts(str);
+				framebuffer_console_write(str, strlen(str));
 				i++;
 				continue;
 			}
@@ -194,6 +220,7 @@ static void print_formatted(display_t *display, char *str, va_list ap)
 				char str[32] = { 0 };
 				number_to_str(c, str, 32);
 				display->puts(str);
+				framebuffer_console_write(str, strlen(str));
 				i++;
 				continue;
 			}
@@ -202,12 +229,14 @@ static void print_formatted(display_t *display, char *str, va_list ap)
 				char str[32] = { 0 };
 				hex_to_str(c, str, 32);
 				display->puts(str);
+				framebuffer_console_write(str, strlen(str));
 				i++;
 				continue;
 			}
 			case 'c': {
 				char c = (char)(va_arg(ap, int) & ~0xFFFFFF00);
 				display->putc(c);
+				framebuffer_console_write(&c, 1);
 				i++;
 				continue;
 			}
@@ -216,6 +245,7 @@ static void print_formatted(display_t *display, char *str, va_list ap)
 			}
 		} else {
 			display->putc(str[i]);
+			framebuffer_console_write(&str[i], 1);
 		}
 	}
 }

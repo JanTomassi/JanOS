@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef struct {
 	fatptr_t (*alloc)(size_t req);
@@ -10,6 +11,10 @@ typedef struct {
 } allocator_t;
 
 allocator_t get_gpa_allocator();
+
+/* Serialize the recursive slab/GPA/VMM metadata domain across CPUs. */
+uint32_t allocator_lock_acquire(void);
+void allocator_lock_release(uint32_t flags);
 
 typedef void (*slab_ctor_t)(void *obj);
 typedef void (*slab_dtor_t)(void *obj);

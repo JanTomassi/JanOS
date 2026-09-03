@@ -16,11 +16,12 @@ COPY libc ./libc
 COPY kernel ./kernel
 COPY apps ./apps
 COPY tests ./tests
-COPY tools/mkiso.sh tools/run-qemu.sh ./tools/
+COPY tools/mkiso-disk.sh tools/run-qemu.sh ./tools/
 
 RUN meson setup out --cross-file config/i686-elf.ini --prefix=/usr --libdir=lib32 \
     -Diso=enabled -Dqemu=disabled
-RUN meson compile -C out iso
+RUN meson compile -C out calc-disk iso
 
 FROM scratch AS iso
 COPY --from=build /build/out/JanOS.iso /
+COPY --from=build /build/out/calc-disk.img /
