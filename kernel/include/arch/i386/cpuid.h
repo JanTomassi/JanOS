@@ -156,13 +156,13 @@ struct feature_info {
 	// circuitry (TCC).
 	bool reserved_2 : 1; // Reserved
 	bool PBE : 1;	     // Pending Break Enable. The processor supports
-			     // the use of the FERR#/PBE# pin when the
-			     // processor is in the stop-clock state (STPCLK#
-			     // is asserted) to signal the processor that an
-			     // interrupt is pending and that the processor
-			     // should return to normal operation to handle
-			     // the interrupt. Bit 10 (PBE enable) in the
-			     // IA32_MISC_ENABLE MSR enables this capability.
+	// the use of the FERR#/PBE# pin when the
+	// processor is in the stop-clock state (STPCLK#
+	// is asserted) to signal the processor that an
+	// interrupt is pending and that the processor
+	// should return to normal operation to handle
+	// the interrupt. Bit 10 (PBE enable) in the
+	// IA32_MISC_ENABLE MSR enables this capability.
 };
 
 struct ext_feature_info cpuid_get_ext_feature_info();

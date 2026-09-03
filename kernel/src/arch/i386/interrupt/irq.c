@@ -4,6 +4,7 @@
 #include <kernel/spinlock.h>
 #include <stddef.h>
 #include <kernel/scheduler.h>
+#include <arch/i386/lapic.h>
 
 #define IRQ_LINE_COUNT 16
 #define IRQ_HANDLER_SLOTS 32
@@ -168,3 +169,15 @@ DEFINE_IRQ_DISPATCH(44)
 DEFINE_IRQ_DISPATCH(45)
 DEFINE_IRQ_DISPATCH(46)
 DEFINE_IRQ_DISPATCH(47)
+
+void isr_local_48_handler(struct i386_trap_frame *frame)
+{
+	lapic_eoi();
+	scheduler_lapic_timer(frame);
+}
+
+void isr_local_49_handler(struct i386_trap_frame *frame)
+{
+	lapic_eoi();
+	scheduler_ipi(frame);
+}

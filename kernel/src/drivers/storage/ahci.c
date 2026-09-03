@@ -134,6 +134,7 @@ static bool ahci_port_rebase(struct ahci_port_state *state)
 
 static void ahci_irq_handler(uint8_t irq_line, void *context)
 {
+	mprint("AHCI fired\n")
 	(void)irq_line;
 	struct hba_mem *hba = context;
 	if (hba == nullptr)
@@ -315,11 +316,11 @@ static bool ahci_exec_dma(struct ahci_port_state *state, uint32_t lba_addr, uint
 	port->ci |= 1u << slot;
 
 	while (true) {
-		if ((port->ci & (1u << slot)) == 0)
-			break;
-		if (state->irq_fired)
-			break;
-		if (port->is & AHCI_PORT_IRQ_TFES)
+		bool fin = false;
+		fin |= (port->ci & (1u << slot)) == 0;
+		fin |= state->irq_fired;
+		fin |= port->is & AHCI_PORT_IRQ_TFES;
+		if (fin)
 			break;
 	}
 

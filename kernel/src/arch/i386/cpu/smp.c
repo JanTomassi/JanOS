@@ -522,9 +522,20 @@ void ap_main(void)
 		spin_lock(&report_lock);
 		kprintf("I am cpu %u :)\n", idx);
 		spin_unlock(&report_lock);
+		lapic_timer_init();
 	}
 
 	scheduler_idle();
+}
+
+void smp_send_scheduler_ipi(uint8_t cpu)
+{
+	if (cpu >= cpu_count || !cpus[cpu].online)
+		return;
+	/* An idle target has no timer-driven user frame to reschedule from. */
+	if (cpu == smp_current_cpu_index() && cpus[cpu].current_process != nullptr)
+		return;
+	lapic_send_ipi(cpus[cpu].apic_id, 49, 0);
 }
 
 bool smp_get_ioapic_info(struct madt_ioapic_info *info)

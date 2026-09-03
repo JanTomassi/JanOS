@@ -6,6 +6,8 @@
 #include <kernel/vir_mem.h>
 #include <kernel/scheduler.h>
 #include <kernel/ipc.h>
+#include <kernel/framebuffer_boot.h>
+#include <arch/i386/smp.h>
 
 struct syscall_slot {
 	syscall_handler_t handler;
@@ -55,7 +57,9 @@ static int32_t syscall_read_handler(syscall_frame *frame, void *context)
 		size_t chunk = frame->edx - count;
 		if (chunk > sizeof(buffer))
 			chunk = sizeof(buffer);
-		size_t got = console_read(buffer, chunk);
+		int32_t got = console_read(buffer, chunk, frame);
+		if (got == -SYSCALL_EIPC_BLOCKED)
+			return got;
 		if (got == 0)
 			break;
 		if (!copy_to_user((void *)(uintptr_t)frame->ecx + count, buffer, got))
@@ -104,6 +108,27 @@ static int32_t syscall_yield_handler(syscall_frame *frame, void *context)
 	return 0;
 }
 
+static int32_t syscall_framebuffer_read(syscall_frame *frame, void *context)
+{
+	(void)context;
+	if (frame->edx > JANOS_FRAMEBUFFER_OUTPUT_CHUNK ||
+		!user_buffer(frame->ecx, frame->edx, VMM_ENTRY_USER_SUPER_BIT |
+			VMM_ENTRY_READ_WRITE_BIT))
+		return -SYSCALL_EFAULT;
+	char buffer[JANOS_FRAMEBUFFER_OUTPUT_CHUNK];
+	size_t count = framebuffer_console_read(buffer, frame->edx);
+	if (count != 0 && !copy_to_user((void *)(uintptr_t)frame->ecx, buffer, count))
+		return -SYSCALL_EFAULT;
+	return (int32_t)count;
+}
+
+static int32_t syscall_cpu_get(syscall_frame *frame, void *context)
+{
+	(void)frame;
+	(void)context;
+	return (int32_t)smp_current_cpu_index();
+}
+
 void syscall_init(void)
 {
 	for (size_t i = 0; i < JANOS_SYS_MAX; ++i)
@@ -125,7 +150,9 @@ int32_t syscall_dispatch(syscall_frame *frame)
 	int32_t result = -SYSCALL_ENOSYS;
 	if (frame->eax < JANOS_SYS_MAX && slots[frame->eax].handler != nullptr)
 		result = slots[frame->eax].handler(frame, slots[frame->eax].context);
-	frame->eax = (uint32_t)result;
+	/* A blocked IPC syscall has already saved its user continuation. */
+	if (result != -SYSCALL_EIPC_BLOCKED)
+		frame->eax = (uint32_t)result;
 	return result;
 }
 
@@ -138,6 +165,8 @@ bool syscall_register_console_handlers(void)
 	return syscall_register(JANOS_SYS_READ, syscall_read_handler, nullptr) &&
 		syscall_register(JANOS_SYS_YIELD, syscall_yield_handler, nullptr) &&
 		syscall_register(JANOS_SYS_WRITE, syscall_write_handler, nullptr) &&
-		syscall_register(JANOS_SYS_EXIT, syscall_exit_handler, nullptr) &&
+		 syscall_register(JANOS_SYS_EXIT, syscall_exit_handler, nullptr) &&
+		syscall_register(JANOS_SYS_FRAMEBUFFER_READ, syscall_framebuffer_read, nullptr) &&
+		syscall_register(JANOS_SYS_CPU_GET, syscall_cpu_get, nullptr) &&
 		ipc_register_syscalls();
 }

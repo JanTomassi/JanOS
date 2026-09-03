@@ -3,6 +3,8 @@
 #include <kernel/vir_mem.h>
 #include <kernel/phy_mem.h>
 #include <kernel/display.h>
+#include <kernel/spinlock.h>
+#include <arch/i386/smp.h>
 #include <string.h>
 
 typedef mem_malloc_tag_t malloc_tag_t;
@@ -11,8 +13,41 @@ typedef mem_phy_mem_tag_t phy_mem_tag_t;
 
 static bool gpa_initialized = false;
 static malloc_tag_t *gpa_allocs = nullptr;
+static spinlock_t allocator_lock = { 0 };
+static uint32_t allocator_lock_depth[16];
 
 MODULE("Allocator");
+
+static uint8_t allocator_cpu_index(void)
+{
+	uint8_t cpu = smp_current_cpu_index();
+	return cpu >= 16 ? 0 : cpu;
+}
+
+uint32_t allocator_lock_acquire(void)
+{
+	uint32_t flags = local_irq_save();
+	uint8_t cpu = allocator_cpu_index();
+	if (allocator_lock_depth[cpu] != 0) {
+		++allocator_lock_depth[cpu];
+		return flags;
+	}
+	spin_lock(&allocator_lock);
+	allocator_lock_depth[cpu] = 1;
+	return flags;
+}
+
+void allocator_lock_release(uint32_t flags)
+{
+	uint8_t cpu = allocator_cpu_index();
+	if (allocator_lock_depth[cpu] == 0) {
+		local_irq_restore(flags);
+		return;
+	}
+	if (--allocator_lock_depth[cpu] == 0)
+		spin_unlock(&allocator_lock);
+	local_irq_restore(flags);
+}
 
 // Map physical pages for a newly allocated tag and initialize its phy chain.
 // Assumes alloc_size is page-aligned and tag has no existing mappings.
@@ -160,6 +195,7 @@ static malloc_tag_t **gpa_lookup_alloc(void *ptr, const malloc_tag_t *loc)
 
 fatptr_t mem_gpa_alloc(size_t req)
 {
+	uint32_t flags = allocator_lock_acquire();
 	if (!gpa_initialized) {
 		gpa_initialized = true;
 		gpa_allocs = mem_get_tag();
@@ -184,14 +220,17 @@ fatptr_t mem_gpa_alloc(size_t req)
 	mem_debug_lists();
 #endif
 
-	return (fatptr_t){
+	fatptr_t result = (fatptr_t){
 		.ptr = mem_get_ptr_tag(mem),
 		.len = mem_get_used_tag(mem),
 	};
+	allocator_lock_release(flags);
+	return result;
 }
 
 void mem_gpa_free(fatptr_t freeing)
 {
+	uint32_t flags = allocator_lock_acquire();
 	malloc_tag_t **tag = gpa_lookup_alloc(freeing.ptr, gpa_allocs);
 	malloc_tag_t *tag_to_free = mem_coalesce_tag(*tag);
 	void *tag_ptr = mem_get_ptr_tag(tag_to_free);
@@ -237,6 +276,7 @@ void mem_gpa_free(fatptr_t freeing)
 #ifdef DEBUG
 	mem_debug_lists();
 #endif
+	allocator_lock_release(flags);
 }
 
 allocator_t get_gpa_allocator()

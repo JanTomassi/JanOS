@@ -774,6 +774,7 @@ struct vmm_entry *vmm_alloc(size_t req_size, uint8_t flags)
 {
 	if (req_size == 0 || (req_size & (PAGE_SIZE - 1)) != 0)
 		BUG("Virtual memory allocation must be non-zero and page aligned");
+	uint32_t lock_flags = allocator_lock_acquire();
 
 	struct vmm_entry *free_chunk = nullptr;
 
@@ -791,12 +792,16 @@ struct vmm_entry *vmm_alloc(size_t req_size, uint8_t flags)
 		}
 	}
 
-	if (free_chunk == nullptr)
+	if (free_chunk == nullptr) {
+		allocator_lock_release(lock_flags);
 		return nullptr;
+	}
 
 	struct vmm_entry *tag = vmm_entry_alloc();
-	if (tag == nullptr)
+	if (tag == nullptr) {
+		allocator_lock_release(lock_flags);
 		return nullptr;
+	}
 
 	*tag = (struct vmm_entry){
 		.ptr = free_chunk->ptr,
@@ -818,6 +823,7 @@ struct vmm_entry *vmm_alloc(size_t req_size, uint8_t flags)
 	debug_vmm_lists();
 #endif
 
+	allocator_lock_release(lock_flags);
 	return tag;
 }
 
@@ -852,6 +858,7 @@ void vmm_free(const void *ptr)
 {
 	if (ptr == nullptr || ((uintptr_t)ptr & (PAGE_SIZE - 1)) != 0)
 		BUG("vmm_free requires a page-aligned allocation address");
+	uint32_t lock_flags = allocator_lock_acquire();
 
 	list_for_each(&vmm_used_list) {
 		struct vmm_entry *cur = list_entry(it, struct vmm_entry, list);
@@ -867,6 +874,7 @@ void vmm_free(const void *ptr)
 #ifdef DEBUG
 	debug_vmm_lists();
 #endif
+	allocator_lock_release(lock_flags);
 }
 
 void vmm_release_init(void)

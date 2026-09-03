@@ -8,6 +8,7 @@
 #include <arch/i386/pic.h>
 #include <arch/i386/cpuid.h>
 #include <arch/i386/lapic.h>
+#include <arch/i386/smp.h>
 
 #define IRQ_LINE_COUNT 16
 
@@ -18,7 +19,8 @@ static void halt_after_user_fault(struct i386_trap_frame *frame)
 		uint32_t cr2 = 0;
 		if (frame->vector == INTN_PAGE_FAULT)
 			__asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
-		kprintf("User fault: vector=%u EIP=%x CS=%x error=%x CR2=%x\n",
+		kprintf("User fault: cpu=%u pid=%u vector=%u EIP=%x CS=%x error=%x CR2=%x\n",
+			(unsigned)smp_current_cpu_index(), (unsigned)process_pid(process),
 			frame->vector, frame->eip, frame->cs, frame->error_code, cr2);
 		process_exit_current(128 + (int)frame->vector);
 		__asm__ volatile("cli");

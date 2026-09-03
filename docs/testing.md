@@ -19,6 +19,8 @@ tested inside QEMU.
 The current Meson suites contain:
 
 - `host:calc`: calculator parsing, arithmetic, overflow, and invalid input.
+- `host:framebuffer-protocol`: framebuffer message sizes, IDs, and stable
+  unavailable-endpoint error values.
 - `host:launch-contract`: validates the generated user ELF format and entry.
 - `contract:kernel-multiboot2-contract`: verifies that GRUB recognizes the
   kernel as Multiboot2.
@@ -122,6 +124,17 @@ option(
 When enabled, compile `tests/kernel` into a dedicated test kernel. The test
 runner should execute after memory, interrupts, and process infrastructure are
 initialized, but before `i386_context_enter_user()`.
+
+The pingpong integration test follows the same separation: `JanOS.iso` is the
+normal boot image, while `JanOS-pingpong.iso` uses the test kernel and loads the
+`PINGPONG` application from the accompanying FAT16 disk.
+
+The framebuffer integration test is separate again: `JanOS-framebuffer.iso`
+uses the test kernel and loads `FBSERVER`, `FBCLIENT`, and `JANOS.PSF` from the
+accompanying FAT16 disk. Normal `JanOS.iso` does not contain application or
+font modules. The guest requires `FBSERVER_READY`, `FBCLIENT_PASS`,
+`FBCLIENT_UNAVAILABLE_PASS`, and a distinct-page-directory `FBTEST_SPACE`
+marker.
 
 Each assertion should report a stable serial marker:
 

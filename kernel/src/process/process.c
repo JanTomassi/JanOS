@@ -5,12 +5,14 @@
 #include <kernel/process/address_space.h>
 #include <kernel/process/stack.h>
 #include <kernel/process/wait_queue.h>
+#include <kernel/framebuffer.h>
 #include <kernel/spinlock.h>
 #include <kernel/vir_mem.h>
 #include <list.h>
 #include <arch/i386/smp.h>
 #include <kernel/scheduler.h>
 #include <kernel/ipc.h>
+#include <kernel/syscall.h>
 
 struct process {
 	process_pid_t pid;
@@ -33,6 +35,7 @@ struct process {
 	bool queued;
 	uint8_t owner_cpu;
 	uint8_t cpu_affinity;
+	struct process_ipc_wait ipc_wait;
 };
 
 static LIST_HEAD(processes);
@@ -191,7 +194,8 @@ bool process_start(struct process *process, uintptr_t entry, int argc,
 bool process_initial_context(const struct process *process,
 							 struct i386_context *context)
 {
-	if (process == nullptr || context == nullptr || process->state != PROCESS_RUNNING)
+	if (process == nullptr || context == nullptr ||
+	    (process->state != PROCESS_RUNNING && process->state != PROCESS_READY))
 		return false;
 	*context = process->saved_context;
 	return true;
@@ -214,6 +218,7 @@ void process_destroy(struct process *process)
 	if (process->parent != nullptr)
 		list_rm(&process->sibling);
 	spin_unlock(&process_lock);
+	framebuffer_capability_revoke_process(process);
 	process_stack_destroy(process->user_stack);
 	process_stack_destroy(process->kernel_stack);
 	address_space_destroy(process->space);
@@ -314,8 +319,10 @@ static void process_reap(struct process *process)
 {
 	struct process *process = argument;
 	process_reap(process);
+	/* An exiting process may be the only runnable process on this CPU. */
+	scheduler_yield(nullptr);
 	for (;;)
-		__asm__ volatile("hlt");
+		__asm__ volatile("sti; hlt" ::: "memory");
 }
 
 void process_exit(struct process *process, int status)
@@ -336,9 +343,10 @@ void process_exit(struct process *process, int status)
 		process->waiting_on = nullptr;
 	}
 	process->status = status;
-	ipc_process_cleanup(process);
 	process->state = PROCESS_ZOMBIE;
 	spin_unlock(&process_lock);
+	framebuffer_capability_revoke_process(process);
+	ipc_process_cleanup(process);
 	process_reap(process);
 }
 
@@ -361,7 +369,6 @@ void process_exit(struct process *process, int status)
 			__asm__ volatile("hlt");
 	}
 	process->status = status;
-	ipc_process_cleanup(process);
 	process->state = PROCESS_ZOMBIE;
 	if (process->waiting_on != nullptr) {
 		list_rm(&process->wait_link);
@@ -369,6 +376,8 @@ void process_exit(struct process *process, int status)
 	}
 	cpu->current_process = nullptr;
 	spin_unlock(&process_lock);
+	framebuffer_capability_revoke_process(process);
+	ipc_process_cleanup(process);
 
 	const fatptr_t *kernel_page_directory = vmm_kernel_page_directory();
 	if (kernel_page_directory == nullptr ||
@@ -388,6 +397,17 @@ struct process *process_find_child(const struct process *parent, process_pid_t p
 	struct process *result = find_pid_locked(pid);
 	if (result != nullptr && result->parent != parent)
 		result = nullptr;
+	spin_unlock(&process_lock);
+	return result;
+}
+
+bool process_exists(process_pid_t pid)
+{
+	if (pid == 0)
+		return false;
+	ensure_initialized();
+	spin_lock(&process_lock);
+	bool result = find_pid_locked(pid) != nullptr;
 	spin_unlock(&process_lock);
 	return result;
 }
@@ -425,6 +445,159 @@ bool process_wake(struct process *process, struct wait_queue *queue)
 	if (result)
 		scheduler_process_ready(process);
 	return result;
+}
+
+bool process_wait_detach(struct process *process, struct wait_queue *queue)
+{
+	if (process == nullptr || process->waiting_on != queue)
+		return false;
+	list_rm(&process->wait_link);
+	process->waiting_on = nullptr;
+	return true;
+}
+
+bool process_wait_requeue(struct process *process, struct wait_queue *from,
+                          struct wait_queue *to)
+{
+	if (process == nullptr || from == nullptr || to == nullptr ||
+	    process->waiting_on != from || process_get_state(process) != PROCESS_BLOCKED)
+		return false;
+	spin_lock(&process_lock);
+	if (process->waiting_on != from || process->state != PROCESS_BLOCKED) {
+		spin_unlock(&process_lock);
+		return false;
+	}
+	list_rm(&process->wait_link);
+	list_add(&process->wait_link, &to->waiters);
+	process->waiting_on = to;
+	spin_unlock(&process_lock);
+	return true;
+}
+
+bool process_ipc_wait_begin(struct process *process, uint32_t syscall,
+	                         uintptr_t user_buffer, uint32_t deadline)
+{
+	if (process == nullptr)
+		return false;
+	spin_lock(&process_lock);
+	if (process->ipc_wait.active) {
+		spin_unlock(&process_lock);
+		return false;
+	}
+	process->ipc_wait = (struct process_ipc_wait){
+		.active = true, .syscall = syscall, .user_buffer = (uint32_t)user_buffer,
+		.deadline = deadline,
+	};
+	spin_unlock(&process_lock);
+	return true;
+}
+
+bool process_ipc_wait_active(const struct process *process)
+{
+	if (process == nullptr)
+		return false;
+	spin_lock(&process_lock);
+	bool active = process->ipc_wait.active;
+	spin_unlock(&process_lock);
+	return active;
+}
+
+uint32_t process_ipc_wait_deadline(const struct process *process)
+{
+	if (process == nullptr)
+		return 0;
+	spin_lock(&process_lock);
+	uint32_t deadline = process->ipc_wait.deadline;
+	spin_unlock(&process_lock);
+	return deadline;
+}
+
+uintptr_t process_ipc_wait_reply_buffer(const struct process *process)
+{
+	if (process == nullptr)
+		return 0;
+	spin_lock(&process_lock);
+	uintptr_t buffer = process->ipc_wait.active ? process->ipc_wait.user_buffer : 0;
+	spin_unlock(&process_lock);
+	return buffer;
+}
+
+bool process_ipc_wait_set_message(struct process *process, uint32_t endpoint,
+                                  const struct janos_ipc_message *message)
+{
+	if (process == nullptr || message == nullptr)
+		return false;
+	spin_lock(&process_lock);
+	if (!process->ipc_wait.active) {
+		spin_unlock(&process_lock);
+		return false;
+	}
+	process->ipc_wait.endpoint = endpoint;
+	process->ipc_wait.message = *message;
+	spin_unlock(&process_lock);
+	return true;
+}
+
+bool process_ipc_wait_get_message(const struct process *process, uint32_t *endpoint,
+                                  struct janos_ipc_message *message)
+{
+	if (process == nullptr || endpoint == nullptr || message == nullptr)
+		return false;
+	spin_lock(&process_lock);
+	if (!process->ipc_wait.active) {
+		spin_unlock(&process_lock);
+		return false;
+	}
+	*endpoint = process->ipc_wait.endpoint;
+	*message = process->ipc_wait.message;
+	spin_unlock(&process_lock);
+	return true;
+}
+
+bool process_ipc_wait_complete(struct process *process, int32_t result,
+	                               const struct janos_ipc_message *message)
+{
+	if (process == nullptr)
+		return false;
+	spin_lock(&process_lock);
+	if (!process->ipc_wait.active) {
+		spin_unlock(&process_lock);
+		return false;
+	}
+	bool copied = true;
+	if (message != nullptr) {
+		if (!address_space_copy_to(process->space, process->ipc_wait.user_buffer,
+		                           message, sizeof(*message)))
+			copied = false;
+	}
+	if (!copied)
+		result = -SYSCALL_EFAULT;
+	if (message != nullptr && copied)
+		process->ipc_wait.message = *message;
+	process->saved_context.eax = (uint32_t)result;
+	process->ipc_wait.active = false;
+	spin_unlock(&process_lock);
+	return true;
+}
+
+bool process_ipc_wait_cancel(struct process *process)
+{
+	return process_ipc_wait_complete(process, -SYSCALL_ESRCH, nullptr);
+}
+
+bool process_ipc_wait_save_context(struct process *process,
+                                   const struct i386_context *context)
+{
+	if (process == nullptr || context == nullptr)
+		return false;
+	spin_lock(&process_lock);
+	if (!process->ipc_wait.active) {
+		spin_unlock(&process_lock);
+		return false;
+	}
+	process->saved_context = *context;
+	spin_unlock(&process_lock);
+	return true;
 }
 
 struct process *process_from_wait_link(struct list_head *link)

@@ -19,6 +19,18 @@ section .text
 	add ebx,_GLOBAL_OFFSET_TABLE_+$$-%%getgot wrt ..gotpc
 %endmacro
 
+%macro local_stub 1
+extern isr_local_%+%1_handler:function
+global isr_stub_%+%1:function
+isr_stub_%+%1:
+	enter_frame 0, %1
+	get_GOT
+	push esp
+	call [ebx + isr_local_%+%1_handler wrt ..got]
+	add esp, 4
+	leave_frame 0
+%endmacro
+
 ; Entry layout after this macro is struct i386_trap_frame.  The CPU error
 ; code is normalized to zero for vectors that do not push one themselves.
 %macro enter_frame 2
@@ -131,8 +143,10 @@ syscall_entry:
 	%assign i i+1
 %endrep
 
-%assign i 48
-%rep 216
+local_stub 48
+local_stub 49
+%assign i 50
+%rep 206
 	exception_noerr_stub i
 	%assign i i+1
 %endrep

@@ -15,7 +15,11 @@ struct list_head {
 		((type *)(mptr - offsetof(type, member)));                                                                                       \
 	})
 
-#define list_entry(ptr, type, list_member) (ptr != nullptr ? container_of(ptr, type, list_member) :  nullptr)
+#define list_entry(ptr, type, list_member) \
+	({ \
+		typeof(ptr) __list_ptr = (ptr); \
+		__list_ptr != nullptr ? container_of(__list_ptr, type, list_member) : nullptr; \
+	})
 
 #define LIST_HEAD(var_name) struct list_head var_name = { .next = &(var_name), .prev = &(var_name) }
 

@@ -1,1 +1,4 @@
 subdir('calc')
+subdir('pingpong')
+subdir('fbserver')
+subdir('fbclient')

@@ -15,6 +15,9 @@ extern void pic_disable(void);
 #define LAPIC_REG_ERR_STAT 0x280
 #define LAPIC_REG_ICR_LOW 0x300
 #define LAPIC_REG_ICR_HIGH 0x310
+#define LAPIC_REG_LVT_TIMER 0x320
+#define LAPIC_REG_TIMER_INITIAL 0x380
+#define LAPIC_REG_TIMER_DIVIDE 0x3E0
 
 #define LAPIC_SVR_ENABLE (1 << 8)
 
@@ -30,12 +33,17 @@ void lapic_set_base(uintptr_t phys)
 
 static inline uint32_t lapic_read(uint32_t reg)
 {
-	return *((volatile uint32_t*)((size_t)lapic_base + reg)) = (*((volatile uint32_t*)((size_t)lapic_base + reg)));
+	return *((volatile uint32_t*)((size_t)lapic_base + reg));
 }
 
 static inline void lapic_write(uint32_t reg, uint32_t val, uint32_t mask)
 {
 	*((volatile uint32_t*)((size_t)lapic_base + reg)) = (*((volatile uint32_t*)((size_t)lapic_base + reg)) & ~mask) | val;
+}
+
+static inline void lapic_write_raw(uint32_t reg, uint32_t val)
+{
+	*((volatile uint32_t*)((size_t)lapic_base + reg)) = val;
 }
 
 static void lapic_map_base(void)
@@ -74,15 +82,28 @@ void lapic_eoi(void)
 	lapic_write(LAPIC_REG_EOI, 0, (~0));
 }
 
+void lapic_timer_init(void)
+{
+	lapic_map_base();
+	/* Each AP gets a periodic preemption source independent of the PIT. */
+	lapic_write_raw(LAPIC_REG_TIMER_DIVIDE, 0x3);
+	lapic_write_raw(LAPIC_REG_LVT_TIMER, 0x20000u | 48u);
+	lapic_write_raw(LAPIC_REG_TIMER_INITIAL, 1000000u);
+	kprintf("LAPIC timer lvt=%x divide=%x initial=%x\n",
+	         lapic_read(LAPIC_REG_LVT_TIMER),
+	         lapic_read(LAPIC_REG_TIMER_DIVIDE),
+	         lapic_read(LAPIC_REG_TIMER_INITIAL));
+}
+
 void lapic_send_ipi(uint8_t apic_id, uint8_t vector, uint8_t delivery_mode)
 {
 	lapic_map_base();
 
 	const uint32_t dest = ((uint32_t)apic_id) << 24;
-	lapic_write(LAPIC_REG_ICR_HIGH, dest, 0x0f000000);
+	lapic_write_raw(LAPIC_REG_ICR_HIGH, dest);
 
 	uint32_t icr_low = (delivery_mode << 8) | vector;
-	lapic_write(LAPIC_REG_ICR_LOW, icr_low, (~0));
+	lapic_write_raw(LAPIC_REG_ICR_LOW, icr_low);
 
 	lapic_wait_delivery();
 }

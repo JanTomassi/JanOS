@@ -6,6 +6,7 @@
 #include <list.h>
 #include <kernel/phy_mem.h>
 #include <arch/i386/context.h>
+#include <janos/syscall.h>
 
 struct address_space;
 struct process_stack;
@@ -23,6 +24,16 @@ enum process_state {
 };
 
 struct process;
+
+struct process_ipc_wait {
+	bool active;
+	uint32_t syscall;
+	uint32_t user_buffer;
+	uint32_t deadline;
+	uint32_t endpoint;
+	struct janos_ipc_message message;
+	uint32_t result;
+};
 
 #define PROCESS_CPU_UNASSIGNED 0xFFu
 
@@ -57,11 +68,15 @@ void process_exit(struct process *process, int status);
 /* Returns the child with pid, or NULL if it is not a direct child. */
 struct process *process_find_child(const struct process *parent,
                                    process_pid_t pid);
+bool process_exists(process_pid_t pid);
 size_t process_child_count(const struct process *parent);
 
 /* Internal ownership hooks used by wait queues. */
 bool process_block(struct process *process, struct wait_queue *queue);
 bool process_wake(struct process *process, struct wait_queue *queue);
+bool process_wait_detach(struct process *process, struct wait_queue *queue);
+bool process_wait_requeue(struct process *process, struct wait_queue *from,
+                          struct wait_queue *to);
 struct process *process_from_wait_link(struct list_head *link);
 void process_save_context(struct process *, const struct i386_context *);
 bool process_load_context(const struct process *, struct i386_context *);
@@ -71,3 +86,17 @@ bool process_is_queued(const struct process *);
 void process_set_queued(struct process *, bool);
 bool process_set_affinity(struct process *, uint8_t);
 struct wait_queue *process_waiting_queue(const struct process *);
+
+bool process_ipc_wait_begin(struct process *, uint32_t syscall, uintptr_t user_buffer,
+                            uint32_t deadline);
+bool process_ipc_wait_active(const struct process *);
+uint32_t process_ipc_wait_deadline(const struct process *);
+uintptr_t process_ipc_wait_reply_buffer(const struct process *);
+bool process_ipc_wait_set_message(struct process *, uint32_t endpoint,
+                                  const struct janos_ipc_message *message);
+bool process_ipc_wait_get_message(const struct process *, uint32_t *endpoint,
+                                  struct janos_ipc_message *message);
+bool process_ipc_wait_complete(struct process *, int32_t result,
+                                const struct janos_ipc_message *message);
+bool process_ipc_wait_cancel(struct process *);
+bool process_ipc_wait_save_context(struct process *, const struct i386_context *);

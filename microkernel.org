@@ -1,0 +1,308 @@
+#+title: JanOS Microkernel Migration Plan
+#+author: JanOS
+
+* Goal
+
+Turn JanOS into a small microkernel that provides only mechanisms in kernel
+mode. Drivers, filesystems, the framebuffer console, and applications should
+run as isolated user processes and communicate through IPC.
+
+The initial demonstrator will run two independent processes on SMP:
+
+- a framebuffer server responsible for display output;
+- the ~calc~ application, running as a separate user process.
+
+The framebuffer server must not share the calculator's address space. The
+kernel owns scheduling, address-space isolation, IPC, interrupts, and the
+capabilities required to access hardware.
+
+* Target Architecture
+
+** Kernel mechanisms
+
+- Per-CPU scheduler state and current-process pointers.
+- Preemptive context switching driven by a timer interrupt.
+- Process address spaces, user/kernel transitions, and process lifecycle.
+- Kernel-managed IPC endpoints with blocking send and receive operations.
+- Capability or handle-based access to IPC endpoints, memory, IRQs, and I/O.
+- SMP startup, CPU affinity, inter-processor interrupts, and load balancing.
+- Minimal interrupt dispatch and delivery to user-space servers.
+- Physical and virtual memory allocation and controlled page mapping.
+
+** User-space servers
+
+- Framebuffer server: owns the framebuffer mapping and renders text/glyphs.
+- Input server: owns PS/2 input and sends keyboard events over IPC.
+- Storage server: owns AHCI and exposes block-device requests over IPC.
+- Filesystem server: reads FAT16 and exposes file operations over IPC.
+- Font service: loads PSF2 files through the filesystem server.
+
+** User applications
+
+- ~calc~ communicates with input and framebuffer servers through IPC.
+- A shell process starts applications and reports process state.
+- Applications do not access framebuffer, SATA, PS/2, or PCI hardware directly.
+
+* Invariants
+
+- Every process has exactly one address space and one lifecycle state.
+- ~current_process~ is per CPU; no global process pointer may represent all CPUs.
+- A process may access only memory and IPC capabilities explicitly granted to it.
+- User processes never execute kernel driver code through direct function calls.
+- Blocking IPC removes the process from the runnable queue.
+- Scheduler and process queues are protected against concurrent SMP access.
+- Server failure must not corrupt or directly terminate unrelated processes.
+- All user pointers and message lengths are validated at the IPC boundary.
+
+* Migration Stages
+
+** Stage 1: Per-CPU process state
+
+- Add a CPU-local structure containing current process, idle process, scheduler
+  stack, and interrupt nesting state.
+- Replace the global ~current_process~ with CPU-local accessors.
+- Add process ownership and CPU fields.
+- Add explicit process states: NEW, READY, RUNNING, BLOCKED, ZOMBIE, DEAD.
+- Ensure process creation and destruction are safe when called on any CPU.
+- Keep the existing single-process boot path working during migration.
+
+Acceptance criteria:
+
+- Two CPUs can enter and leave the kernel without sharing process state.
+- Existing ~calc~ Multiboot and SATA boot tests still pass.
+
+** Stage 2: Scheduler and context switching
+
+- Add one runnable queue per CPU and an idle thread per CPU.
+- Add a timer source and periodic preemption.
+- Implement save/restore of general registers, segment registers, EFLAGS,
+  CR3, kernel stack, and user iret frames.
+- Implement voluntary yield and blocking/unblocking paths.
+- Add process CPU affinity and an initial fixed-affinity policy.
+- Pin the future framebuffer server to CPU 0 and ~calc~ to CPU 1.
+- Use inter-processor interrupts when waking or migrating a process.
+
+Acceptance criteria:
+
+- Two test processes alternate execution without corrupting address spaces.
+- A blocked process does not consume CPU time.
+- A process can be woken on its assigned CPU.
+
+** Stage 3: IPC mechanism
+
+- Define fixed-size kernel message headers and bounded payloads.
+- Add endpoint creation, send, receive, reply, and notification operations.
+- Support synchronous request/reply for simple servers.
+- Support asynchronous event messages for keyboard and interrupt delivery.
+- Copy small messages through the kernel initially; add shared-memory transfer
+  only after the basic protocol is reliable.
+- Validate endpoint handles, sender identity, payload size, and user buffers.
+- Add timeout and cancellation behavior for blocked IPC.
+
+Acceptance criteria:
+
+- A client can call a user-space echo server from both CPUs.
+- Server and client can block, wake, reply, and exit cleanly.
+- Invalid handles and malformed messages are rejected without kernel faults.
+
+** Mandatory Stage 3 Completion Fixes
+
+The current fixed-size IPC ABI is not considered complete until these items are
+implemented. Stage 4 must not begin before all of them pass the guest tests.
+
+*** Pending syscall continuations
+
+- Add a per-process IPC continuation containing the operation, endpoint,
+  message buffer, request ID, deadline, and return value.
+- Change a blocking send or receive into a scheduler-visible BLOCKED state
+  instead of returning immediately with ~EAGAIN~.
+- Resume the saved syscall frame when the operation completes.
+- Ensure the continuation stores only validated kernel-owned copies of user
+  arguments and never retains raw unvalidated user pointers.
+- Reject a second blocking operation while a continuation is active.
+
+*** Reply delivery
+
+- Store the requesting process and request ID in the pending request record.
+- Copy a validated reply into the blocked client's kernel-owned reply buffer.
+- Wake the client on the client's assigned CPU after the reply is committed.
+- Restore the client syscall frame with the reply result before it becomes
+  RUNNING again.
+- Cancel pending requests when either the client or server exits.
+- Ensure a reply token can be consumed exactly once.
+
+*** Timer deadlines and cancellation
+
+- Add a monotonic scheduler tick counter and a deadline to every finite wait.
+- Put blocked IPC waits on a timeout queue ordered by deadline.
+- Wake expired waits with a defined timeout error.
+- Remove timeout entries atomically when a message or reply completes first.
+- Add explicit cancellation for process exit, endpoint destruction, and a
+  future cancellation syscall.
+- Ensure timeout callbacks cannot access freed process or endpoint objects.
+
+*** Endpoint capability transfer
+
+- Replace the current globally usable endpoint number with a per-process
+  capability table or ownership-scoped handle table.
+- Grant a client an endpoint capability during process startup or an explicit
+  capability-transfer operation.
+- Validate capability rights separately for send, receive, reply, and notify.
+- Revoke capabilities when an endpoint or owning process exits.
+- Make stale handles fail after slot reuse through generation checks.
+
+*** Cross-CPU echo milestone
+
+- Start one user-space echo server on CPU 0 and two clients on CPU 0 and CPU 1.
+- Give both clients send capability and the server receive/reply capability.
+- Verify both clients block in IPC, are woken by the server, and resume with
+  the correct reply.
+- Verify the server can block waiting for either client without consuming CPU.
+- Verify a client can be terminated while blocked without corrupting the
+  server, endpoint queue, scheduler queue, or timeout queue.
+- Record scheduler switches, CPU IDs, endpoint IDs, request IDs, and wakeup
+  reasons on the serial debug stream.
+
+Mandatory acceptance criteria:
+
+- A finite IPC wait returns only after message delivery or timeout.
+- A reply resumes the correct client on its assigned CPU.
+- Endpoint capabilities cannot be guessed, reused after revocation, or used
+  for an operation not covered by their rights.
+- Two clients on different CPUs complete the echo test repeatedly without
+  address-space, queue, or allocator corruption.
+- Killing either client or the server leaves no dangling wait or timeout entry.
+
+The `pingpong` user application is the required protocol test client/server;
+the process manager must launch it in these roles before this milestone is
+accepted as a guest-level pass.
+
+** Stage 4: Framebuffer server
+
+- Remove framebuffer ownership from the kernel display implementation.
+- Create a framebuffer server process with a capability for the framebuffer
+  memory mapping and display metadata.
+- Move PSF2 parsing and glyph rendering into the server.
+- Define messages for putc, puts, cursor movement, clear, and scroll.
+- Keep serial output as a kernel debug sink independent of the server.
+- Define behavior when the framebuffer server exits or becomes unavailable.
+
+Acceptance criteria:
+
+- Kernel diagnostics continue on serial without framebuffer access.
+- A user client can write text to the framebuffer through IPC.
+- The framebuffer server and client have separate page directories.
+
+** Stage 5: Input server and shell
+
+- Move PS/2 keyboard handling into an input server.
+- Deliver key events to a shell or terminal server through IPC.
+- Add line editing, command history, and command dispatch in user space.
+- Implement shell commands:
+  - ~help~
+  - ~ps~
+  - ~info~
+  - ~font~
+  - ~calc~
+  - ~clear~
+  - ~exit~
+- Make ~ps~ report PID, state, CPU, entry point, and address-space identity.
+- Make ~info~ report server capabilities, CPU affinity, framebuffer mode, and
+  loaded font metadata.
+
+Acceptance criteria:
+
+- The shell remains responsive while ~calc~ is blocked on input.
+- The shell starts and observes ~calc~ as a separate process.
+- Process startup diagnostics are obtained through an IPC process service.
+
+** Stage 6: Storage and filesystem servers
+
+- Move PCI discovery and AHCI ownership into a storage server.
+- Expose block reads and writes through validated IPC requests.
+- Move FAT16 parsing into a filesystem server consuming the block protocol.
+- Move PSF2 and ELF file loading to user-space services.
+- Replace direct kernel ~block_device~ calls with server handles.
+- Keep a small boot-time loader only until the user-space servers can start.
+
+Acceptance criteria:
+
+- ~calc~ and ~JANOS.PSF~ are loaded from FAT16 without kernel filesystem code.
+- Storage-server failure is isolated from the shell and framebuffer server.
+- Read and write requests reject overflow, invalid sectors, and bad handles.
+
+** Stage 7: Capability hardening
+
+- Replace globally discoverable resources with unforgeable handles.
+- Grant framebuffer memory only to the framebuffer server.
+- Grant AHCI MMIO and IRQ capabilities only to the storage server.
+- Grant endpoint capabilities explicitly during process startup.
+- Remove unnecessary kernel mappings from user page directories.
+- Audit every syscall and IPC path for user-pointer validation.
+
+Acceptance criteria:
+
+- ~calc~ cannot read or write framebuffer MMIO directly.
+- A server cannot access another server's address space without a capability.
+- Hardware access violations become contained process failures.
+
+* Process Startup Protocol
+
+The initial process manager starts services in dependency order:
+
+1. Create the framebuffer server and grant framebuffer/font capabilities.
+2. Create the input server and grant PS/2 IRQ and I/O capabilities.
+3. Create the storage server and grant PCI/AHCI capabilities.
+4. Create the filesystem server connected to the storage endpoint.
+5. Create the shell and grant input, framebuffer, and process-manager endpoints.
+6. Let the shell start ~calc~ with only the capabilities it needs.
+
+Every startup response should include:
+
+- PID;
+- entry point;
+- initial stack pointer;
+- assigned CPU;
+- process state;
+- address-space identifier;
+- granted endpoint and memory capabilities.
+
+* Testing Strategy
+
+** Host tests
+
+- Scheduler queue insertion, removal, and priority/affinity decisions.
+- IPC message size, handle validation, blocking, and reply behavior.
+- Process state transitions and exit status handling.
+- PSF2 parsing, glyph bounds, and malformed-file rejection.
+- Shell command parsing and process-info formatting.
+
+** Guest tests
+
+- Boot with one CPU and two CPUs.
+- Start shell, framebuffer server, and ~calc~ independently.
+- Exercise blocked input and concurrent framebuffer writes.
+- Kill or stop a server and verify isolation.
+- Load ~CALC~ and ~JANOS.PSF~ from SATA/FAT16.
+- Verify serial diagnostics during framebuffer and user-process faults.
+
+** Required debug output
+
+- PID and CPU for scheduler switches.
+- IPC endpoint, sender, receiver, and message type.
+- Process state transitions.
+- Page-fault address and instruction pointer.
+- Server startup capabilities.
+- Serial output must remain available even when the framebuffer server fails.
+
+* Completion Definition
+
+The migration is complete when:
+
+- framebuffer and ~calc~ are separate user processes;
+- they can run concurrently on different CPUs;
+- all communication uses IPC and explicit capabilities;
+- kernel drivers and filesystems are no longer required for normal operation;
+- process startup information is available through the shell;
+- malformed IPC, files, fonts, and user memory cannot crash the kernel;
+- serial debugging remains functional throughout boot and failure handling.
