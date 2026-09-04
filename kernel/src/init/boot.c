@@ -31,6 +31,8 @@
 #include <kernel/process/process.h>
 #include <arch/i386/context.h>
 #include <kernel/syscall.h>
+#include <kernel/ipc.h>
+#include <kernel/process/process_service.h>
 #include <kernel/scheduler.h>
 #include <string.h>
 
@@ -102,6 +104,22 @@ struct mbi_info {
 	struct multiboot_tag_elf_sections *elf_sec_tag;
 	const struct multiboot_tag *acpi_tag;
 };
+
+struct kernel_init_context {
+	unsigned int magic;
+	uintptr_t mbi_addr;
+	size_t mbi_size;
+	struct mbi_info mbi_info;
+	size_t mbi_copy_size;
+	fatptr_t mbi_copy_phys;
+	struct vmm_entry *mbi_copy_virt;
+	struct block_device application_disk;
+	struct i386_context initial_context;
+	bool framebuffer_started;
+	bool initial_context_ready;
+	kernel_boot_test_fn boot_test;
+};
+
 static struct mbi_info find_mbi_info(uintptr_t mbi_addr, size_t mbi_size)
 {
 	struct mbi_info res = { 0 };
@@ -141,8 +159,7 @@ static struct mbi_info find_mbi_info(uintptr_t mbi_addr, size_t mbi_size)
 	return res;
 }
 
-void kernel_initialize(unsigned int magic, unsigned long mbi_addr,
-                       kernel_boot_test_fn boot_test)
+static void init_display(void)
 {
 	display_t serial_dpy = init_serial();
 	uint8_t serial_dpy_reg = DISPLAY_MAX_DISPS;
@@ -151,50 +168,65 @@ void kernel_initialize(unsigned int magic, unsigned long mbi_addr,
 		display_set_debug(serial_dpy_reg);
 		display_setcurrent(serial_dpy_reg);
 	}
-
 	section_divisor("Control registers");
 	debug_CR_reg();
+}
 
-	/* Make sure the magic number matches for memory mapping*/
-	if (magic != MULTIBOOT2_BOOTLOADER_MAGIC) {
+static bool init_multiboot(struct kernel_init_context *init)
+{
+	/* Make sure the magic number matches for memory mapping. */
+	if (init->magic != MULTIBOOT2_BOOTLOADER_MAGIC) {
 		panic("invalid magic number!\n");
 	}
 
-	if (mbi_addr & 7) {
-		kprintf("Unaligned mbi: %x\n", mbi_addr);
-		return;
+	if (init->mbi_addr & 7) {
+		kprintf("Unaligned mbi: %x\n", init->mbi_addr);
+		return false;
 	}
 
-	size_t mbi_size = *(unsigned *)mbi_addr;
-	kprintf("Announced mbi size %x\n", mbi_size);
+	init->mbi_size = *(unsigned *)init->mbi_addr;
+	kprintf("Announced mbi size %x\n", init->mbi_size);
 
-	memblock_init(mbi_addr, false);
+	memblock_init(init->mbi_addr, false);
 	memblock_dump();
 
-	phy_mem_init();
+	return true;
+}
 
-	struct mbi_info mbi_info = find_mbi_info(mbi_addr, mbi_size);
-	const size_t mbi_copy_size = round_up_to_page(mbi_size);
-	fatptr_t mbi_copy_phys = phy_mem_alloc(mbi_copy_size, PHY_MEM_ALLOC_HIGH);
-	if (mbi_copy_phys.ptr == nullptr)
+static bool copy_multiboot(struct kernel_init_context *init){
+	init->mbi_info = find_mbi_info(init->mbi_addr, init->mbi_size);
+	init->mbi_copy_size = round_up_to_page(init->mbi_size);
+	init->mbi_copy_phys = phy_mem_alloc(init->mbi_copy_size, PHY_MEM_ALLOC_HIGH);
+
+	if (init->mbi_copy_phys.ptr == nullptr)
 		panic("Failed to allocate Multiboot copy\n");
-	memcpy(mbi_copy_phys.ptr, (const void *)mbi_addr, mbi_size);
-	memset((uint8_t *)mbi_copy_phys.ptr + mbi_size, 0, mbi_copy_size - mbi_size);
 
+	memcpy(init->mbi_copy_phys.ptr, (const void *)init->mbi_addr, init->mbi_size);
+	memset((uint8_t *)init->mbi_copy_phys.ptr + init->mbi_size, 0, init->mbi_copy_size - init->mbi_size);
+
+	return true;
+}
+
+static void init_virtual_memory(struct kernel_init_context *init)
+{
 	section_divisor("Virtual memory init");
-	vmm_init(mbi_info.elf_sec_tag, nullptr, 0);
+	vmm_init(init->mbi_info.elf_sec_tag, nullptr, 0);
 	init_kmalloc();
 	init_slab_allocator();
-	vmm_finish_init(mbi_info.elf_sec_tag, nullptr, 0);
-	struct vmm_entry *mbi_copy_virt = vmm_alloc(mbi_copy_size,
+	vmm_finish_init(init->mbi_info.elf_sec_tag, nullptr, 0);
+	init->mbi_copy_virt = vmm_alloc(init->mbi_copy_size,
 		VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
-	if (mbi_copy_virt == nullptr)
+	if (init->mbi_copy_virt == nullptr)
 		panic("Failed to allocate virtual Multiboot copy\n");
-	map_pages(&mbi_copy_phys, mbi_copy_virt);
-	mbi_info = find_mbi_info((uintptr_t)mbi_copy_virt->ptr, mbi_size);
+	map_pages(&init->mbi_copy_phys, init->mbi_copy_virt);
+	init->mbi_info = find_mbi_info((uintptr_t)init->mbi_copy_virt->ptr,
+		init->mbi_size);
+}
 
+static void init_interrupts(const struct kernel_init_context *init)
+{
 	idt_init();
-	smp_init((struct multiboot_tag *)mbi_info.acpi_tag);
+	smp_init((struct multiboot_tag *)init->mbi_info.acpi_tag);
 
 	struct madt_ioapic_info ioapic_info;
 	if (smp_get_ioapic_info(&ioapic_info)) {
@@ -217,7 +249,10 @@ void kernel_initialize(unsigned int magic, unsigned long mbi_addr,
 		imcr_route_to_apic();
 		pic_disable();
 	}
+}
 
+static void init_kernel_services(void)
+{
 	ps2_init();
 	block_device_init();
 
@@ -226,34 +261,65 @@ void kernel_initialize(unsigned int magic, unsigned long mbi_addr,
 	syscall_init();
 	if (!syscall_register_console_handlers())
 		panic("Failed to register console syscalls\n");
+	if (!ipc_register_syscalls())
+		panic("Failed to register ipc syscalls\n");
+        if (!process_service_register_syscalls())
+		panic("Failed to register process syscalls\n");
 	pit_init();
-	if (boot_test != nullptr)
-		boot_test(mbi_copy_virt->ptr, mbi_size);
+}
 
+static void run_boot_test(const struct kernel_init_context *init)
+{
+	if (init->boot_test != nullptr)
+		init->boot_test(init->mbi_copy_virt->ptr, init->mbi_size);
+}
+
+static void init_userspace(struct kernel_init_context *init)
+{
 	__asm__ volatile("sti");
 
-	struct block_device application_disk;
-	if (!find_application_disk(&application_disk))
+	if (!find_application_disk(&init->application_disk))
 		panic("No FAT16 application disk found\n");
 
-	struct i386_context initial_context;
-	bool framebuffer_started = framebuffer_boot_services(mbi_copy_virt->ptr, mbi_size,
-		&application_disk,
-		&initial_context);
-	if (!framebuffer_started)
+	init->framebuffer_started = framebuffer_boot_services(init->mbi_copy_virt->ptr,
+		init->mbi_size, &init->application_disk, &init->initial_context);
+	if (!init->framebuffer_started)
 		kprintf("Framebuffer services unavailable\n");
 	else
 		framebuffer_console_enable();
 
-	if (framebuffer_started && !framebuffer_boot_clear())
+	if (init->framebuffer_started && !framebuffer_boot_clear())
 		panic("Failed to queue framebuffer clear request\n");
 
-	bool initial_context_ready = framebuffer_started;
-	if (!stage5_boot_services(&application_disk, &initial_context,
-		&initial_context_ready))
+	init->initial_context_ready = init->framebuffer_started;
+	if (!stage5_boot_services(&init->application_disk, &init->initial_context,
+		&init->initial_context_ready))
 		panic("Failed to start Stage 5 userspace services\n");
 
-	i386_context_enter_user(&initial_context);
+	i386_context_enter_user(&init->initial_context);
+}
 
-	kprintf("Finish init\n");
+static void kernel_initialize(struct kernel_init_context *init)
+{
+	init_display();
+	if (!init_multiboot(init))
+		return;
+	phy_mem_init();
+	copy_multiboot(init);
+	init_virtual_memory(init);
+	init_interrupts(init);
+	init_kernel_services();
+	run_boot_test(init);
+	init_userspace(init);
+}
+
+void kernel_boot(unsigned int magic, unsigned long mbi_addr,
+	              kernel_boot_test_fn boot_test)
+{
+	struct kernel_init_context init = {
+		.magic = magic,
+		.mbi_addr = mbi_addr,
+		.boot_test = boot_test,
+	};
+	kernel_initialize(&init);
 }
