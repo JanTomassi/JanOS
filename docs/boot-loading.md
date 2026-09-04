@@ -29,6 +29,18 @@ meson compile -C build calc-disk iso
 ./tools/run-qemu.sh qemu-system-i386 build/JanOS.iso sata build/calc-disk.img
 ```
 
+## GDB Debugging
+
+The `gdb` Meson target starts the disk-backed kernel paused at reset, loads the
+kernel symbols, and connects GDB to QEMU's remote stub on port `1234`:
+
+```sh
+meson compile -C build gdb
+```
+
+The target prefers `i686-elf-gdb` and falls back to `gdb`. Set breakpoints such
+as `kernel_initialize` or `init_virtual_memory`, then use `continue`.
+
 The ISO and the application disk are separate intentionally. The ISO contains
 the kernel boot artifact; the FAT16 disk contains software loaded after the
 kernel starts.

@@ -2,7 +2,7 @@ project(
   'JanOS',
   'c',
   version: '0.1.0',
-  meson_version: '>=1.3.0',
+  meson_version: '>=1.6.0',
   default_options: [
     'buildtype=debug',
     'c_std=c2x',
@@ -78,22 +78,32 @@ if grub_mkrescue.found()
       command: [sh, iso_script, grub_mkrescue, '@OUTPUT@', '@INPUT0@', '@INPUT1@'],
       build_by_default: false,
   )
-  pingpong_grub_config = files('data/grub-pingpong.cfg')
-  janos_pingpong_iso = custom_target(
-    'pingpong-iso',
-    input: [janos_test_kernel, pingpong_grub_config],
-    output: 'JanOS-pingpong.iso',
-    command: [sh, iso_script, grub_mkrescue, '@OUTPUT@', '@INPUT0@', '@INPUT1@'],
-    build_by_default: false,
-  )
-  framebuffer_grub_config = files('data/grub-framebuffer.cfg')
-  janos_framebuffer_iso = custom_target(
-    'framebuffer-iso',
-    input: [janos_test_kernel, framebuffer_grub_config],
-    output: 'JanOS-framebuffer.iso',
-    command: [sh, iso_script, grub_mkrescue, '@OUTPUT@', '@INPUT0@', '@INPUT1@'],
-    build_by_default: false,
-  )
+  if get_option('kernel_tests')
+    pingpong_grub_config = files('data/grub-pingpong.cfg')
+    janos_pingpong_iso = custom_target(
+      'pingpong-iso',
+      input: [janos_test_kernel, pingpong_grub_config],
+      output: 'JanOS-pingpong.iso',
+      command: [sh, iso_script, grub_mkrescue, '@OUTPUT@', '@INPUT0@', '@INPUT1@'],
+      build_by_default: false,
+    )
+    framebuffer_grub_config = files('data/grub-framebuffer.cfg')
+    janos_framebuffer_iso = custom_target(
+      'framebuffer-iso',
+      input: [janos_test_kernel, framebuffer_grub_config],
+      output: 'JanOS-framebuffer.iso',
+      command: [sh, iso_script, grub_mkrescue, '@OUTPUT@', '@INPUT0@', '@INPUT1@'],
+      build_by_default: false,
+    )
+    kernel_test_grub_config = files('data/grub-test.cfg')
+    janos_kernel_test_iso = custom_target(
+      'kernel-test-iso',
+      input: [janos_test_kernel, kernel_test_grub_config],
+      output: 'JanOS-kernel-test.iso',
+      command: [sh, iso_script, grub_mkrescue, '@OUTPUT@', '@INPUT0@', '@INPUT1@'],
+      build_by_default: false,
+    )
+  endif
 
   qemu_option = get_option('qemu')
   qemu = find_program('qemu-system-i386', native: true, required: qemu_option)
@@ -134,55 +144,17 @@ if grub_mkrescue.found()
       command: [sh, qemu_script, qemu, janos_iso, 'debug-sata', calc_disk.full_path(), ''],
       depends: [calc_disk],
     )
-    pingpong_guest_test = find_program('tests/guest/pingpong_qemu.sh', native: true)
-    test(
-      'pingpong-guest',
-      pingpong_guest_test,
-      args: [qemu, janos_pingpong_iso, calc_disk.full_path()],
-      depends: [janos_pingpong_iso, calc_disk],
-      timeout: 30,
-      is_parallel: false,
-      suite: 'guest',
-    )
-    test(
-      'pingpong-disk-guest',
-      pingpong_guest_test,
-      args: [qemu, janos_pingpong_iso, calc_disk.full_path()],
-      depends: [janos_pingpong_iso, calc_disk],
-      timeout: 30,
-      is_parallel: false,
-      suite: 'guest',
-    )
-    test(
-      'pingpong-guest-4cpu',
-      pingpong_guest_test,
-      args: [qemu, janos_pingpong_iso, calc_disk.full_path()],
-      depends: [janos_pingpong_iso, calc_disk],
-      env: ['JANOS_QEMU_SMP=4'],
-      timeout: 30,
-      is_parallel: false,
-      suite: 'guest',
-    )
-    framebuffer_guest_test = files('tests/guest/framebuffer_qemu.sh')
-    test(
-      'framebuffer-guest',
-      sh,
-      args: [framebuffer_guest_test, qemu, janos_framebuffer_iso, calc_disk.full_path()],
-      depends: [janos_framebuffer_iso, calc_disk],
-      timeout: 40,
-      is_parallel: false,
-      suite: 'guest',
-    )
-    shell_guest_test = files('tests/guest/shell_qemu.sh')
-    test(
-      'shell-guest',
-      sh,
-      args: [shell_guest_test, qemu, janos_iso, calc_disk.full_path()],
-      depends: [janos_iso, calc_disk],
-      timeout: 60,
-      is_parallel: false,
-      suite: 'guest',
-    )
+    gdb = find_program('i686-elf-gdb', 'gdb', native: true, required: false)
+    if gdb.found()
+      gdb_script = files('tools/debug-qemu.sh')
+      run_target(
+        'gdb',
+        command: [sh, gdb_script, qemu, gdb, janos_kernel, qemu_script,
+          janos_iso, 'debug-sata', sata_disk1, sata_disk2],
+        depends: [janos_kernel, janos_iso, calc_disk],
+      )
+    endif
+    subdir('tests/integration')
   endif
 endif
 

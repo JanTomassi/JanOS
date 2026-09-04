@@ -9,6 +9,7 @@
 #include <kernel/process/process.h>
 #include <kernel/scheduler.h>
 #include <kernel/syscall.h>
+#include <kernel/phy_mem.h>
 #include <kernel/vir_mem.h>
 #include <arch/i386/context.h>
 #include <arch/i386/smp.h>
@@ -95,11 +96,15 @@ static bool multiboot_cmdline_is(const void *multiboot_info,
 static void run_pingpong_test(void)
 {
 	struct block_device device;
-	if (!find_application_disk("pingpong", &device))
-		return;
+	if (!find_application_disk("pingpong", &device)) {
+		kernel_test_marker("PINGPONG", false);
+		kernel_test_finish(1);
+	}
 	struct process_exec_result server;
-	if (!process_load_block_device_app(&device, "pingpong", &server))
-		return;
+	if (!process_load_block_device_app(&device, "pingpong", &server)) {
+		kernel_test_marker("PINGPONG", false);
+		kernel_test_finish(1);
+	}
 
 	int32_t endpoint = ipc_endpoint_create_for(server.process);
 	char endpoint_text[12];
@@ -150,8 +155,10 @@ static void run_pingpong_test(void)
 static void run_framebuffer_test(const void *multiboot_info, size_t multiboot_info_size)
 {
 	struct block_device device;
-	if (!find_application_disk("fbserver", &device))
-		return;
+	if (!find_application_disk("fbserver", &device)) {
+		kernel_test_marker("FRAMEBUFFER", false);
+		kernel_test_finish(1);
+	}
 
 	struct process_exec_result server;
 	if (!process_load_block_device_app(&device, "fbserver", &server))
@@ -244,12 +251,155 @@ static void run_framebuffer_test(const void *multiboot_info, size_t multiboot_in
 	i386_context_enter_user(&server.context);
 }
 
+static bool run_memory_self_test(void)
+{
+	fatptr_t physical = phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH);
+	if (physical.ptr == nullptr)
+		return false;
+	phy_mem_free(physical);
+
+	struct vmm_entry *mapping = vmm_alloc(PAGE_SIZE * 4,
+		VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
+	if (mapping == nullptr)
+		return false;
+	uint8_t *bytes = mapping->ptr;
+	bytes[0] = 0x5a;
+	bytes[mapping->size - 1] = 0xa5;
+	bool valid = mapping->size >= PAGE_SIZE * 4 && bytes[0] == 0x5a &&
+		bytes[mapping->size - 1] == 0xa5;
+	vmm_free(mapping->ptr);
+	return valid;
+}
+
+static bool run_process_self_test(void)
+{
+	struct process *parent = process_create(nullptr);
+	struct process *child = parent == nullptr ? nullptr : process_create(parent);
+	if (parent == nullptr || child == nullptr)
+		goto fail;
+	if (process_parent(child) != parent || process_child_count(parent) != 1 ||
+		process_get_state(child) != PROCESS_NEW)
+		goto fail;
+	const fatptr_t *parent_pd = process_page_directory(parent);
+	const fatptr_t *child_pd = process_page_directory(child);
+	if (parent_pd == nullptr || child_pd == nullptr || parent_pd->ptr == nullptr ||
+		child_pd->ptr == nullptr || parent_pd->ptr == child_pd->ptr ||
+		address_space_id(process_address_space(parent)) ==
+		address_space_id(process_address_space(child)))
+		goto fail;
+
+	struct janos_process_info info;
+	if (process_snapshot_pid(process_pid(child), &info) != 0 ||
+		info.address_space != address_space_id(process_address_space(child)))
+		goto fail;
+
+	void *mapped = nullptr;
+	if (address_space_map(process_address_space(child), PAGE_SIZE,
+		VMM_ENTRY_READ_WRITE_BIT, &mapped) ||
+		address_space_map_at(process_address_space(child), 0xc0000000u, PAGE_SIZE,
+			VMM_ENTRY_USER_SUPER_BIT, &mapped) ||
+		!address_space_map(process_address_space(child), PAGE_SIZE * 2,
+		VMM_ENTRY_USER_SUPER_BIT | VMM_ENTRY_READ_WRITE_BIT, &mapped) ||
+		mapped == nullptr || !address_space_validate(process_address_space(child),
+			(uintptr_t)mapped + PAGE_SIZE - 16, 32,
+			VMM_ENTRY_USER_SUPER_BIT | VMM_ENTRY_READ_WRITE_BIT))
+		goto fail;
+	uint8_t input[32];
+	uint8_t output[32] = { 0 };
+	for (size_t i = 0; i < sizeof(input); ++i)
+		input[i] = (uint8_t)(i ^ 0x5a);
+	if (!address_space_copy_to(process_address_space(child),
+		(uintptr_t)mapped + PAGE_SIZE - 16,
+		input, sizeof(input)) ||
+		!address_space_copy_from(process_address_space(child), output,
+		(uintptr_t)mapped + PAGE_SIZE - 16, sizeof(output)) ||
+		memcmp(input, output, sizeof(input)) != 0 ||
+		!address_space_protect(process_address_space(child), (uintptr_t)mapped,
+			PAGE_SIZE * 2, VMM_ENTRY_USER_SUPER_BIT) ||
+		!address_space_validate(process_address_space(child), (uintptr_t)mapped,
+			PAGE_SIZE * 2, VMM_ENTRY_USER_SUPER_BIT) ||
+		address_space_validate(process_address_space(child), (uintptr_t)mapped,
+			PAGE_SIZE * 2, VMM_ENTRY_USER_SUPER_BIT | VMM_ENTRY_READ_WRITE_BIT) ||
+		!address_space_unmap(process_address_space(child), mapped) ||
+		address_space_unmap(process_address_space(child), mapped))
+		goto fail;
+
+	fatptr_t borrowed_page = phy_mem_alloc(PAGE_SIZE, PHY_MEM_ALLOC_HIGH);
+	if (borrowed_page.ptr == nullptr)
+		goto fail;
+	void *borrowed = nullptr;
+	bool borrowed_ok = address_space_map_borrowed(process_address_space(parent),
+		(uintptr_t)borrowed_page.ptr, PAGE_SIZE,
+		VMM_ENTRY_USER_SUPER_BIT | VMM_ENTRY_READ_WRITE_BIT, &borrowed);
+	if (borrowed_ok)
+		borrowed_ok = address_space_unmap(process_address_space(parent), borrowed);
+	phy_mem_free(borrowed_page);
+	if (!borrowed_ok)
+		goto fail;
+
+	process_destroy(child);
+	process_destroy(parent);
+	return true;
+
+fail:
+	process_destroy(child);
+	process_destroy(parent);
+	return false;
+}
+
+static int32_t selftest_syscall_handler(syscall_frame *frame, void *context)
+{
+	uint32_t *calls = context;
+	if (frame == nullptr || calls == nullptr)
+		return -1;
+	++*calls;
+	return (int32_t)frame->ebx;
+}
+
+static bool run_syscall_self_test(void)
+{
+	uint32_t calls = 0;
+	syscall_init();
+	if (!syscall_register(0, selftest_syscall_handler, &calls) ||
+		syscall_register(0, selftest_syscall_handler, &calls) ||
+		syscall_register(JANOS_SYS_MAX, selftest_syscall_handler, &calls))
+		return false;
+	syscall_frame frame = { .eax = 0, .ebx = 0x1234 };
+	if (syscall_dispatch(&frame) != 0x1234 || frame.eax != 0x1234 || calls != 1)
+		return false;
+	return syscall_dispatch(nullptr) == -SYSCALL_ENOSYS;
+}
+
+static void run_kernel_self_tests(void)
+{
+	bool memory_ok = run_memory_self_test();
+	kernel_test_marker("MEMORY", memory_ok);
+	if (!memory_ok)
+		kernel_test_finish(1);
+	bool syscall_ok = run_syscall_self_test();
+	kernel_test_marker("SYSCALL", syscall_ok);
+	if (!syscall_ok)
+		kernel_test_finish(1);
+	bool process_ok = run_process_self_test();
+	kernel_test_marker("PROCESS", process_ok);
+	if (!process_ok)
+		kernel_test_finish(1);
+	kernel_test_marker("BOOT", true);
+	kernel_test_finish(0);
+}
+
 void kernel_test_boot(const void *multiboot_info, size_t multiboot_info_size)
 {
+	if (multiboot_cmdline_is(multiboot_info, multiboot_info_size, "selftest")) {
+		run_kernel_self_tests();
+		return;
+	}
 	if (multiboot_cmdline_is(multiboot_info, multiboot_info_size, "pingpong")) {
 		run_pingpong_test();
 		return;
 	}
 	if (multiboot_cmdline_is(multiboot_info, multiboot_info_size, "framebuffer"))
 		run_framebuffer_test(multiboot_info, multiboot_info_size);
+	kernel_test_marker("MODE", false);
+	kernel_test_finish(1);
 }

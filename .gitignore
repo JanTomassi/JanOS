@@ -13,5 +13,7 @@ sysroot
 *.d
 *.o
 *.a
+*.pyc
+__pycache__/
 
 JanOS.*

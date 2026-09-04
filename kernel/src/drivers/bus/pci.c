@@ -8,14 +8,30 @@
 
 #define PCI_CONFIG_ENABLE (1u << 31)
 
+static struct pci_config_ops pci_config_ops = { 0 };
+
+/*
+ * PCI configuration mechanism #1 packs the BDF (bus/device/function) and a
+ * dword-aligned register offset into one value written to CF8.  The selected
+ * register is then read or written through CFC.
+ */
 static uint32_t pci_make_address(uint8_t bus, uint8_t device, uint8_t function, uint8_t offset)
 {
 	return PCI_CONFIG_ENABLE | ((uint32_t)bus << 16) | ((uint32_t)device << 11) | ((uint32_t)function << 8) |
 	       (offset & 0xFC);
 }
 
+void pci_set_config_ops(const struct pci_config_ops *ops)
+{
+	pci_config_ops = ops == nullptr ? (struct pci_config_ops){ 0 } : *ops;
+}
+
 uint32_t pci_read_config_dword(uint8_t bus, uint8_t device, uint8_t function, uint8_t offset)
 {
+	offset &= 0xFC;
+	if (pci_config_ops.read_dword != nullptr)
+		return pci_config_ops.read_dword(bus, device, function, offset,
+			pci_config_ops.context);
 	outd(PCI_CONFIG_ADDRESS, pci_make_address(bus, device, function, offset));
 	return ind(PCI_CONFIG_DATA);
 }
@@ -34,12 +50,19 @@ uint8_t pci_read_config_byte(uint8_t bus, uint8_t device, uint8_t function, uint
 
 void pci_write_config_dword(uint8_t bus, uint8_t device, uint8_t function, uint8_t offset, uint32_t value)
 {
+	offset &= 0xFC;
+	if (pci_config_ops.write_dword != nullptr) {
+		pci_config_ops.write_dword(bus, device, function, offset, value,
+			pci_config_ops.context);
+		return;
+	}
 	outd(PCI_CONFIG_ADDRESS, pci_make_address(bus, device, function, offset));
 	outd(PCI_CONFIG_DATA, value);
 }
 
 bool pci_read_device(uint8_t bus, uint8_t device, uint8_t function, struct pci_device *out)
 {
+	/* Vendor ID 0xffff is the standard "no function present" response. */
 	uint16_t vendor_id = pci_read_config_word(bus, device, function, 0x00);
 	if (vendor_id == 0xFFFF)
 		return false;
@@ -87,6 +110,11 @@ static bool pci_match_class(const struct pci_device *dev, uint8_t class_id, uint
 
 bool pci_find_class(uint8_t class_id, uint8_t subclass, uint8_t prog_if, struct pci_device *out)
 {
+	/*
+	 * A device has up to 32 slots per bus.  Function zero is always probed;
+	 * functions 1-7 are probed only when its header advertises a multifunction
+	 * device.  The first matching function is returned to the driver.
+	 */
 	for (uint16_t bus = 0; bus < 256; bus++) {
 		for (uint8_t device = 0; device < 32; device++) {
 			struct pci_device dev = { 0 };
@@ -128,6 +156,7 @@ void pci_enable_bus_mastering(const struct pci_device *device)
 	if (device == nullptr)
 		return;
 
+	/* Command bit 1 enables memory space; bit 2 permits DMA bus mastering. */
 	uint16_t command = pci_read_config_word(device->bus, device->device, device->function, 0x04);
 	command |= (1u << 2) | (1u << 1);
 	uint32_t new_value = (uint32_t)command | ((uint32_t)pci_read_config_word(device->bus, device->device, device->function, 0x06) << 16);

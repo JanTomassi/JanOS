@@ -9,6 +9,11 @@ enum block_device_backend {
 	BLOCK_DEVICE_BACKEND_ATA_PIO,
 };
 
+typedef bool (*block_device_read_fn)(void *context, uint64_t lba,
+	uint32_t sector_count, void *destination);
+typedef bool (*block_device_write_fn)(void *context, uint64_t lba,
+	uint32_t sector_count, const void *source);
+
 struct block_device {
 	enum block_device_backend backend;
 	uint32_t sector_size;
@@ -17,6 +22,10 @@ struct block_device {
 	uint8_t ahci_port;
 	uint8_t channel;
 	uint8_t drive;
+	/* Optional backend override used by tests and software-backed devices. */
+	block_device_read_fn read_fn;
+	block_device_write_fn write_fn;
+	void *context;
 };
 
 void block_device_init(void);

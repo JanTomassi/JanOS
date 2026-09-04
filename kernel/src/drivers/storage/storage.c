@@ -216,6 +216,8 @@ bool block_device_read(const struct block_device *device, uint64_t lba, uint32_t
 	if (device == nullptr || dest == nullptr || sector_count == 0 || lba > UINT32_MAX ||
 		sector_count > UINT16_MAX || device->sector_size != 512)
 		return false;
+	if (device->read_fn != nullptr)
+		return device->read_fn(device->context, lba, sector_count, dest);
 
 	switch (device->backend) {
 	case BLOCK_DEVICE_BACKEND_AHCI:
@@ -232,6 +234,8 @@ bool block_device_write(const struct block_device *device, uint64_t lba, uint32_
 	if (device == nullptr || src == nullptr || sector_count == 0 || lba > UINT32_MAX ||
 		sector_count > UINT16_MAX || device->sector_size != 512)
 		return false;
+	if (device->write_fn != nullptr)
+		return device->write_fn(device->context, lba, sector_count, src);
 
 	switch (device->backend) {
 	case BLOCK_DEVICE_BACKEND_AHCI:

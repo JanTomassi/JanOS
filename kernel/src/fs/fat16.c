@@ -5,7 +5,7 @@
 #include <kernel/allocator.h>
 #include <kernel/fat16.h>
 
-static char toupper(char c){
+static char fat16_toupper(char c){
 	if(c >= 'a' && c <= 'z'){
 		c += 'A'-'a';
 	}
@@ -115,6 +115,11 @@ static uint32_t fat16_cluster_to_lba(const fat16_layout_t *layout, uint16_t clus
 
 void fat16_compute_layout(const fat_BS_t *bpb, fat16_layout_t *out)
 {
+	if (out == nullptr)
+		return;
+	*out = (fat16_layout_t){ 0 };
+	if (bpb == nullptr || bpb->sector_size == 0 || bpb->sectors_per_cluster == 0)
+		return;
 	out->fat_start_lba = fat16_fat_start_lba(bpb);
 	out->root_dir_sectors = fat16_root_dir_sectors(bpb);
 	out->root_dir_lba = fat16_root_dir_lba(bpb, out->fat_start_lba);
@@ -129,9 +134,11 @@ fat_BS_t *read_fat_boot_section(struct block_device dev){
 	fatptr_t boot_sector = gpa_alloc.alloc(512);
 
 	fat_BS_t *boot_sector_p = boot_sector.ptr;
+	if (boot_sector_p == nullptr)
+		return nullptr;
 	memset(boot_sector_p, 0, 512);
 
-	if (boot_sector_p == nullptr || !block_device_read(&dev, 0, 1, boot_sector_p)) {
+	if (!block_device_read(&dev, 0, 1, boot_sector_p)) {
 		if (boot_sector_p != nullptr)
 			gpa_alloc.free(boot_sector);
 		return nullptr;
@@ -155,7 +162,7 @@ static uint16_t fat16_extract_entry(const uint8_t *sector, uint32_t offset)
 
 uint16_t fat16_read_fat_entry(const struct block_device *device, const fat16_layout_t *layout, uint16_t cluster)
 {
-	if (device == nullptr || layout == nullptr || layout->sector_size == 0)
+	if (device == nullptr || layout == nullptr || layout->sector_size < 2)
 		return 0;
 
 	uint32_t fat_offset = (uint32_t)cluster * 2;
@@ -190,7 +197,8 @@ static bool fat16_name_matches(const fat_dir_entry_t *entry, const char *name)
 		return false;
 
 	for (size_t i = 0; entry_name[i] != '\0' || name[i] != '\0'; ++i) {
-		if (toupper((unsigned char)entry_name[i]) != toupper((unsigned char)name[i]))
+		if (fat16_toupper((unsigned char)entry_name[i]) !=
+			fat16_toupper((unsigned char)name[i]))
 			return false;
 	}
 
@@ -308,6 +316,14 @@ static bool fat16_read_cluster_data(const struct block_device *device, const fat
 	return ok;
 }
 
+static size_t fat16_cluster_limit(const struct block_device *device)
+{
+	if (device == nullptr || device->sector_count == 0 ||
+		device->sector_count > UINT16_MAX)
+		return UINT16_MAX;
+	return (size_t)device->sector_count;
+}
+
 bool fat16_read_file(const struct block_device *device, const fat_dir_entry_t *entry,
 		     void *buffer, size_t buffer_size, size_t *out_bytes)
 {
@@ -331,7 +347,10 @@ bool fat16_read_file(const struct block_device *device, const fat_dir_entry_t *e
 	uint8_t *out = buffer;
 	uint16_t cluster = entry->first_cluster_low;
 	size_t total_read = 0;
-	while (cluster >= 2 && total_read < to_read) {
+	size_t cluster_steps = 0;
+	size_t cluster_limit = fat16_cluster_limit(device);
+	while (cluster >= 2 && total_read < to_read && cluster_steps < cluster_limit) {
+		++cluster_steps;
 		size_t cluster_read = 0;
 		if (!fat16_read_cluster_data(device, &layout, cluster, out + total_read,
 					     to_read - total_read, &cluster_read)) {
@@ -390,8 +409,11 @@ bool fat16_file_read_at(const struct fat16_file *file, uint32_t offset,
 	uint16_t cluster = file->entry.first_cluster_low;
 	size_t skip = offset;
 	size_t copied = 0;
+	size_t cluster_steps = 0;
+	size_t cluster_limit = fat16_cluster_limit(&file->device);
 	bool ok = true;
-	while (skip >= cluster_bytes) {
+	while (skip >= cluster_bytes && cluster_steps < cluster_limit) {
+		++cluster_steps;
 		uint16_t next = fat16_read_fat_entry(&file->device, &file->layout, cluster);
 		if (fat16_is_end_of_chain(next) || next < 2) {
 			ok = false;
@@ -400,7 +422,8 @@ bool fat16_file_read_at(const struct fat16_file *file, uint32_t offset,
 		cluster = next;
 		skip -= cluster_bytes;
 	}
-	while (ok && copied < wanted) {
+	while (ok && copied < wanted && cluster_steps < cluster_limit) {
+		++cluster_steps;
 		size_t cluster_read = 0;
 		if (!fat16_read_cluster_data(&file->device, &file->layout, cluster,
 					     temporary.ptr, cluster_bytes, &cluster_read)) {

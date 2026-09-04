@@ -394,15 +394,25 @@ static void build_stacks(void)
 	}
 }
 
+static bool wait_for_cpu_online(size_t index)
+{
+	for (volatile int wait = 0; wait < 1000000; wait++) {
+		if (__atomic_load_n(&cpus[index].online, __ATOMIC_ACQUIRE))
+			return true;
+	}
+	return false;
+}
+
 static void start_aps(void)
 {
-	// for each Local APIC ID we do...
+	/* The trampoline has shared self-modifying data and a temporary stack. */
 	for(size_t i = 0; i < cpu_count; i++) {
-		// do not start BSP, that's already running this code
+		/* Do not start BSP, which is already running this code. */
 		if (cpus[i].online)
 			continue;
-		// TODO: pass the physical address of the trampoline
 		lapic_start_ap(cpus[i].apic_id, (uint8_t)(ap_trampoline_phys_base >> 12));
+		if (!wait_for_cpu_online(i))
+			panic("SMP: CPU %u failed to start\n", cpus[i].apic_id);
 	}
 }
 
