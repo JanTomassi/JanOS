@@ -314,6 +314,33 @@ bool ipc_kernel_send(uint32_t handle, const struct janos_ipc_message *message)
 	return true;
 }
 
+bool ipc_kernel_notify(uint32_t handle, uint32_t type, uint32_t value)
+{
+	struct janos_ipc_message message = { .header = {
+		.type = type,
+		.flags = JANOS_IPC_NOTIFICATION,
+		.length = sizeof(value),
+	} };
+	memcpy(message.payload, &value, sizeof(value));
+	ensure_initialized();
+	uint32_t flags = spin_lock_irqsave(&ipc_lock);
+	struct ipc_endpoint *endpoint = lookup(handle);
+	if (endpoint == nullptr || endpoint->count == JANOS_IPC_QUEUE_SIZE) {
+		spin_unlock_irqrestore(&ipc_lock, flags);
+		return false;
+	}
+	message.header.request_id = endpoint->next_request++;
+	message.header.sender = 0;
+	if (endpoint->next_request == 0)
+		endpoint->next_request = 1;
+	endpoint->messages[(endpoint->head + endpoint->count) % JANOS_IPC_QUEUE_SIZE] = message;
+	++endpoint->count;
+	spin_unlock_irqrestore(&ipc_lock, flags);
+	/* Wake without copying into a user address from interrupt context. */
+	ipc_wake_receiver(handle);
+	return true;
+}
+
 static int32_t ipc_send(syscall_frame *frame, void *context)
 {
 	(void)context;
