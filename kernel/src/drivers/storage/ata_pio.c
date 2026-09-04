@@ -73,6 +73,8 @@ enum ata_channel {
 #define ATA_SECONDARY_IO 0x170
 #define ATA_SECONDARY_CTRL 0x376
 
+#define ATA_POLL_LIMIT 1000000u
+
 struct IDEChannelRegisters {
 	unsigned short base;  // I/O Base.
 	unsigned short ctrl;  // Control Base
@@ -90,6 +92,20 @@ static void wait_device(uint8_t channel)
 	inb(ctrl);
 	inb(ctrl);
 	inb(ctrl);
+}
+
+static bool ata_wait_not_busy(uint16_t base, uint8_t *status_out)
+{
+	for (unsigned int poll = 0; poll < ATA_POLL_LIMIT; ++poll) {
+		uint8_t status = inb(base + 7);
+		if ((status & ATA_SR_BSY) == 0) {
+			if (status_out != nullptr)
+				*status_out = status;
+			return true;
+		}
+		__asm__ volatile("pause");
+	}
+	return false;
 }
 
 static void soft_reset(uint8_t channel)
@@ -176,10 +192,13 @@ bool ata_pio_28_read(uint8_t channel, uint8_t drive, uint32_t lba_addr, uint16_t
 
 	size_t dest_idx = 0;
 	while (sector_count--) {
-		while (inb(base + 7) & 0x80)
-			;
-		if (inb(base + 7) & 0x21)
-			panic("ERR or DF set, error reg is %x", inb(base + 1));
+		uint8_t status;
+		if (!ata_wait_not_busy(base, &status) ||
+		    (status & (ATA_SR_ERR | ATA_SR_DF)) ||
+		    !(status & ATA_SR_DRQ)) {
+			outb(channels[channel].ctrl, 0);
+			return false;
+		}
 
 		/* in al, dx		; grab a status byte */
 		/* test al, 0x80	; BSY flag set? */
@@ -238,10 +257,13 @@ bool ata_pio_28_write(uint8_t channel, uint8_t drive, uint32_t lba_addr, uint16_
 
 	size_t src_idx = 0;
 	while (sector_count--) {
-		while (inb(base + 7) & 0x80)
-			;
-		if (inb(base + 7) & 0x21)
-			panic("ERR or DF set, error reg is %x", inb(base + 1));
+		uint8_t status;
+		if (!ata_wait_not_busy(base, &status) ||
+		    (status & (ATA_SR_ERR | ATA_SR_DF)) ||
+		    !(status & ATA_SR_DRQ)) {
+			outb(channels[channel].ctrl, 0);
+			return false;
+		}
 
 		uint16_t word_to_trans = 256;
 		while (word_to_trans--) {
@@ -252,8 +274,12 @@ bool ata_pio_28_write(uint8_t channel, uint8_t drive, uint32_t lba_addr, uint16_
 	}
 
 	outb(base + 7, ATA_CMD_CACHE_FLUSH);
-	while (inb(base + 7) & ATA_SR_BSY)
-		;
+	uint8_t status;
+	if (!ata_wait_not_busy(base, &status) ||
+	    (status & (ATA_SR_ERR | ATA_SR_DF))) {
+		outb(channels[channel].ctrl, 0);
+		return false;
+	}
 
 	outb(channels[channel].ctrl, 0);
 	return true;

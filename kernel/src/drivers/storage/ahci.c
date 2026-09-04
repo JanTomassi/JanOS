@@ -35,6 +35,7 @@ MODULE("AHCI");
 
 #define AHCI_PRDT_MAX_BYTES (4u * 1024u * 1024u)
 #define AHCI_MMIO_WINDOW (0x2000u)
+#define AHCI_POLL_LIMIT 1000000u
 
 struct ahci_port_state {
 	bool active;
@@ -57,19 +58,29 @@ static struct {
 
 bool is_ahci_probed = false;
 
-static void ahci_port_stop(volatile struct hba_port *port)
+static bool ahci_wait_clear(volatile uint32_t *value, uint32_t mask)
 {
-	port->cmd &= ~(AHCI_PORT_CMD_ST | AHCI_PORT_CMD_FRE);
-	while (port->cmd & (AHCI_PORT_CMD_FR | AHCI_PORT_CMD_CR))
-		;
+	for (unsigned int poll = 0; poll < AHCI_POLL_LIMIT; ++poll) {
+		if ((*value & mask) == 0)
+			return true;
+		__asm__ volatile("pause");
+	}
+	return false;
 }
 
-static void ahci_port_start(volatile struct hba_port *port)
+static bool ahci_port_stop(volatile struct hba_port *port)
 {
-	while (port->cmd & AHCI_PORT_CMD_CR)
-		;
+	port->cmd &= ~(AHCI_PORT_CMD_ST | AHCI_PORT_CMD_FRE);
+	return ahci_wait_clear(&port->cmd, AHCI_PORT_CMD_FR | AHCI_PORT_CMD_CR);
+}
+
+static bool ahci_port_start(volatile struct hba_port *port)
+{
+	if (!ahci_wait_clear(&port->cmd, AHCI_PORT_CMD_CR))
+		return false;
 	port->cmd |= AHCI_PORT_CMD_FRE;
 	port->cmd |= AHCI_PORT_CMD_ST;
+	return true;
 }
 
 static bool ahci_port_present(volatile struct hba_port *port)
@@ -83,18 +94,16 @@ static bool ahci_port_present(volatile struct hba_port *port)
 static int ahci_find_free_slot(volatile struct hba_port *port)
 {
 	uint32_t slots = port->sact | port->ci;
-	for (int i = 0; i < AHCI_CMD_SLOT_COUNT; i++) {
-		if ((slots & (1u << i)) == 0)
-			return i;
-	}
-	return -1;
+	/* Rebase allocates one command table, so only slot zero is usable. */
+	return (slots & 1u) == 0 ? 0 : -1;
 }
 
 static bool ahci_port_rebase(struct ahci_port_state *state)
 {
 	volatile struct hba_port *port = state->port;
 
-	ahci_port_stop(port);
+	if (!ahci_port_stop(port))
+		return false;
 
 	state->cmd_list = dma_alloc(1024);
 	state->fis = dma_alloc(256);
@@ -128,8 +137,7 @@ static bool ahci_port_rebase(struct ahci_port_state *state)
 	port->is = 0xFFFFFFFFu;
 	port->ie = 0xFFFFFFFFu;
 
-	ahci_port_start(port);
-	return true;
+	return ahci_port_start(port);
 }
 
 static void ahci_irq_handler(uint8_t irq_line, void *context)
@@ -199,8 +207,10 @@ void ahci_init(void)
 	ahci_state.hba = (volatile struct hba_mem *)ahci_state.mmio.virt;
 
 	ahci_state.hba->ghc |= AHCI_GHC_HR;
-	while (ahci_state.hba->ghc & AHCI_GHC_HR)
-		;
+	if (!ahci_wait_clear(&ahci_state.hba->ghc, AHCI_GHC_HR)) {
+		mprint("AHCI controller reset timed out\n");
+		return;
+	}
 
 	ahci_state.hba->ghc |= AHCI_GHC_AE;
 	ahci_state.hba->ghc |= AHCI_GHC_IE;
@@ -258,8 +268,8 @@ static bool ahci_exec_dma(struct ahci_port_state *state, uint32_t lba_addr, uint
 		return false;
 
 	volatile struct hba_port *port = state->port;
-	while (port->tfd & (AHCI_PORT_TFD_BSY | AHCI_PORT_TFD_DRQ))
-		;
+	if (!ahci_wait_clear(&port->tfd, AHCI_PORT_TFD_BSY | AHCI_PORT_TFD_DRQ))
+		return false;
 
 	int slot = ahci_find_free_slot(port);
 	if (slot < 0)
@@ -315,13 +325,29 @@ static bool ahci_exec_dma(struct ahci_port_state *state, uint32_t lba_addr, uint
 	state->irq_fired = false;
 	port->ci |= 1u << slot;
 
-	while (true) {
+	bool timed_out = true;
+	for (unsigned int poll = 0; poll < AHCI_POLL_LIMIT; ++poll) {
 		bool fin = false;
 		fin |= (port->ci & (1u << slot)) == 0;
 		fin |= state->irq_fired;
 		fin |= port->is & AHCI_PORT_IRQ_TFES;
-		if (fin)
+		if (fin) {
+			timed_out = false;
 			break;
+		}
+		__asm__ volatile("pause");
+	}
+
+	if (timed_out) {
+		mprint("AHCI port %u command timed out\n", state->port_index);
+		state->active = false;
+		/*
+		 * Do not release the DMA buffer while the controller may still own
+		 * it.  A successful port stop makes it safe to reclaim.
+		 */
+		if (ahci_port_stop(port))
+			dma_free(&data);
+		return false;
 	}
 
 	bool ok = (port->ci & (1u << slot)) == 0 && (port->is & AHCI_PORT_IRQ_TFES) == 0;

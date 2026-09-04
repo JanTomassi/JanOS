@@ -460,9 +460,10 @@ path, and verify:
 - Loading an ELF file from FAT16.
 - Starting that ELF as a process and receiving its exit status.
 
-ATA PIO and AHCI polling loops must have bounded timeouts before they can be
-tested reliably. An absent or broken device must fail the test instead of
-hanging QEMU indefinitely.
+ATA PIO, AHCI, and LAPIC polling loops use bounded timeouts. An absent or
+broken device must fail the operation instead of hanging QEMU indefinitely;
+timeout paths should be covered by injected host tests where the hardware
+operation can be represented by a fake register backend.
 
 ## Meson Suites
 

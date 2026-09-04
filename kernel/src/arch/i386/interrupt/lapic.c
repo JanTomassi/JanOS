@@ -18,6 +18,7 @@ extern void pic_disable(void);
 #define LAPIC_REG_LVT_TIMER 0x320
 #define LAPIC_REG_TIMER_INITIAL 0x380
 #define LAPIC_REG_TIMER_DIVIDE 0x3E0
+#define LAPIC_POLL_LIMIT 1000000u
 
 #define LAPIC_SVR_ENABLE (1 << 8)
 
@@ -162,7 +163,10 @@ void lapic_trigger_startup(uint8_t vector){
 
 inline void lapic_wait_delivery(){
 	lapic_map_base();
-	do {
+	for (unsigned int poll = 0; poll < LAPIC_POLL_LIMIT; ++poll) {
+		if ((lapic_read(LAPIC_REG_ICR_LOW) & (1 << 12)) == 0)
+			return;
 		__asm__ __volatile__ ("pause" : : : "memory");
-	}while(lapic_read(LAPIC_REG_ICR_LOW) & (1 << 12));
+	}
+	mprint("LAPIC IPI delivery timed out\n");
 }
