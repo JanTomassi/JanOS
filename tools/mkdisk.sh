@@ -8,7 +8,8 @@ server=$4
 client=$5
 procserv=$6
 input=$7
-font=$8
+shell=$8
+font=$9
 
 rm -f "$output"
 mkfs.fat -C -F 16 -S 512 -s 4 -R 4 -n JANOS -i 4A4E4F53 "$output" 16384 >/dev/null
@@ -18,5 +19,6 @@ MTOOLS_SKIP_CHECK=1 mcopy -i "$output" "$server" ::FBSERVER
 MTOOLS_SKIP_CHECK=1 mcopy -i "$output" "$client" ::FBCLIENT
 MTOOLS_SKIP_CHECK=1 mcopy -i "$output" "$procserv" ::PROCSERV
 MTOOLS_SKIP_CHECK=1 mcopy -i "$output" "$input" ::INPUT
+MTOOLS_SKIP_CHECK=1 mcopy -i "$output" "$shell" ::SHELL
 MTOOLS_SKIP_CHECK=1 mcopy -i "$output" "$font" ::JANOS.PSF
 fsck.fat -n "$output" >/dev/null

@@ -7,7 +7,6 @@
 #include <kernel/phy_mem.h>
 #include <kernel/vir_mem.h>
 #include <kernel/allocator.h>
-#include <kernel/mem_allocs.h>
 
 #include <kernel/interrupt.h>
 #include <kernel/storage.h>
@@ -15,6 +14,7 @@
 #include <kernel/fat16.h>
 #include <kernel/framebuffer_boot.h>
 #include <kernel/memblock.h>
+#include <kernel/stage5.h>
 
 #include <arch/i386/ata_pio.h>
 #include <arch/i386/control_register.h>
@@ -31,7 +31,6 @@
 #include <arch/i386/context.h>
 #include <kernel/syscall.h>
 #include <kernel/scheduler.h>
-#include <arch/i386/port.h>
 #include <string.h>
 #ifdef JANOS_KERNEL_TESTS
 #include <kernel/test.h>
@@ -84,149 +83,20 @@ static void imcr_route_to_apic(void)
 	outb(0x23, 0x01);
 }
 
-void section_divisor(char *section_name)
+static void section_divisor(const char *section_name)
 {
 	const char* div = "---------------------------------------"
 			  "-------------------------------------\n";
 	const size_t div_len = strlen(div);
+	if (section_name == nullptr)
+		return;
 	const size_t section_len = strlen(section_name);
-
-	if (section_name != NULL)
-		kprintf("\n%s", section_name);
+	kprintf("\n%s", section_name);
 
 	if ((long)div_len - (long)section_len < 1)
-		panic("section divisor to long");
+		panic("section divisor too long");
 
 	kprintf(div + section_len);
-}
-
-void phy_memory_test()
-{
-	section_divisor("Testing physical memory allocator");
-	const size_t alloc_count = 4;
-
-	fatptr_t ptr[alloc_count];
-
-	for (size_t k = 0; k <= 10; k++){
-		kprintf("Level is: %x\n", k);
-		for(size_t i = 0; i < alloc_count; i++){
-			fatptr_t mem = phy_mem_alloc(PAGE_SIZE << k, PHY_MEM_ALLOC_HIGH);
-			if (mem.ptr == nullptr)
-				panic("physical allocator test allocation failed at level %x\n", k);
-			kprintf("mem allocated: ptr %x, len %x\n", mem.ptr, mem.len);
-			ptr[i] = mem;
-		}
-		for(size_t i = 0; i < alloc_count; i++){
-			phy_mem_free(ptr[i]);
-		}
-		kprintf("\n");
-	}
-}
-
-void gpa_test(allocator_t gpa_alloc){
-	section_divisor("Testing gpa alloc:\n");
-
-	fatptr_t mem1 = gpa_alloc.alloc(4096);
-	kprintf("mem1 allocated\n");
-	fatptr_t mem2 = gpa_alloc.alloc(128);
-	kprintf("mem2 allocated\n");
-
-	gpa_alloc.free(mem2);
-	kprintf("mem2 freed\n");
-	gpa_alloc.free(mem1);
-	kprintf("mem1 freed\n");
-
-	mem1 = gpa_alloc.alloc(4096);
-	kprintf("mem1 allocated\n");
-	mem2 = gpa_alloc.alloc(512);
-	kprintf("mem2 allocated\n");
-
-	gpa_alloc.free(mem1);
-	kprintf("mem1 freed\n");
-	gpa_alloc.free(mem2);
-	kprintf("mem2 freed\n");
-
-	fatptr_t ptr[512] = { 0 };
-
-	for(size_t i = 0; i < 512; i++){
-		fatptr_t mem = gpa_alloc.alloc(8);
-		ptr[i] = mem;
-	}
-	for(size_t i = 0; i < 512; i++){
-		gpa_alloc.free(ptr[i]);
-	}
-
-	for(size_t i = 0; i < 512; i++){
-		fatptr_t mem = gpa_alloc.alloc(16);
-		ptr[i] = mem;
-	}
-	for(size_t i = 0; i < 512; i++){
-		gpa_alloc.free(ptr[i]);
-	}
-
-	for(size_t i = 0; i < 512; i++){
-		fatptr_t mem = gpa_alloc.alloc(32);
-		ptr[i] = mem;
-	}
-	for(size_t i = 0; i < 512; i++){
-		gpa_alloc.free(ptr[i]);
-	}
-
-	for(size_t i = 0; i < 512; i++){
-		fatptr_t mem = gpa_alloc.alloc(64);
-		ptr[i] = mem;
-	}
-	for(size_t i = 0; i < 512; i++){
-		gpa_alloc.free(ptr[i]);
-	}
-
-	for(size_t i = 0; i < 512; i++){
-		fatptr_t mem = gpa_alloc.alloc(128);
-		ptr[i] = mem;
-	}
-	for(size_t i = 0; i < 512; i++){
-		gpa_alloc.free(ptr[i]);
-	}
-
-	for(size_t i = 0; i < 512; i++){
-		fatptr_t mem = gpa_alloc.alloc(256);
-		ptr[i] = mem;
-	}
-	for(size_t i = 0; i < 512; i++){
-		gpa_alloc.free(ptr[i]);
-	}
-
-	for(size_t i = 0; i < 512; i++){
-		fatptr_t mem = gpa_alloc.alloc(512);
-		ptr[i] = mem;
-	}
-	for(size_t i = 0; i < 512; i++){
-		gpa_alloc.free(ptr[i]);
-	}
-
-	for(size_t i = 0; i < 512; i++){
-		fatptr_t mem = gpa_alloc.alloc(1024);
-		ptr[i] = mem;
-	}
-	for(size_t i = 0; i < 512; i++){
-		gpa_alloc.free(ptr[i]);
-	}
-
-	for(size_t i = 0; i < 512; i++){
-		fatptr_t mem = gpa_alloc.alloc(2048);
-		ptr[i] = mem;
-	}
-	for(size_t i = 0; i < 512; i++){
-		gpa_alloc.free(ptr[i]);
-	}
-
-	for(size_t i = 0; i < 512; i++){
-		fatptr_t mem = gpa_alloc.alloc(4096);
-		ptr[i] = mem;
-	}
-	for(size_t i = 0; i < 512; i++){
-		gpa_alloc.free(ptr[i]);
-	}
 }
 
 struct mbi_info {
@@ -316,6 +186,7 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	vmm_init(mbi_info.elf_sec_tag, nullptr, 0);
 	init_kmalloc();
 	init_slab_allocator();
+	vmm_finish_init(mbi_info.elf_sec_tag, nullptr, 0);
 	struct vmm_entry *mbi_copy_virt = vmm_alloc(mbi_copy_size,
 		VMM_ENTRY_PRESENT_BIT | VMM_ENTRY_READ_WRITE_BIT);
 	if (mbi_copy_virt == nullptr)
@@ -376,23 +247,15 @@ void kernel_main(unsigned int magic, unsigned long mbi_addr)
 	else
 		framebuffer_console_enable();
 
-	struct process_exec_result calc;
-	const char *calc_argv[] = { "calc", nullptr };
-	if (!process_exec_block_device_app(&application_disk, "calc", 1,
-		calc_argv, &calc))
-		panic("Failed to load calc from FAT16 application disk\n");
-	size_t cpu_count;
-	struct cpu_info *cpus = smp_get_cpus(&cpu_count);
-	if (cpu_count > 1 && cpus[1].online)
-		(void)scheduler_set_affinity(calc.process, 1);
-	kprintf("Loaded calc from FAT16 block device %s\n", application_disk.name);
-	kprintf("startup: pid=%u entry=%x state=%u\n", process_pid(calc.process),
-		process_user_entry(calc.process), process_get_state(calc.process));
-
 	if (framebuffer_started && !framebuffer_boot_clear())
 		panic("Failed to queue framebuffer clear request\n");
 
-	i386_context_enter_user(framebuffer_started ? &initial_context : &calc.context);
+	bool initial_context_ready = framebuffer_started;
+	if (!stage5_boot_services(&application_disk, &initial_context,
+		&initial_context_ready))
+		panic("Failed to start Stage 5 userspace services\n");
+
+	i386_context_enter_user(&initial_context);
 
 	kprintf("Finish init\n");
 }

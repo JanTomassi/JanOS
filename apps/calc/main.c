@@ -32,14 +32,29 @@ static int command_is(const char *line, const char *command)
 	return command[i] == '\0' && (line[i] == '\0' || line[i] == ' ' || line[i] == '\t');
 }
 
+static int evaluate(const char *expression)
+{
+	calc_int32_t result;
+	enum calc_status status = calc_eval(expression, (calc_size_t)strlen(expression), &result);
+	if (status == CALC_OK) {
+		print_integer(result);
+		print("\n");
+	} else {
+		print("error: ");
+		print(calc_status_string(status));
+		print("\n");
+	}
+	return status == CALC_OK ? 0 : 1;
+}
+
 int main(int argc, char **argv)
 {
-	(void)argc;
-	(void)argv;
+	if (argc > 1)
+		return evaluate(argv[1]);
 	char input[CALC_MAX_INPUT + 1];
 	char last_input[CALC_MAX_INPUT + 1];
 	bool has_last_input = false;
-	print("jan> ");
+	print("calc> ");
 	for (;;) {
 		calc_int32_t bytes = (calc_int32_t)read(0, input, CALC_MAX_INPUT);
 		if (bytes <= 0)
@@ -56,19 +71,19 @@ int main(int argc, char **argv)
 		}
 		if (command_is(input, "help")) {
 			print("help  show commands\ninfo  show process information\ncpu   show current CPU\ncalc  evaluate an expression\n");
-			print("jan> ");
+			print("calc> ");
 			continue;
 		}
 		if (command_is(input, "info")) {
 			print("JanOS MVP shell: one foreground process, PS/2 input, console output\n");
 			print("Use calc <expression> or enter an expression directly.\n");
-			print("jan> ");
+			print("calc> ");
 			continue;
 		}
 		if (command_is(input, "cpu")) {
 			print("calc cpu=");
 			print_integer(janos_cpu_get());
-			print("\njan> ");
+			print("\ncalc> ");
 			continue;
 		}
 		const char *expression = input;
@@ -87,7 +102,7 @@ int main(int argc, char **argv)
 			print(calc_status_string(status));
 			print("\n");
 		}
-		print("jan> ");
+		print("calc> ");
 	}
 	return 0;
 }

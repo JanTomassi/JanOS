@@ -2,6 +2,7 @@ kernel_inc = include_directories('include')
 
 kernel_sources = files(
   'src/init/main.c',
+  'src/init/stage5.c',
   'src/core/display.c',
   'src/core/interrupt.c',
   'src/mm/memblock.c',
