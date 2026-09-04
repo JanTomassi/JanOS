@@ -9,6 +9,9 @@
 #include <kernel/syscall.h>
 #include <kernel/scheduler.h>
 #include <kernel/process/wait_queue.h>
+#include <kernel/ipc.h>
+
+#include <janos/input.h>
 
 #include <arch/i386/irq.h>
 #include <arch/i386/ps2.h>
@@ -52,6 +55,7 @@ static char input_buffer[CONSOLE_INPUT_SIZE];
 static size_t input_read;
 static size_t input_write;
 static struct wait_queue console_readers;
+static volatile uint32_t input_endpoint;
 
 static bool input_push(char ch)
 {
@@ -132,6 +136,10 @@ static void ps2_irq_handler(uint8_t irq_line, void *context)
 		: "=g"(scan_code)
 		:
 		: "%al");
+	if (input_endpoint != 0) {
+		(void)ipc_kernel_notify(input_endpoint, JANOS_INPUT_MSG_RAW, scan_code);
+		return;
+	}
 
 	struct key_event event = scan_code1_to_key_event(scan_code);
 	update_mod_key(event);
@@ -142,6 +150,11 @@ void ps2_init(void)
 {
 	wait_queue_init(&console_readers);
 	irq_register_handler(1, ps2_irq_handler, nullptr);
+}
+
+void ps2_set_input_endpoint(uint32_t endpoint)
+{
+	input_endpoint = endpoint;
 }
 
 int32_t console_read(char *buffer, size_t length, struct i386_trap_frame *frame)
