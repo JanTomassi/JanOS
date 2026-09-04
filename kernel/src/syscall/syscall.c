@@ -171,8 +171,6 @@ bool syscall_register_console_handlers(void)
         res &= syscall_register(JANOS_SYS_EXIT, syscall_exit_handler, nullptr);
         res &= syscall_register(JANOS_SYS_FRAMEBUFFER_READ, syscall_framebuffer_read, nullptr);
         res &= syscall_register(JANOS_SYS_CPU_GET, syscall_cpu_get, nullptr);
-        res &= ipc_register_syscalls();
-        res &= process_service_register_syscalls();
 
         return res;
 }
