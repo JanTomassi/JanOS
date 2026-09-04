@@ -98,9 +98,16 @@ static void gpa_alloc_new_region(malloc_tag_t *tag, size_t req)
 // Assumes tag has enough free space for req.
 static malloc_tag_t *gpa_split_tag_region(malloc_tag_t *tag, size_t req)
 {
+	/* Reserve the source tail while obtaining metadata, which may grow the
+	 * malloc-tag slab and recursively allocate from the GPA allocator. */
+	size_t original_used = mem_get_used_tag(tag);
+	mem_set_used_tag(tag, mem_get_size_tag(tag));
 	malloc_tag_t *mem = mem_get_tag();
-	void *mem_ptr = mem_get_ptr_tag(tag) + mem_get_used_tag(tag);
-	size_t tag_free = mem_get_size_tag(tag) - mem_get_used_tag(tag);
+	mem_set_used_tag(tag, original_used);
+	if (mem == nullptr)
+		return nullptr;
+	void *mem_ptr = mem_get_ptr_tag(tag) + original_used;
+	size_t tag_free = mem_get_size_tag(tag) - original_used;
 
 	struct list_head *tag_chain = mem_get_chain_tag(tag);
 
@@ -207,10 +214,18 @@ fatptr_t mem_gpa_alloc(size_t req)
 
 	if (mem == nullptr) {
 		mem = mem_get_tag();
+		if (mem == nullptr) {
+			allocator_lock_release(flags);
+			return (fatptr_t){ .ptr = nullptr, .len = 0 };
+		}
 		gpa_alloc_new_region(mem, req);
 		mem_register_tag(mem);
 	} else {
 		mem = gpa_split_tag_region(mem, req);
+		if (mem == nullptr) {
+			allocator_lock_release(flags);
+			return (fatptr_t){ .ptr = nullptr, .len = 0 };
+		}
 		mem_register_tag(mem);
 	}
 
@@ -231,8 +246,14 @@ fatptr_t mem_gpa_alloc(size_t req)
 void mem_gpa_free(fatptr_t freeing)
 {
 	uint32_t flags = allocator_lock_acquire();
-	malloc_tag_t **tag = gpa_lookup_alloc(freeing.ptr, gpa_allocs);
-	malloc_tag_t *tag_to_free = mem_coalesce_tag(*tag);
+	malloc_tag_t **tag_entry = gpa_lookup_alloc(freeing.ptr, gpa_allocs);
+	if (tag_entry == nullptr || *tag_entry == nullptr) {
+		allocator_lock_release(flags);
+		return;
+	}
+	malloc_tag_t *tag = *tag_entry;
+	*tag_entry = nullptr;
+	malloc_tag_t *tag_to_free = mem_coalesce_tag(tag);
 	void *tag_ptr = mem_get_ptr_tag(tag_to_free);
 
 	struct list_head *chain = mem_get_chain_tag(tag_to_free);
@@ -272,7 +293,6 @@ void mem_gpa_free(fatptr_t freeing)
 	}
 
 	mem_unregister_tag(tag_to_free);
-	tag = nullptr;
 #ifdef DEBUG
 	mem_debug_lists();
 #endif

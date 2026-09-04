@@ -948,6 +948,7 @@ static void migrate_tags_to_slab(void)
 
 	if (vmm_entry_cache == nullptr)
 		panic("Failed to create slab cache for vmm entries\n");
+	slab_set_cache_reserve(vmm_entry_cache, 10);
 
 	fatptr_t tag_s = slab_alloc_obj(vmm_entry_cache);
 
