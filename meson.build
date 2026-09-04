@@ -173,6 +173,16 @@ if grub_mkrescue.found()
       is_parallel: false,
       suite: 'guest',
     )
+    shell_guest_test = files('tests/guest/shell_qemu.sh')
+    test(
+      'shell-guest',
+      sh,
+      args: [shell_guest_test, qemu, janos_iso, calc_disk.full_path()],
+      depends: [janos_iso, calc_disk],
+      timeout: 60,
+      is_parallel: false,
+      suite: 'guest',
+    )
   endif
 endif
 
