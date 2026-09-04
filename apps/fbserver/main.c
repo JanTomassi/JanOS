@@ -269,8 +269,8 @@ static int32_t drain_console(struct fb_state *state)
 	return count;
 }
 
-static void reply(uint32_t endpoint, const struct janos_ipc_message *request,
-	int32_t status)
+static void reply_status(uint32_t endpoint,
+	const struct janos_ipc_message *request, int32_t status)
 {
 	struct janos_ipc_message response = { .header = {
 		.type = request->header.type,
@@ -280,6 +280,35 @@ static void reply(uint32_t endpoint, const struct janos_ipc_message *request,
 	} };
 	struct janos_fb_reply operation = { .status = status };
 	memcpy(response.payload, &operation, sizeof(operation));
+	(void)janos_ipc_reply(endpoint, request->header.request_id, &response);
+}
+
+static void reply_info(uint32_t endpoint, const struct janos_ipc_message *request,
+	const struct fb_state *state)
+{
+	struct janos_ipc_message response = { .header = {
+		.type = request->header.type,
+		.flags = JANOS_IPC_REPLY,
+		.length = sizeof(struct janos_fb_info_reply),
+		.request_id = request->header.request_id,
+	} };
+	struct janos_fb_info_reply info = {
+		.status = JANOS_FB_STATUS_OK,
+		.width = state->width,
+		.height = state->height,
+		.pitch = state->pitch,
+		.bpp = state->bytes_per_pixel * 8,
+		.type = 1,
+		.columns = state->columns,
+		.rows = state->rows,
+		.font_size = state->font_size,
+		.font_header_size = state->font_header_size,
+		.font_glyph_count = state->font_glyph_count,
+		.font_glyph_size = state->font_glyph_size,
+		.font_width = state->font_width,
+		.font_height = state->font_height,
+	};
+	memcpy(response.payload, &info, sizeof(info));
 	(void)janos_ipc_reply(endpoint, request->header.request_id, &response);
 }
 
@@ -326,8 +355,15 @@ static int server(int argc, char **argv)
 				continue;
 			return 1;
 		}
+		if (request.header.type == JANOS_FB_MSG_INFO) {
+			if (request.header.length == 0)
+				reply_info(endpoint, &request, &state);
+			else
+				reply_status(endpoint, &request, JANOS_FB_STATUS_INVALID);
+			continue;
+		}
 		int32_t status = request_status(&state, &request);
-		reply(endpoint, &request, status);
+		reply_status(endpoint, &request, status);
 	}
 }
 
