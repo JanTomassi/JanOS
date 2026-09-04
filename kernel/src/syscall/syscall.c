@@ -7,6 +7,7 @@
 #include <kernel/scheduler.h>
 #include <kernel/ipc.h>
 #include <kernel/framebuffer_boot.h>
+#include <kernel/process/process_service.h>
 #include <arch/i386/smp.h>
 
 struct syscall_slot {
@@ -162,11 +163,16 @@ bool syscall_register_console_handlers(void)
 	    slots[JANOS_SYS_WRITE].handler != nullptr ||
 	    slots[JANOS_SYS_EXIT].handler != nullptr)
 		return false;
-	return syscall_register(JANOS_SYS_READ, syscall_read_handler, nullptr) &&
-		syscall_register(JANOS_SYS_YIELD, syscall_yield_handler, nullptr) &&
-		syscall_register(JANOS_SYS_WRITE, syscall_write_handler, nullptr) &&
-		 syscall_register(JANOS_SYS_EXIT, syscall_exit_handler, nullptr) &&
-		syscall_register(JANOS_SYS_FRAMEBUFFER_READ, syscall_framebuffer_read, nullptr) &&
-		syscall_register(JANOS_SYS_CPU_GET, syscall_cpu_get, nullptr) &&
-		ipc_register_syscalls();
+
+        bool res = true;
+	res &= syscall_register(JANOS_SYS_READ, syscall_read_handler, nullptr);
+        res &= syscall_register(JANOS_SYS_YIELD, syscall_yield_handler, nullptr);
+        res &= syscall_register(JANOS_SYS_WRITE, syscall_write_handler, nullptr);
+        res &= syscall_register(JANOS_SYS_EXIT, syscall_exit_handler, nullptr);
+        res &= syscall_register(JANOS_SYS_FRAMEBUFFER_READ, syscall_framebuffer_read, nullptr);
+        res &= syscall_register(JANOS_SYS_CPU_GET, syscall_cpu_get, nullptr);
+        res &= ipc_register_syscalls();
+        res &= process_service_register_syscalls();
+
+        return res;
 }

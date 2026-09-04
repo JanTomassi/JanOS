@@ -6,6 +6,7 @@
 #include <list.h>
 #include <kernel/phy_mem.h>
 #include <arch/i386/context.h>
+#include <janos/process.h>
 #include <janos/syscall.h>
 
 struct address_space;
@@ -69,7 +70,12 @@ void process_exit(struct process *process, int status);
 struct process *process_find_child(const struct process *parent,
                                    process_pid_t pid);
 bool process_exists(process_pid_t pid);
+struct process *process_find_pid(process_pid_t pid);
 size_t process_child_count(const struct process *parent);
+
+/* Copy a stable, userspace-safe diagnostic record while holding process state. */
+int32_t process_snapshot(size_t index, struct janos_process_info *info);
+int32_t process_snapshot_pid(process_pid_t pid, struct janos_process_info *info);
 
 /* Internal ownership hooks used by wait queues. */
 bool process_block(struct process *process, struct wait_queue *queue);

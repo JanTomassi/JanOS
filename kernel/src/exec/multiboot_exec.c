@@ -298,13 +298,14 @@ bool process_exec_block_device_calc(const struct block_device *device,
 	return process_exec_block_device_app(device, "calc", 1, argv, result);
 }
 
-bool process_load_block_device_app(const struct block_device *device,
-	                               const char *name,
-	                               struct process_exec_result *result)
+bool process_load_block_device_app_for_parent(const struct block_device *device,
+	                                           const char *name,
+	                                           struct process *parent,
+	                                           struct process_exec_result *result)
 {
 	if (device == nullptr || name == nullptr || result == nullptr)
 		return false;
-	struct process *process = process_create(nullptr);
+	struct process *process = process_create(parent);
 	if (process == nullptr)
 		return false;
 	struct load_context load_context = {
@@ -326,6 +327,13 @@ bool process_load_block_device_app(const struct block_device *device,
 	result->process = process;
 	result->entry = load_result.entry;
 	return true;
+}
+
+bool process_load_block_device_app(const struct block_device *device,
+	                               const char *name,
+	                               struct process_exec_result *result)
+{
+	return process_load_block_device_app_for_parent(device, name, nullptr, result);
 }
 
 bool process_exec_block_device_app(const struct block_device *device,

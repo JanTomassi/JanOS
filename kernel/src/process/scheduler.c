@@ -75,7 +75,9 @@ static struct process *dequeue(uint8_t cpu)
 static void frame_from_context(struct i386_trap_frame *frame,
                                const struct i386_context *context)
 {
-	frame->gs = frame->fs = frame->es = frame->ds = I386_KERNEL_DATA_SELECTOR;
+	uint32_t data_selector = (context->cs & 3u) == 3u ?
+		I386_USER_DATA_SELECTOR : I386_KERNEL_DATA_SELECTOR;
+	frame->gs = frame->fs = frame->es = frame->ds = data_selector;
 	frame->edi = context->edi; frame->esi = context->esi; frame->ebp = context->ebp;
 	frame->ebx = context->ebx; frame->edx = context->edx; frame->ecx = context->ecx;
 	frame->eax = context->eax;

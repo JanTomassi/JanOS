@@ -1,4 +1,5 @@
 #include <janos/syscall.h>
+#include <janos/process.h>
 #include <stdint.h>
 #include <unistd.h>
 
@@ -46,6 +47,19 @@ ssize_t janos_framebuffer_read(void *buffer, size_t length)
 int32_t janos_cpu_get(void)
 {
 	return syscall3(JANOS_SYS_CPU_GET, 0, 0, 0);
+}
+
+int32_t janos_process_snapshot(uint32_t index, struct janos_process_info *info)
+{
+	return syscall3(JANOS_SYS_PROCESS_SNAPSHOT, index,
+		(uint32_t)(uintptr_t)info, 0);
+}
+
+int32_t janos_process_spawn(const struct janos_process_exec_request *request,
+	                           struct janos_process_info *info)
+{
+	return syscall4(JANOS_SYS_PROCESS_SPAWN,
+		(uint32_t)(uintptr_t)request, (uint32_t)(uintptr_t)info, 0, 0);
 }
 
 int32_t janos_ipc_endpoint_create(uint32_t flags)

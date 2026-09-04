@@ -13,6 +13,7 @@
 #include <kernel/scheduler.h>
 #include <kernel/ipc.h>
 #include <kernel/syscall.h>
+#include <string.h>
 
 struct process {
 	process_pid_t pid;
@@ -35,6 +36,7 @@ struct process {
 	bool queued;
 	uint8_t owner_cpu;
 	uint8_t cpu_affinity;
+	char name[JANOS_PROCESS_NAME_SIZE];
 	struct process_ipc_wait ipc_wait;
 };
 
@@ -166,6 +168,13 @@ bool process_start(struct process *process, uintptr_t entry, int argc,
 	}
 	process->user_entry = entry;
 	process->user_stack_pointer = user_stack_pointer;
+	memset(process->name, 0, sizeof(process->name));
+	if (argc > 0 && argv != nullptr && argv[0] != nullptr) {
+		size_t name_length = 0;
+		while (name_length + 1 < sizeof(process->name) && argv[0][name_length] != '\0')
+			++name_length;
+		memcpy(process->name, argv[0], name_length);
+	}
 	process->initial_context = context;
 	process->saved_context = context;
 	if (cpu->current_process == nullptr) {
@@ -410,6 +419,65 @@ bool process_exists(process_pid_t pid)
 	bool result = find_pid_locked(pid) != nullptr;
 	spin_unlock(&process_lock);
 	return result;
+}
+
+struct process *process_find_pid(process_pid_t pid)
+{
+	if (pid == 0)
+		return nullptr;
+	ensure_initialized();
+	spin_lock(&process_lock);
+	struct process *result = find_pid_locked(pid);
+	spin_unlock(&process_lock);
+	return result;
+}
+
+static void process_fill_snapshot(const struct process *process,
+	                              struct janos_process_info *info)
+{
+	*info = (struct janos_process_info){
+		.pid = process->pid,
+		.state = (uint32_t)process->state,
+		.status = process->status,
+		.cpu = process->owner_cpu,
+		.affinity = process->cpu_affinity,
+		.entry = (uint32_t)process->user_entry,
+		.address_space = address_space_id(process->space),
+	};
+	memcpy(info->name, process->name, sizeof(info->name));
+}
+
+int32_t process_snapshot(size_t index, struct janos_process_info *info)
+{
+	if (info == nullptr)
+		return -JANOS_EINVAL;
+	ensure_initialized();
+	spin_lock(&process_lock);
+	size_t current = 0;
+	struct process *found = nullptr;
+	list_for_each(&processes) {
+		if (current++ == index) {
+			found = list_entry(it, struct process, all);
+			break;
+		}
+	}
+	if (found != nullptr)
+		process_fill_snapshot(found, info);
+	spin_unlock(&process_lock);
+	return found == nullptr ? -JANOS_ENOENT : 0;
+}
+
+int32_t process_snapshot_pid(process_pid_t pid, struct janos_process_info *info)
+{
+	if (pid == 0 || info == nullptr)
+		return -JANOS_EINVAL;
+	ensure_initialized();
+	spin_lock(&process_lock);
+	struct process *found = find_pid_locked(pid);
+	if (found != nullptr)
+		process_fill_snapshot(found, info);
+	spin_unlock(&process_lock);
+	return found == nullptr ? -JANOS_ENOENT : 0;
 }
 
 size_t process_child_count(const struct process *parent)
