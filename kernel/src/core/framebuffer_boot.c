@@ -61,6 +61,11 @@ bool framebuffer_boot_clear(void)
 		&request);
 }
 
+uint32_t framebuffer_boot_endpoint(void)
+{
+	return framebuffer_endpoint;
+}
+
 void framebuffer_console_flush(void)
 {
 	/* Output is drained by fbserver through the framebuffer read syscall. */
@@ -164,7 +169,5 @@ bool framebuffer_boot_services(const void *multiboot_info,
 		JANOS_IPC_RIGHT_SEND))
 		return false;
 
-	kprintf("Framebuffer services started server=%u client=%u\n",
-		(unsigned)process_pid(server.process), (unsigned)process_pid(client.process));
 	return true;
 }
