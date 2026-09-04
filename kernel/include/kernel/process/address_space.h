@@ -2,12 +2,16 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <kernel/phy_mem.h>
 
 struct address_space;
 
 struct address_space *address_space_create(void);
 void address_space_destroy(struct address_space *space);
+
+/* Stable opaque identity used by process diagnostics. */
+uint32_t address_space_id(const struct address_space *space);
 
 /* The process-owned page directory frame. */
 const fatptr_t *address_space_page_directory(const struct address_space *space);

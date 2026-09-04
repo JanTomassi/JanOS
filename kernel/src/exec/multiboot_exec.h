@@ -44,6 +44,10 @@ bool process_exec_multiboot_calc(const void *multiboot_info,
 bool process_load_block_device_app(const struct block_device *device,
 	                                   const char *name,
 	                                   struct process_exec_result *result);
+bool process_load_block_device_app_for_parent(const struct block_device *device,
+	                                           const char *name,
+	                                           struct process *parent,
+	                                           struct process_exec_result *result);
 
 /* Load and start an ELF from a FAT16 root directory. */
 bool process_exec_block_device_app(const struct block_device *device,

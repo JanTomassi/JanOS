@@ -9,6 +9,7 @@ kernel_sources = files(
   'src/mm/allocator.c',
   'src/mm/slab_allocator.c',
   'src/process/process.c',
+  'src/process/process_service.c',
   'src/process/address_space.c',
   'src/process/stack.c',
   'src/process/wait_queue.c',
@@ -67,7 +68,7 @@ janos_kernel = executable(
 janos_test_kernel = executable(
   'JanOS.test.kernel',
   kernel_sources,
-	files('../tests/kernel/test_runner.c'),
+  files('../tests/kernel/test_runner.c'),
   kernel_asm,
   include_directories: [kernel_inc, libc_inc, sdk_inc],
   link_with: libk,

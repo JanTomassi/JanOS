@@ -42,11 +42,11 @@ subdir('apps')
 mkdisk = find_program('tools/mkdisk.sh', native: true)
 calc_disk = custom_target(
   'calc-disk',
-  input: [calc_app, pingpong_app, fbserver_app, fbclient_app,
+  input: [calc_app, pingpong_app, fbserver_app, fbclient_app, procserv_app,
     files('data/janos.psf2')],
   output: 'calc-disk.img',
   command: [sh, mkdisk, '@OUTPUT@', '@INPUT0@', '@INPUT1@', '@INPUT2@',
-    '@INPUT3@', '@INPUT4@'],
+    '@INPUT3@', '@INPUT4@', '@INPUT5@'],
   build_by_default: false,
 )
 

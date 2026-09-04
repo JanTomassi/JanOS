@@ -25,6 +25,7 @@ struct address_page {
 };
 
 struct address_space {
+	uint32_t id;
 	fatptr_t page_directory;
 	struct list_head mappings;
 	uintptr_t next_user_address;
@@ -135,6 +136,7 @@ static allocator_t object_allocator;
 static bool allocator_ready;
 /* Temporary mappings use shared kernel page tables and must be serialized. */
 static spinlock_t address_space_lock = { 0 };
+static uint32_t next_address_space_id = 1;
 
 static void ensure_allocator(void)
 {
@@ -166,9 +168,19 @@ struct address_space *address_space_create(void)
 		object_free(space, sizeof(*space));
 		return nullptr;
 	}
+	uint32_t flags = spin_lock_irqsave(&address_space_lock);
+	space->id = next_address_space_id++;
+	if (space->id == 0)
+		space->id = next_address_space_id++;
+	spin_unlock_irqrestore(&address_space_lock, flags);
 	RESET_LIST_ITEM(&space->mappings);
 	space->next_user_address = USER_ADDRESS_START;
 	return space;
+}
+
+uint32_t address_space_id(const struct address_space *space)
+{
+	return space == nullptr ? 0 : space->id;
 }
 
 bool address_space_activate(struct address_space *space)
@@ -255,7 +267,7 @@ static bool address_space_map_at_kind(struct address_space *space, uintptr_t add
 				.size = PAGE_SIZE, .flags = flags | VMM_ENTRY_PRESENT_BIT };
 			RESET_LIST_ITEM(&one_page.list);
 			if (!vmm_page_directory_map(&space->page_directory, &physical,
-				address + offset, one_page.flags))
+		                            address + offset, one_page.flags))
 				goto fail;
 			++mapped_pages;
 			continue;
@@ -273,7 +285,7 @@ static bool address_space_map_at_kind(struct address_space *space, uintptr_t add
 			.flags = flags | VMM_ENTRY_PRESENT_BIT };
 		RESET_LIST_ITEM(&one_page.list);
 		if (!vmm_page_directory_map(&space->page_directory, &page->physical,
-		                            address + offset, one_page.flags))
+			                            address + offset, one_page.flags))
 			goto fail;
 		/* Keep physical pages in virtual-address order for indexed copies. */
 		list_add(&page->list, mapping->physical_pages.prev);
