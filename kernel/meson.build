@@ -1,7 +1,7 @@
 kernel_inc = include_directories('include')
 
 kernel_sources = files(
-  'src/init/main.c',
+  'src/init/boot.c',
   'src/init/stage5.c',
   'src/core/display.c',
   'src/core/interrupt.c',
@@ -55,6 +55,7 @@ kernel_linker_script = meson.current_source_dir() / 'src/arch/i386/boot/linker.l
 janos_kernel = executable(
   'JanOS.kernel',
   kernel_sources,
+  files('src/init/main.c'),
   kernel_asm,
   include_directories: [kernel_inc, libc_inc, sdk_inc],
   link_with: libk,
@@ -69,12 +70,12 @@ janos_kernel = executable(
 janos_test_kernel = executable(
   'JanOS.test.kernel',
   kernel_sources,
-  files('../tests/kernel/test_runner.c'),
+  files('../tests/kernel/test_entry.c', '../tests/kernel/test_runner.c'),
   kernel_asm,
   include_directories: [kernel_inc, libc_inc, sdk_inc],
   link_with: libk,
   dependencies: libgcc,
-  c_args: ['-ffreestanding', '-D__is_kernel', '-DJANOS_KERNEL_TESTS'],
+  c_args: ['-ffreestanding', '-D__is_kernel'],
   link_args: ['-nostdlib', '-no-pie', '-Wl,-T,' + kernel_linker_script],
   link_depends: files('src/arch/i386/boot/linker.ld'),
 )
