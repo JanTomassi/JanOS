@@ -479,7 +479,7 @@ __init struct mbi_info init_memblock_from_mbi(uintptr_t mbi_addr){
 		case MULTIBOOT_TAG_TYPE_ACPI_NEW: {
 			if (tag->size < sizeof(struct multiboot_tag_new_acpi))
 				break;
-			res.acpi_tag = tag;
+			res.acpi_tag = (struct multiboot_tag *)tag;
 			struct rsdp_descriptor *rsdp = (struct rsdp_descriptor *)(((struct multiboot_tag_new_acpi *)res.acpi_tag)->rsdp);
 			memblock_reserve((size_t)rsdp, sizeof(struct rsdp_descriptor));
 
@@ -490,7 +490,8 @@ __init struct mbi_info init_memblock_from_mbi(uintptr_t mbi_addr){
 			size_t entry_count = (rsdt->length - sizeof(struct acpi_sdt_header)) / sizeof(uint32_t);
 			uint32_t *entries = (uint32_t *)((uint8_t *)rsdt + sizeof(struct acpi_sdt_header));
 			for (size_t i = 0; i < entry_count; i++) {
-				struct acpi_sdt_header *hdr = (struct acpi_sdt_header *)entries[i];
+				struct acpi_sdt_header *hdr =
+					(struct acpi_sdt_header *)(uintptr_t)entries[i];
 				size_t hdr_len = hdr->length;
 				memblock_reserve((size_t)hdr, hdr_len);
 				bool is_apic = true;

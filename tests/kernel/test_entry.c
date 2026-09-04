@@ -3,5 +3,5 @@
 
 void kernel_main(unsigned int magic, unsigned long mbi_addr)
 {
-	kernel_initialize(magic, mbi_addr, kernel_test_boot);
+	kernel_boot(magic, mbi_addr, kernel_test_boot);
 }

@@ -16,6 +16,7 @@ kernel_sources = files(
   'src/process/wait_queue.c',
   'src/process/scheduler.c',
   'src/exec/elf_loader.c',
+  'src/exec/elf_loader_fat16.c',
   'src/exec/multiboot_exec.c',
   'src/syscall/syscall.c',
 	'src/ipc/ipc.c',
@@ -67,15 +68,18 @@ janos_kernel = executable(
   install_dir: '/boot',
 )
 
-janos_test_kernel = executable(
-  'JanOS.test.kernel',
-  kernel_sources,
-  files('../tests/kernel/test_entry.c', '../tests/kernel/test_runner.c'),
-  kernel_asm,
-  include_directories: [kernel_inc, libc_inc, sdk_inc],
-  link_with: libk,
-  dependencies: libgcc,
-  c_args: ['-ffreestanding', '-D__is_kernel'],
-  link_args: ['-nostdlib', '-no-pie', '-Wl,-T,' + kernel_linker_script],
-  link_depends: files('src/arch/i386/boot/linker.ld'),
-)
+if get_option('kernel_tests')
+  janos_test_kernel = executable(
+    'JanOS.test.kernel',
+    kernel_sources,
+    files('../tests/kernel/test_entry.c', '../tests/kernel/test_runner.c',
+      '../tests/kernel/test_exit.c'),
+    kernel_asm,
+    include_directories: [kernel_inc, libc_inc, sdk_inc],
+    link_with: libk,
+    dependencies: libgcc,
+    c_args: ['-ffreestanding', '-D__is_kernel'],
+    link_args: ['-nostdlib', '-no-pie', '-Wl,-T,' + kernel_linker_script],
+    link_depends: files('src/arch/i386/boot/linker.ld'),
+  )
+endif
