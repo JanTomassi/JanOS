@@ -5,6 +5,7 @@ kernel_sources = files(
   'src/init/stage5.c',
   'src/core/display.c',
   'src/core/boot_log.c',
+  'src/core/display_session.c',
   'src/core/interrupt.c',
   'src/mm/memblock.c',
   'src/mm/mem_allocs.c',

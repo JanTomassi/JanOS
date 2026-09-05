@@ -6,6 +6,7 @@
 #include <arch/i386/context.h>
 
 struct block_device;
+struct process;
 
 bool framebuffer_boot_services(const void *multiboot_info,
                                size_t multiboot_info_size,
@@ -14,6 +15,9 @@ bool framebuffer_boot_services(const void *multiboot_info,
 bool framebuffer_boot_clear(void);
 uint32_t framebuffer_boot_endpoint(void);
 size_t framebuffer_console_write(const char *buffer, size_t length);
+size_t framebuffer_console_write_user(const char *buffer, size_t length);
 size_t framebuffer_console_read(char *buffer, size_t length);
+bool framebuffer_console_claim(struct process *process);
+bool framebuffer_console_release(struct process *process);
 void framebuffer_console_enable(void);
 void framebuffer_console_flush(void);

@@ -62,6 +62,16 @@ boot_log_test = executable(
   override_options: ['c_std=c11'],
 )
 
+display_session_test = executable(
+  'display-session-test',
+  'display_session_test.c',
+  '../../kernel/src/core/display_session.c',
+  native: true,
+  include_directories: [kernel_inc, libc_inc, sdk_inc, include_directories('.')],
+  c_args: ['-Wall', '-Wextra', '-Werror'],
+  override_options: ['c_std=c11'],
+)
+
 elf_loader_test = executable(
   'elf-loader-test',
   'elf_loader_test.c',
@@ -144,6 +154,7 @@ test('ipc-state', ipc_state_test, suite: 'host')
 test('pingpong', pingpong_test, suite: 'host')
 test('framebuffer-protocol', framebuffer_protocol_test, suite: 'host')
 test('boot-log', boot_log_test, suite: 'host')
+test('display-session', display_session_test, suite: 'host')
 test('elf-loader', elf_loader_test, suite: 'host')
 test('fat16', fat16_test, suite: 'host')
 test('memblock', memblock_test, suite: 'host')

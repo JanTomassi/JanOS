@@ -76,6 +76,8 @@ bool stage5_boot_services(const struct block_device *device,
 		JANOS_IPC_RIGHT_SEND))
 		return false;
 	process_service_configure(procserv.process, device);
+	if (framebuffer_endpoint != 0 && !framebuffer_console_claim(shell.process))
+		return false;
 
 	const char *procserv_argv[] = {
 		"procserv", "server", procserv_endpoint_text, nullptr,

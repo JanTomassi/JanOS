@@ -24,6 +24,7 @@ struct fb_state {
 	uint32_t font_glyph_size;
 	uint32_t font_width;
 	uint32_t font_height;
+	uint32_t foreground_pid;
 };
 
 static void print(const char *text)
@@ -276,6 +277,39 @@ static int32_t request_status(struct fb_state *state,
 	return JANOS_FB_STATUS_INVALID;
 }
 
+static int32_t session_status(struct fb_state *state,
+	const struct janos_ipc_message *request)
+{
+	if (request->header.sender != 0 ||
+		request->header.length != sizeof(struct janos_fb_session))
+		return JANOS_FB_STATUS_INVALID;
+	struct janos_fb_session session;
+	memcpy(&session, request->payload, sizeof(session));
+	if (session.mode == JANOS_FB_SESSION_FOREGROUND) {
+		if (session.owner == 0 || (state->foreground_pid != 0 &&
+			state->foreground_pid != session.owner))
+			return JANOS_FB_STATUS_INVALID;
+		state->foreground_pid = session.owner;
+		print("FBSERVER_FOREGROUND_PASS pid=");
+		print_uint(session.owner);
+		print("\n");
+		return JANOS_FB_STATUS_OK;
+	}
+	if (session.mode == JANOS_FB_SESSION_BOOT &&
+		state->foreground_pid == session.owner && session.owner != 0) {
+		state->foreground_pid = 0;
+		return JANOS_FB_STATUS_OK;
+	}
+	return JANOS_FB_STATUS_INVALID;
+}
+
+static bool request_allowed(const struct fb_state *state,
+	const struct janos_ipc_message *request)
+{
+	return state->foreground_pid == 0 ||
+		request->header.sender == state->foreground_pid;
+}
+
 static int32_t drain_console(struct fb_state *state, bool check_boot_log,
 	size_t *boot_log_match, bool *boot_log_seen)
 {
@@ -387,6 +421,15 @@ static int server(int argc, char **argv)
 			if (result == -JANOS_ENOMSG || result == -JANOS_EAGAIN)
 				continue;
 			return 1;
+		}
+		if (request.header.type == JANOS_FB_MSG_SESSION) {
+			int32_t status = session_status(&state, &request);
+			reply_status(endpoint, &request, status);
+			continue;
+		}
+		if (!request_allowed(&state, &request)) {
+			reply_status(endpoint, &request, JANOS_FB_STATUS_INVALID);
+			continue;
 		}
 		if (request.header.type == JANOS_FB_MSG_INFO) {
 			if (request.header.length == 0)

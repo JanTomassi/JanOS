@@ -26,6 +26,8 @@ int main(void)
 		"cursor exceeds IPC payload");
 	_Static_assert(sizeof(struct janos_fb_scroll) <= JANOS_IPC_PAYLOAD_SIZE,
 		"scroll exceeds IPC payload");
+	_Static_assert(sizeof(struct janos_fb_session) <= JANOS_IPC_PAYLOAD_SIZE,
+		"session exceeds IPC payload");
 	_Static_assert(sizeof(struct janos_fb_info_reply) <= JANOS_IPC_PAYLOAD_SIZE,
 		"info reply exceeds IPC payload");
 	_Static_assert(sizeof(struct janos_fb_puts) == JANOS_IPC_PAYLOAD_SIZE,
@@ -42,6 +44,7 @@ int main(void)
 	assert(JANOS_FB_MSG_CURSOR != JANOS_FB_MSG_CLEAR);
 	assert(JANOS_FB_MSG_CLEAR != JANOS_FB_MSG_SCROLL);
 	assert(JANOS_FB_MSG_SCROLL != JANOS_FB_MSG_INFO);
+	assert(JANOS_FB_MSG_INFO != JANOS_FB_MSG_SESSION);
 	assert(-JANOS_EBADF == -9);
 	assert(JANOS_FB_STATUS_OK == 0);
 	return 0;

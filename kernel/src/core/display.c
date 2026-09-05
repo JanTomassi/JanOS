@@ -186,7 +186,7 @@ size_t display_write(const char *buffer, size_t length)
 		for (size_t i = 0; i < length; ++i)
 			disps[current].putc(buffer[i]);
 	}
-	framebuffer_console_write(buffer, length);
+	framebuffer_console_write_user(buffer, length);
 	framebuffer_console_flush();
 	spin_unlock_irqrestore(&print_lock, flags);
 	return length;

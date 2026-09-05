@@ -14,6 +14,13 @@ enum janos_framebuffer_message_type {
 	JANOS_FB_MSG_CLEAR = 0x46420004u,
 	JANOS_FB_MSG_SCROLL = 0x46420005u,
 	JANOS_FB_MSG_INFO = 0x46420006u,
+	/* Kernel-to-server session control; user requests must be rejected. */
+	JANOS_FB_MSG_SESSION = 0x46420007u,
+};
+
+enum janos_fb_session_mode {
+	JANOS_FB_SESSION_BOOT = 0,
+	JANOS_FB_SESSION_FOREGROUND = 1,
 };
 
 enum janos_framebuffer_status {
@@ -39,6 +46,11 @@ struct janos_fb_cursor {
 
 struct janos_fb_scroll {
 	uint32_t rows;
+};
+
+struct janos_fb_session {
+	uint32_t mode;
+	uint32_t owner;
 };
 
 struct janos_fb_reply {
@@ -77,6 +89,8 @@ _Static_assert(sizeof(struct janos_fb_puts) == JANOS_IPC_PAYLOAD_SIZE,
 	"framebuffer puts payload must fit IPC");
 _Static_assert(sizeof(struct janos_fb_reply) <= JANOS_IPC_PAYLOAD_SIZE,
 	"framebuffer reply must fit IPC");
+_Static_assert(sizeof(struct janos_fb_session) <= JANOS_IPC_PAYLOAD_SIZE,
+	"framebuffer session payload must fit IPC");
 _Static_assert(sizeof(struct janos_fb_info_reply) <= JANOS_IPC_PAYLOAD_SIZE,
 	"framebuffer info reply must fit IPC");
 _Static_assert(sizeof(struct janos_framebuffer_info) == 28,

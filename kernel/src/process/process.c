@@ -14,6 +14,7 @@
 #include <kernel/scheduler.h>
 #include <kernel/ipc.h>
 #include <kernel/syscall.h>
+#include <kernel/framebuffer_boot.h>
 #include <string.h>
 
 struct process {
@@ -428,6 +429,7 @@ void process_exit(struct process *process, int status)
 	process->state = PROCESS_ZOMBIE;
 	spin_unlock(&process_lock);
 	process_service_process_exiting(process);
+	(void)framebuffer_console_release(process);
 	framebuffer_capability_revoke_process(process);
 	ipc_process_cleanup(process);
 	process_reap(process);
@@ -464,6 +466,7 @@ void process_exit(struct process *process, int status)
 	cpu->current_process = nullptr;
 	spin_unlock(&process_lock);
 	process_service_process_exiting(process);
+	(void)framebuffer_console_release(process);
 	framebuffer_capability_revoke_process(process);
 	ipc_process_cleanup(process);
 

@@ -1,6 +1,7 @@
 #include <kernel/framebuffer_boot.h>
 
 #include <kernel/boot_log.h>
+#include <kernel/display_session.h>
 #include <kernel/display.h>
 #include <kernel/framebuffer.h>
 #include <kernel/ipc.h>
@@ -14,18 +15,45 @@
 
 static uint32_t framebuffer_endpoint;
 static struct boot_log boot_log;
+static struct display_session console_session = {
+	.mode = DISPLAY_SESSION_BOOT,
+};
 static spinlock_t console_lock = { 0 };
 
-size_t framebuffer_console_write(const char *buffer, size_t length)
+static bool foreground_process_allowed(const struct process *process)
+{
+	while (process != nullptr) {
+		if (display_session_allows(&console_session, process_pid(process)))
+			return true;
+		process = process_parent(process);
+	}
+	return false;
+}
+
+static size_t framebuffer_console_write_internal(const char *buffer, size_t length,
+	bool user_output)
 {
 	if (buffer == nullptr)
 		return 0;
 	uint32_t flags = spin_lock_irqsave(&console_lock);
-	size_t written = boot_log_write(&boot_log, buffer, length);
+	bool allowed = display_session_allows(&console_session, 0);
+	if (!allowed && user_output)
+		allowed = foreground_process_allowed(process_current());
+	size_t written = allowed ? boot_log_write(&boot_log, buffer, length) : 0;
 	spin_unlock_irqrestore(&console_lock, flags);
 	if (framebuffer_endpoint != 0 && written != 0)
 		ipc_wake_receiver(framebuffer_endpoint);
-	return written;
+	return length;
+}
+
+size_t framebuffer_console_write(const char *buffer, size_t length)
+{
+	return framebuffer_console_write_internal(buffer, length, false);
+}
+
+size_t framebuffer_console_write_user(const char *buffer, size_t length)
+{
+	return framebuffer_console_write_internal(buffer, length, true);
 }
 
 size_t framebuffer_console_read(char *buffer, size_t length)
@@ -56,6 +84,55 @@ uint32_t framebuffer_boot_endpoint(void)
 void framebuffer_console_flush(void)
 {
 	/* Output is drained by fbserver through the framebuffer read syscall. */
+}
+
+static bool queue_session_update(uint32_t mode, uint32_t owner)
+{
+	if (framebuffer_endpoint == 0)
+		return false;
+	struct janos_ipc_message request = { .header = {
+		.type = JANOS_FB_MSG_SESSION,
+		.flags = JANOS_IPC_REQUEST,
+		.length = sizeof(struct janos_fb_session),
+	} };
+	struct janos_fb_session session = { .mode = mode, .owner = owner };
+	memcpy(request.payload, &session, sizeof(session));
+	return ipc_kernel_send(framebuffer_endpoint, &request);
+}
+
+bool framebuffer_console_claim(struct process *process)
+{
+	if (process == nullptr)
+		return false;
+	process_pid_t owner = process_pid(process);
+	uint32_t flags = spin_lock_irqsave(&console_lock);
+	bool available = console_session.mode == DISPLAY_SESSION_BOOT ||
+		(console_session.mode == DISPLAY_SESSION_FOREGROUND &&
+		 console_session.owner == owner);
+	spin_unlock_irqrestore(&console_lock, flags);
+	if (!available || !queue_session_update(JANOS_FB_SESSION_FOREGROUND, owner))
+		return false;
+	flags = spin_lock_irqsave(&console_lock);
+	bool claimed = display_session_claim(&console_session, owner);
+	spin_unlock_irqrestore(&console_lock, flags);
+	return claimed;
+}
+
+bool framebuffer_console_release(struct process *process)
+{
+	if (process == nullptr)
+		return false;
+	process_pid_t owner = process_pid(process);
+	uint32_t flags = spin_lock_irqsave(&console_lock);
+	bool owns_session = console_session.mode == DISPLAY_SESSION_FOREGROUND &&
+		console_session.owner == owner;
+	spin_unlock_irqrestore(&console_lock, flags);
+	if (!owns_session || !queue_session_update(JANOS_FB_SESSION_BOOT, owner))
+		return false;
+	flags = spin_lock_irqsave(&console_lock);
+	bool released = display_session_release(&console_session, owner);
+	spin_unlock_irqrestore(&console_lock, flags);
+	return released;
 }
 
 void framebuffer_console_enable(void)
@@ -145,13 +222,6 @@ bool framebuffer_boot_services(const void *multiboot_info,
 	if (!process_start(server.process, server.entry, 12, server_argv))
 		return false;
 	if (!process_initial_context(server.process, initial_context))
-		return false;
-
-	const char *client_argv[] = { "fbclient", "client", endpoint_text, nullptr };
-	struct process_exec_result client;
-	if (!process_exec_block_device_app(device, "fbclient", 3, client_argv, &client) ||
-		!ipc_grant_process((uint32_t)endpoint_result, process_pid(client.process),
-		JANOS_IPC_RIGHT_SEND))
 		return false;
 
 	return true;
