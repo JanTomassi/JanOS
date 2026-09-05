@@ -82,8 +82,33 @@ _Static_assert(sizeof(struct janos_process_spawn_reply) <= JANOS_IPC_PAYLOAD_SIZ
 _Static_assert(sizeof(struct janos_process_spawn_result) <= JANOS_IPC_PAYLOAD_SIZE,
 	"process spawn result exceeds IPC payload");
 
+/**
+ * Copy a process-table entry into `info`.
+ *
+ * `index` is a zero-based enumeration index, not a PID.  The function returns
+ * zero on success, -JANOS_ENOENT when the index is outside the current table,
+ * or another negative -JANOS_* value.  This syscall is reserved for the
+ * authorized process-management service.
+ */
 int32_t janos_process_snapshot(uint32_t index, struct janos_process_info *info);
+
+/**
+ * Ask the authorized process-management service to load and start an app.
+ *
+ * The request supplies the parent PID, executable name, one argument string,
+ * and optional CPU affinity.  On success `result` receives the new process
+ * snapshot and an endpoint capability for sending it input.  The request and
+ * result buffers are copied by the kernel, so they may be stack allocated.
+ */
 int32_t janos_process_spawn(const struct janos_process_exec_request *request,
-	                           struct janos_process_spawn_result *result);
-/* Polls a direct child; NOHANG returns zero while it is still running. */
+                           struct janos_process_spawn_result *result);
+
+/**
+ * Poll and, when it has exited, reap a direct child.
+ *
+ * On success the child's exit status is stored in `status` when non-null and
+ * the child PID is returned.  JANOS_PROCESS_WAIT_NOHANG returns zero while
+ * the child is still running; without it the current kernel returns
+ * -JANOS_EAGAIN instead of blocking.
+ */
 int32_t janos_process_wait(uint32_t pid, int32_t *status, uint32_t options);
