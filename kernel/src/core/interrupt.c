@@ -23,7 +23,7 @@ static void halt_after_user_fault(struct i386_trap_frame *frame)
 			(unsigned)smp_current_cpu_index(), (unsigned)process_pid(process),
 			frame->vector, frame->eip, frame->cs, frame->error_code, cr2);
 		process_exit_current(128 + (int)frame->vector);
-		__asm__ volatile("cli");
+		__asm__ volatile("cli" ::: "memory", "cc");
 		for (;;)
 			__asm__ volatile("hlt");
 	}

@@ -305,5 +305,5 @@ bool scheduler_set_affinity(struct process *process, uint8_t cpu)
 [[noreturn]] void scheduler_idle(void)
 {
 	for (;;)
-		__asm__ volatile("sti; hlt" ::: "memory");
+		__asm__ volatile("sti; hlt" ::: "memory", "cc");
 }

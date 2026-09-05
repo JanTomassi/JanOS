@@ -108,9 +108,8 @@ isr_stub_%+%1:
 	call [ebx + irq_prepare wrt ..got]
 	add esp, 4
 	push esp
-	push dword %1
 	call [ebx + isr_%+%1_handler wrt ..got]
-	add esp, 8
+	add esp, 4
 	push dword %1
 	call [ebx + irq_ack wrt ..got]
 	add esp, 4

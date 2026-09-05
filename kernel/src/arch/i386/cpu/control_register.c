@@ -10,7 +10,7 @@ struct CR0_reg get_CR0_reg(void)
 			 "mov %%eax, %0"
 			 : "=g"(CR0)
 			 :
-			 : "%eax");
+			 : "eax");
 	return CR0;
 }
 
@@ -68,7 +68,7 @@ bool set_CR0_reg(enum CR0_REG flag, bool val)
 			 "mov %%eax, %%cr0;"
 			 :
 			 : "g"(CR0)
-			 : "%eax");
+			 : "eax", "memory");
 	return true;
 }
 
@@ -79,7 +79,7 @@ size_t get_CR3_reg(void)
 			 "mov %%eax, %0;"
 			 : "=g"(CR3)
 			 :
-			 : "%eax");
+			 : "eax");
 	return CR3;
 }
 bool set_CR3_reg(size_t val)
@@ -88,7 +88,7 @@ bool set_CR3_reg(size_t val)
 			 "mov %%eax, %%cr3 "
 			 :
 			 : "g"(val)
-			 : "%eax");
+			 : "eax", "memory");
 
 	return get_CR3_reg() == val;
 }
@@ -100,7 +100,7 @@ struct CR4_reg get_CR4_reg(void)
 			 "mov %%eax, %0"
 			 : "=g"(CR4)
 			 :
-			 : "%eax");
+			 : "eax");
 	return CR4;
 }
 
@@ -205,7 +205,7 @@ bool set_CR4_reg(enum CR4_REG flag, bool val)
 			 "mov %%eax, %%cr4;"
 			 :
 			 : "g"(CR4)
-			 : "%eax");
+			 : "eax", "memory");
 	return true;
 }
 

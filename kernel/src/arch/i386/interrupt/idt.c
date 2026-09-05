@@ -65,5 +65,6 @@ void idt_init(void)
 			 "jmp longjmp_after_gdt;\n"
 			 "longjmp_after_gdt:"
 			 :
-			 : "m"(idtr)); // load the new IDT
+			 : "m"(idtr)
+			 : "memory"); // load the new IDT
 }

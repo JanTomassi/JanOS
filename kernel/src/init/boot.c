@@ -276,7 +276,7 @@ static void run_boot_test(const struct kernel_init_context *init)
 
 static void init_userspace(struct kernel_init_context *init)
 {
-	__asm__ volatile("sti");
+	__asm__ volatile("sti" ::: "memory", "cc");
 
 	if (!find_application_disk(&init->application_disk))
 		panic("No FAT16 application disk found\n");

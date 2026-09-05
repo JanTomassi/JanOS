@@ -13,5 +13,5 @@ void kernel_test_marker(const char *name, bool passed)
 	kprintf("JANOS:TEST:EXIT:%u\n", (unsigned)status);
 	outd(0xf4, status);
 	for (;;)
-		__asm__ volatile("cli; hlt" ::: "memory");
+	__asm__ volatile("cli; hlt" ::: "memory", "cc");
 }

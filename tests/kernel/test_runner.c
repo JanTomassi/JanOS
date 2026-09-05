@@ -148,7 +148,7 @@ static void run_pingpong_test(void)
 	kprintf("PINGPONG_AFFINITY server=0 client0=0 client1=%u\n",
 	         (unsigned)client1_cpu);
 
-	__asm__ volatile("sti");
+	__asm__ volatile("sti" ::: "memory", "cc");
 	i386_context_enter_user(&server.context);
 }
 
@@ -247,7 +247,7 @@ static void run_framebuffer_test(const void *multiboot_info, size_t multiboot_in
 		(unsigned)distinct);
 	if (!distinct)
 		panic("Framebuffer server and client share a page directory\n");
-	__asm__ volatile("sti");
+	__asm__ volatile("sti" ::: "memory", "cc");
 	i386_context_enter_user(&server.context);
 }
 

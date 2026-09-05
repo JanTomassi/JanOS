@@ -14,6 +14,7 @@
 #include <janos/input.h>
 
 #include <arch/i386/irq.h>
+#include <arch/i386/port.h>
 #include <arch/i386/ps2.h>
 
 struct active_mod_key {
@@ -128,14 +129,7 @@ static void ps2_irq_handler(uint8_t irq_line, void *context)
 {
 	(void)irq_line;
 	(void)context;
-	uint8_t scan_code;
-
-	__asm__("mov    $0,    %0;"   /* zeroing scan_code */
-		"inb 	$0x60, %%al;" /* reading input from keyboard */
-		"mov    %%al,  %0"    /* coping keyboard input to scan_code */
-		: "=g"(scan_code)
-		:
-		: "%al");
+	uint8_t scan_code = inb(0x60);
 	if (input_endpoint != 0) {
 		(void)ipc_kernel_notify(input_endpoint, JANOS_INPUT_MSG_RAW, scan_code);
 		return;

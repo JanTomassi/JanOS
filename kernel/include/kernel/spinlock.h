@@ -10,7 +10,7 @@ typedef struct {
 static inline uint32_t local_irq_save(void)
 {
 	uint32_t flags;
-	__asm__ volatile("pushfl; popl %0; cli" : "=r"(flags) : : "memory");
+	__asm__ volatile("pushfl; popl %0; cli" : "=r"(flags) : : "memory", "cc");
 	return flags;
 }
 

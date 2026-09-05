@@ -404,7 +404,7 @@ static void process_publish_exit_complete(struct process *process)
 	/* An exiting process may be the only runnable process on this CPU. */
 	scheduler_yield(nullptr);
 	for (;;)
-		__asm__ volatile("sti; hlt" ::: "memory");
+		__asm__ volatile("sti; hlt" ::: "memory", "cc");
 }
 
 void process_exit(struct process *process, int status)
@@ -445,13 +445,13 @@ void process_exit(struct process *process, int status)
 	struct process *process = cpu == nullptr ? nullptr : cpu->current_process;
 	if (process == nullptr) {
 		spin_unlock(&process_lock);
-		__asm__ volatile("cli");
+		__asm__ volatile("cli" ::: "memory", "cc");
 		for (;;)
 			__asm__ volatile("hlt");
 	}
 	if (process->state == PROCESS_ZOMBIE || process->state == PROCESS_DEAD) {
 		spin_unlock(&process_lock);
-		__asm__ volatile("cli");
+		__asm__ volatile("cli" ::: "memory", "cc");
 		for (;;)
 			__asm__ volatile("hlt");
 	}

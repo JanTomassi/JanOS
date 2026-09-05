@@ -8,7 +8,7 @@ static int32_t syscall3(uint32_t number, uint32_t arg1, uint32_t arg2,
 {
 	int32_t result;
 	__asm__ volatile("int $0x80" : "=a"(result)
-		: "a"(number), "b"(arg1), "c"(arg2), "d"(arg3) : "memory");
+		: "a"(number), "b"(arg1), "c"(arg2), "d"(arg3) : "memory", "cc");
 	return result;
 }
 
@@ -17,7 +17,8 @@ static int32_t syscall4(uint32_t number, uint32_t arg1, uint32_t arg2,
 {
 	int32_t result;
 	__asm__ volatile("int $0x80" : "=a"(result)
-		: "a"(number), "b"(arg1), "c"(arg2), "d"(arg3), "S"(arg4) : "memory");
+		: "a"(number), "b"(arg1), "c"(arg2), "d"(arg3), "S"(arg4)
+		: "memory", "cc");
 	return result;
 }
 

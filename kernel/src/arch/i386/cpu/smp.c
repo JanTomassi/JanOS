@@ -521,7 +521,7 @@ void ap_main(void)
 	}
 
 	lapic_enable();
-	__asm__ volatile("lidt %0" : : "m"(bsp_idtr));
+	__asm__ volatile("lidt %0" : : "m"(bsp_idtr) : "memory");
 
 	if (idx < MAX_CPUS) {
 		if (!i386_tss_init_cpu(&cpus[idx].tss_state,
