@@ -26,16 +26,8 @@ trap cleanup EXIT
 
 # Keep the index limited to the kernel. In particular, tools/src contains a
 # complete vendored compiler tree and must not become part of TAGS.
-git -C "$root" ls-files -co --exclude-standard -- kernel |
-while IFS= read -r path; do
-  case "$path" in
-    kernel/*.[ch]|kernel/*.[sS])
-      if [ -f "$root/$path" ]; then
-        printf '%s\n' "$path"
-      fi
-      ;;
-  esac
-done > "$file_list"
+git -C "$root" ls-files -co --exclude-standard -- kernel apps libc sdk |
+awk '/\.[chSs]$/' > "$file_list"
 
 if [ ! -s "$file_list" ]; then
   printf '%s\n' 'error: no kernel source files found' >&2
@@ -44,4 +36,4 @@ fi
 
 (CDPATH= cd "$root" && etags --declarations --output="$tag_file" - < "$file_list")
 mv -f "$tag_file" "$output"
-printf 'Wrote %s\n' "$output"
+printf 'Wrote %s from %d files\n' "$output" "$(wc -l < "$file_list")"
