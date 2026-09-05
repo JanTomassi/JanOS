@@ -1,6 +1,7 @@
 #include <kernel/stage5.h>
 
 #include <kernel/block_device.h>
+#include <kernel/display.h>
 #include <kernel/framebuffer_boot.h>
 #include <kernel/ipc.h>
 #include <kernel/process/process.h>
@@ -76,8 +77,11 @@ bool stage5_boot_services(const struct block_device *device,
 		JANOS_IPC_RIGHT_SEND))
 		return false;
 	process_service_configure(procserv.process, device);
-	if (framebuffer_endpoint != 0 && !framebuffer_console_claim(shell.process))
-		return false;
+	if (framebuffer_endpoint != 0) {
+		if (!framebuffer_console_handoff(shell.process))
+			return false;
+		kprintf("FBHANDOFF_READY pid=%u\n", (unsigned)process_pid(shell.process));
+	}
 
 	const char *procserv_argv[] = {
 		"procserv", "server", procserv_endpoint_text, nullptr,

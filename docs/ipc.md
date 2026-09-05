@@ -47,6 +47,12 @@ operation used by clients when they need that reply; its request, reply, and
 timeout fit the existing i386 register ABI while message payloads remain at 64
 bytes.
 
+The framebuffer session message is kernel-to-server control traffic. Its sender
+must be the kernel, and its mode, owner PID, and opaque handoff token must match
+the current transition. After a foreground handoff, regular framebuffer
+requests are accepted only from the authorized shell endpoint owner. User
+messages cannot claim, replace, or release the session.
+
 An unavailable or stale endpoint returns `-JANOS_EBADF` without entering the
 server or dereferencing a user pointer. The framebuffer client treats that as
 the stable unavailable-server result and remains alive rather than crashing.

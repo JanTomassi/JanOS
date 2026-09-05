@@ -19,6 +19,7 @@ static struct display_session console_session = {
 	.mode = DISPLAY_SESSION_BOOT,
 };
 static spinlock_t console_lock = { 0 };
+static uint32_t next_session_token = 1;
 
 static bool foreground_process_allowed(const struct process *process)
 {
@@ -86,7 +87,8 @@ void framebuffer_console_flush(void)
 	/* Output is drained by fbserver through the framebuffer read syscall. */
 }
 
-static bool queue_session_update(uint32_t mode, uint32_t owner)
+static bool queue_session_update_locked(uint32_t mode, uint32_t owner,
+	uint32_t token)
 {
 	if (framebuffer_endpoint == 0)
 		return false;
@@ -95,25 +97,34 @@ static bool queue_session_update(uint32_t mode, uint32_t owner)
 		.flags = JANOS_IPC_REQUEST,
 		.length = sizeof(struct janos_fb_session),
 	} };
-	struct janos_fb_session session = { .mode = mode, .owner = owner };
+	struct janos_fb_session session = {
+		.mode = mode,
+		.owner = owner,
+		.token = token,
+	};
 	memcpy(request.payload, &session, sizeof(session));
 	return ipc_kernel_send(framebuffer_endpoint, &request);
 }
 
-bool framebuffer_console_claim(struct process *process)
+bool framebuffer_console_handoff(struct process *process)
 {
 	if (process == nullptr)
 		return false;
 	process_pid_t owner = process_pid(process);
 	uint32_t flags = spin_lock_irqsave(&console_lock);
-	bool available = console_session.mode == DISPLAY_SESSION_BOOT ||
-		(console_session.mode == DISPLAY_SESSION_FOREGROUND &&
-		 console_session.owner == owner);
-	spin_unlock_irqrestore(&console_lock, flags);
-	if (!available || !queue_session_update(JANOS_FB_SESSION_FOREGROUND, owner))
+	if (console_session.mode != DISPLAY_SESSION_BOOT) {
+		spin_unlock_irqrestore(&console_lock, flags);
 		return false;
-	flags = spin_lock_irqsave(&console_lock);
-	bool claimed = display_session_claim(&console_session, owner);
+	}
+	uint32_t token = next_session_token++;
+	if (token == 0)
+		token = next_session_token++;
+	bool claimed = display_session_claim(&console_session, owner, token);
+	if (claimed && !queue_session_update_locked(
+		JANOS_FB_SESSION_FOREGROUND, owner, token)) {
+		(void)display_session_release(&console_session, owner, token);
+		claimed = false;
+	}
 	spin_unlock_irqrestore(&console_lock, flags);
 	return claimed;
 }
@@ -126,11 +137,13 @@ bool framebuffer_console_release(struct process *process)
 	uint32_t flags = spin_lock_irqsave(&console_lock);
 	bool owns_session = console_session.mode == DISPLAY_SESSION_FOREGROUND &&
 		console_session.owner == owner;
-	spin_unlock_irqrestore(&console_lock, flags);
-	if (!owns_session || !queue_session_update(JANOS_FB_SESSION_BOOT, owner))
+	uint32_t token = console_session.token;
+	if (!owns_session || !queue_session_update_locked(
+		JANOS_FB_SESSION_BOOT, owner, token)) {
+		spin_unlock_irqrestore(&console_lock, flags);
 		return false;
-	flags = spin_lock_irqsave(&console_lock);
-	bool released = display_session_release(&console_session, owner);
+	}
+	bool released = display_session_release(&console_session, owner, token);
 	spin_unlock_irqrestore(&console_lock, flags);
 	return released;
 }

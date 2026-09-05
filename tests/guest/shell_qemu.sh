@@ -47,6 +47,7 @@ qemu_pid=$!
 
 for _ in $(seq 1 30); do
 	if grep -q 'SHELL_READY' "$log" &&
+	   grep -q 'FBHANDOFF_READY' "$log" &&
 	   grep -q 'FBSERVER_FOREGROUND_PASS' "$log"; then
 		break
 	fi

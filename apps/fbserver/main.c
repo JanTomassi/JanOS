@@ -25,6 +25,7 @@ struct fb_state {
 	uint32_t font_width;
 	uint32_t font_height;
 	uint32_t foreground_pid;
+	uint32_t foreground_token;
 };
 
 static void print(const char *text)
@@ -286,18 +287,23 @@ static int32_t session_status(struct fb_state *state,
 	struct janos_fb_session session;
 	memcpy(&session, request->payload, sizeof(session));
 	if (session.mode == JANOS_FB_SESSION_FOREGROUND) {
-		if (session.owner == 0 || (state->foreground_pid != 0 &&
-			state->foreground_pid != session.owner))
+		if (session.owner == 0 || session.token == 0 ||
+			(state->foreground_pid != 0 &&
+			 (state->foreground_pid != session.owner ||
+			  state->foreground_token != session.token)))
 			return JANOS_FB_STATUS_INVALID;
 		state->foreground_pid = session.owner;
+		state->foreground_token = session.token;
 		print("FBSERVER_FOREGROUND_PASS pid=");
 		print_uint(session.owner);
 		print("\n");
 		return JANOS_FB_STATUS_OK;
 	}
 	if (session.mode == JANOS_FB_SESSION_BOOT &&
-		state->foreground_pid == session.owner && session.owner != 0) {
+		state->foreground_pid == session.owner && session.owner != 0 &&
+		state->foreground_token == session.token && session.token != 0) {
 		state->foreground_pid = 0;
+		state->foreground_token = 0;
 		return JANOS_FB_STATUS_OK;
 	}
 	return JANOS_FB_STATUS_INVALID;

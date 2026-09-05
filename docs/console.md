@@ -6,6 +6,12 @@ and its FAT16 application files are available. The PS/2 driver only forwards raw
 scan bytes to the userspace input server; the input server decodes keys and
 sends logical key notifications to the shell.
 
+The display begins in BOOT mode, retaining early diagnostics in a bounded ring.
+Before the shell is runnable, Stage 5 performs an authorized atomic handoff to
+the shell session. In FOREGROUND mode, only the shell and descendant processes
+send console output to the framebuffer; kernel diagnostics and unrelated
+processes remain serial-only.
+
 The userspace shell owns line editing, command history, and command dispatch.
 Its commands are `help`, `ps`, `info`, `font`, `calc`, `clear`, and `exit`.
 `procserv` provides process snapshots and calculator spawning over IPC. `calc`

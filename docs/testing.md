@@ -21,6 +21,8 @@ Every test is registered with Meson. The current suites contain:
 - `host:calc`: calculator parsing, arithmetic, overflow, and invalid input.
 - `host:framebuffer-protocol`: framebuffer message sizes, IDs, and stable error
   values.
+- `host:boot-log` and `host:display-session`: ring ordering, overwrite behavior,
+  session ownership, token validation, and release rules.
 - `host:elf-loader`: real ELF segment validation and loading through injected
   map, copy, zero, unmap, and protection callbacks.
 - `host:fat16`: real FAT16 layout, directory, file, partial-read, allocation
@@ -51,8 +53,9 @@ Every test is registered with Meson. The current suites contain:
 - `qemu:pingpong-guest`, `qemu:pingpong-guest-4cpu`,
   `qemu:framebuffer-guest`, and `qemu:shell-guest`: userspace integration
   scenarios using the real disk and services. The shell scenario also covers
-  foreground calculator input, explicit calculator exit, one-shot execution,
-  and absence of blocked or zombie calculators after reaping.
+  authorized framebuffer handoff, foreground calculator input, explicit
+  calculator exit, one-shot execution, and absence of blocked or zombie
+  calculators after reaping.
 
 Run them with:
 
@@ -75,6 +78,8 @@ tests/
 ├── host/
 │   ├── test.h
 │   ├── calc_test.c
+│   ├── boot_log_test.c
+│   ├── display_session_test.c
 │   ├── elf_loader_test.c
 │   ├── fat16_test.c
 │   ├── memblock_test.c

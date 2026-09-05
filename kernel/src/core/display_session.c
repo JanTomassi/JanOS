@@ -8,26 +8,32 @@ void display_session_init(struct display_session *session)
 		};
 }
 
-bool display_session_claim(struct display_session *session, uint32_t owner)
+bool display_session_claim(struct display_session *session, uint32_t owner,
+	uint32_t token)
 {
-	if (session == 0 || owner == 0 ||
+	if (session == 0 || owner == 0 || token == 0 ||
 		(session->mode != DISPLAY_SESSION_BOOT &&
 		 session->mode != DISPLAY_SESSION_FOREGROUND))
 		return false;
-	if (session->mode == DISPLAY_SESSION_FOREGROUND && session->owner != owner)
+	if (session->mode == DISPLAY_SESSION_FOREGROUND &&
+		(session->owner != owner || session->token != token))
 		return false;
 	session->mode = DISPLAY_SESSION_FOREGROUND;
 	session->owner = owner;
+	session->token = token;
 	return true;
 }
 
-bool display_session_release(struct display_session *session, uint32_t owner)
+bool display_session_release(struct display_session *session, uint32_t owner,
+	uint32_t token)
 {
-	if (session == 0 || owner == 0 ||
-		session->mode != DISPLAY_SESSION_FOREGROUND || session->owner != owner)
+	if (session == 0 || owner == 0 || token == 0 ||
+		session->mode != DISPLAY_SESSION_FOREGROUND || session->owner != owner ||
+		session->token != token)
 		return false;
 	session->mode = DISPLAY_SESSION_BOOT;
 	session->owner = 0;
+	session->token = 0;
 	return true;
 }
 

@@ -51,6 +51,7 @@ struct janos_fb_scroll {
 struct janos_fb_session {
 	uint32_t mode;
 	uint32_t owner;
+	uint32_t token;
 };
 
 struct janos_fb_reply {

@@ -17,7 +17,7 @@ uint32_t framebuffer_boot_endpoint(void);
 size_t framebuffer_console_write(const char *buffer, size_t length);
 size_t framebuffer_console_write_user(const char *buffer, size_t length);
 size_t framebuffer_console_read(char *buffer, size_t length);
-bool framebuffer_console_claim(struct process *process);
+bool framebuffer_console_handoff(struct process *process);
 bool framebuffer_console_release(struct process *process);
 void framebuffer_console_enable(void);
 void framebuffer_console_flush(void);

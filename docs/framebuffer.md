@@ -15,16 +15,23 @@ entries but never returns the display range to the physical allocator.
 
 The normal `JanOS.iso` contains only the kernel. The accompanying FAT16
 application disk contains `calc`, `fbserver`, `fbclient`, and `JANOS.PSF`.
-During boot the kernel creates the framebuffer capability and loads the server
-and client from that disk alongside `calc`. `JanOS-framebuffer.iso` remains the
-dedicated guest image for the isolated framebuffer protocol test.
+During normal boot the kernel creates the framebuffer capability and loads only
+the server from that disk. `fbclient` remains a dedicated test client, and
+`JanOS-framebuffer.iso` is the isolated guest image for the framebuffer protocol
+test.
 
 The client uses `janos_ipc_call()` and reports success only after validating a
 reply for every operation. Calling an unavailable or stale endpoint returns
 `-JANOS_EBADF`; the dedicated guest test records this as
 `FBCLIENT_UNAVAILABLE_PASS` and the client does not fault.
 
-After the service starts, kernel diagnostics and process console writes are
-mirrored to it as non-blocking output notifications. Serial remains the primary
-diagnostic channel; output generated before framebuffer service startup is
-available only on serial.
+The kernel starts in a BOOT display session. Kernel diagnostics and process
+console writes are captured in the bounded boot-log ring and drained by the
+server. Stage 5 atomically queues a kernel-only session update and publishes the
+shell as the foreground owner before making the shell runnable. The update
+contains an opaque per-handoff token; stale or user-sent session updates are
+rejected by `fbserver`.
+
+After handoff, serial remains the primary diagnostic channel. Only the shell and
+its descendants are mirrored to the framebuffer, while kernel and unrelated
+process output remains serial-only.

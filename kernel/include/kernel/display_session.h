@@ -11,9 +11,12 @@ enum display_session_mode {
 struct display_session {
 	enum display_session_mode mode;
 	uint32_t owner;
+	uint32_t token;
 };
 
 void display_session_init(struct display_session *session);
-bool display_session_claim(struct display_session *session, uint32_t owner);
-bool display_session_release(struct display_session *session, uint32_t owner);
+bool display_session_claim(struct display_session *session, uint32_t owner,
+	uint32_t token);
+bool display_session_release(struct display_session *session, uint32_t owner,
+	uint32_t token);
 bool display_session_allows(const struct display_session *session, uint32_t owner);

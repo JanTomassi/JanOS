@@ -28,6 +28,8 @@ int main(void)
 		"scroll exceeds IPC payload");
 	_Static_assert(sizeof(struct janos_fb_session) <= JANOS_IPC_PAYLOAD_SIZE,
 		"session exceeds IPC payload");
+	_Static_assert(sizeof(struct janos_fb_session) == 12,
+		"session payload ABI changed");
 	_Static_assert(sizeof(struct janos_fb_info_reply) <= JANOS_IPC_PAYLOAD_SIZE,
 		"info reply exceeds IPC payload");
 	_Static_assert(sizeof(struct janos_fb_puts) == JANOS_IPC_PAYLOAD_SIZE,
