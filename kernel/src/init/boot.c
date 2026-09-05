@@ -288,9 +288,6 @@ static void init_userspace(struct kernel_init_context *init)
 	else
 		framebuffer_console_enable();
 
-	if (init->framebuffer_started && !framebuffer_boot_clear())
-		panic("Failed to queue framebuffer clear request\n");
-
 	init->initial_context_ready = init->framebuffer_started;
 	if (!stage5_boot_services(&init->application_disk, &init->initial_context,
 		&init->initial_context_ready))

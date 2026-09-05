@@ -1,5 +1,6 @@
 #include <kernel/framebuffer_boot.h>
 
+#include <kernel/boot_log.h>
 #include <kernel/display.h>
 #include <kernel/framebuffer.h>
 #include <kernel/ipc.h>
@@ -12,29 +13,19 @@
 #include "../exec/multiboot_exec.h"
 
 static uint32_t framebuffer_endpoint;
-static char console_buffer[64 * 1024];
-static size_t console_head;
-static size_t console_count;
+static struct boot_log boot_log;
 static spinlock_t console_lock = { 0 };
-static bool console_enabled;
 
 size_t framebuffer_console_write(const char *buffer, size_t length)
 {
-	if (buffer == nullptr || !console_enabled)
+	if (buffer == nullptr)
 		return 0;
 	uint32_t flags = spin_lock_irqsave(&console_lock);
-	for (size_t i = 0; i < length; ++i) {
-		if (console_count == sizeof(console_buffer)) {
-			console_head = (console_head + 1) % sizeof(console_buffer);
-			--console_count;
-		}
-		console_buffer[(console_head + console_count) % sizeof(console_buffer)] = buffer[i];
-		++console_count;
-	}
+	size_t written = boot_log_write(&boot_log, buffer, length);
 	spin_unlock_irqrestore(&console_lock, flags);
-	if (framebuffer_endpoint != 0 && length != 0)
+	if (framebuffer_endpoint != 0 && written != 0)
 		ipc_wake_receiver(framebuffer_endpoint);
-	return length;
+	return written;
 }
 
 size_t framebuffer_console_read(char *buffer, size_t length)
@@ -42,11 +33,7 @@ size_t framebuffer_console_read(char *buffer, size_t length)
 	if (buffer == nullptr || length == 0)
 		return 0;
 	uint32_t flags = spin_lock_irqsave(&console_lock);
-	size_t count = length < console_count ? length : console_count;
-	for (size_t i = 0; i < count; ++i)
-		buffer[i] = console_buffer[(console_head + i) % sizeof(console_buffer)];
-	console_head = (console_head + count) % sizeof(console_buffer);
-	console_count -= count;
+	size_t count = boot_log_read(&boot_log, buffer, length);
 	spin_unlock_irqrestore(&console_lock, flags);
 	return count;
 }
@@ -73,9 +60,7 @@ void framebuffer_console_flush(void)
 
 void framebuffer_console_enable(void)
 {
-	uint32_t flags = spin_lock_irqsave(&console_lock);
-	console_enabled = true;
-	spin_unlock_irqrestore(&console_lock, flags);
+	/* Boot-log capture is active before the framebuffer server starts. */
 }
 
 static size_t u32_to_decimal(uint32_t value, char *buffer, size_t size)

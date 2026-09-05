@@ -29,6 +29,7 @@ fi
 pid=$!
 for _ in $(seq 1 30); do
 	if grep -q 'FBSERVER_READY' "$log" &&
+	   grep -q 'FBBOOTLOG_PASS' "$log" &&
 	   grep -q 'FBCLIENT_PASS' "$log" &&
 	   grep -q 'FBCLIENT_UNAVAILABLE_PASS' "$log" &&
 	   grep -q 'FBTEST_SPACE.*distinct=1' "$log"; then
@@ -36,6 +37,9 @@ for _ in $(seq 1 30); do
 			break
 		fi
 		exit 0
+	fi
+	if grep -q 'FBBOOTLOG_FAIL' "$log"; then
+		break
 	fi
 	sleep 1
 done

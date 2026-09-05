@@ -209,9 +209,10 @@ static void run_framebuffer_test(const void *multiboot_info, size_t multiboot_in
 	const char *server_argv[] = {
 		"fbserver", "server", endpoint_text, framebuffer_address_text,
 		framebuffer_size_text, pitch_text, width_text, height_text, bpp_text,
-		type_text, font_address_text, font_size_text, nullptr,
+		type_text, font_address_text, font_size_text, "test", nullptr,
 	};
-	if (!process_start(server.process, server.entry, 12, server_argv) ||
+	kprintf("FBTEST_BOOTLOG\n");
+	if (!process_start(server.process, server.entry, 13, server_argv) ||
 		!process_initial_context(server.process, &server.context))
 		panic("Failed to start framebuffer server\n");
 

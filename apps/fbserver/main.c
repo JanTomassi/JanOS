@@ -205,6 +205,24 @@ static void putc_frame(struct fb_state *state, uint32_t character)
 	advance(state);
 }
 
+static bool scan_boot_log_marker(const char *buffer, size_t length, size_t *matched)
+{
+	static const char marker[] = "FBTEST_BOOTLOG";
+	const size_t marker_length = sizeof(marker) - 1;
+	if (buffer == 0 || matched == 0)
+		return false;
+	for (size_t i = 0; i < length; ++i) {
+		if (buffer[i] == marker[*matched]) {
+			++*matched;
+			if (*matched == marker_length)
+				return true;
+		} else {
+			*matched = buffer[i] == marker[0] ? 1 : 0;
+		}
+	}
+	return false;
+}
+
 static int32_t request_status(struct fb_state *state,
 	const struct janos_ipc_message *request)
 {
@@ -258,12 +276,16 @@ static int32_t request_status(struct fb_state *state,
 	return JANOS_FB_STATUS_INVALID;
 }
 
-static int32_t drain_console(struct fb_state *state)
+static int32_t drain_console(struct fb_state *state, bool check_boot_log,
+	size_t *boot_log_match, bool *boot_log_seen)
 {
 	char buffer[JANOS_FRAMEBUFFER_OUTPUT_CHUNK];
 	ssize_t count = janos_framebuffer_read(buffer, sizeof(buffer));
 	if (count < 0)
 		return count;
+	if (check_boot_log && !*boot_log_seen &&
+		scan_boot_log_marker(buffer, (size_t)count, boot_log_match))
+		*boot_log_seen = true;
 	for (ssize_t i = 0; i < count; ++i)
 		putc_frame(state, (uint8_t)buffer[i]);
 	return count;
@@ -337,16 +359,27 @@ static int server(int argc, char **argv)
 	if (state.columns == 0 || state.rows == 0)
 		return 1;
 	uint32_t endpoint = parse_uint(argv[2]);
+	bool check_boot_log = argc >= 13 && argv[12][0] == 't' &&
+		argv[12][1] == 'e' && argv[12][2] == 's' && argv[12][3] == 't' &&
+		argv[12][4] == '\0';
+	bool boot_log_seen = false;
+	size_t boot_log_match = 0;
+	bool boot_log_checked = !check_boot_log;
 	clear(&state);
 	print("FBSERVER_READY cpu=");
 	print_uint((uint32_t)janos_cpu_get());
 	print("\n");
 	for (;;) {
-		int32_t output = drain_console(&state);
+		int32_t output = drain_console(&state, check_boot_log, &boot_log_match,
+			&boot_log_seen);
 		if (output < 0)
 			return 1;
 		if (output > 0)
 			continue;
+		if (!boot_log_checked) {
+			print(boot_log_seen ? "FBBOOTLOG_PASS\n" : "FBBOOTLOG_FAIL\n");
+			boot_log_checked = true;
+		}
 		struct janos_ipc_message request;
 		int32_t result = janos_ipc_receive(endpoint, &request,
 			JANOS_IPC_TIMEOUT_INFINITE);
