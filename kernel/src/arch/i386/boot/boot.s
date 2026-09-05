@@ -11,8 +11,8 @@ framebuffer_tag_start:
         dw 5
         dw 1
         dd framebuffer_tag_end - framebuffer_tag_start
-        dd 1920
-        dd 1080
+        dd 800
+        dd 400
         dd 32
 	align 8
 framebuffer_tag_end:

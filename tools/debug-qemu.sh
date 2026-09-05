@@ -36,5 +36,8 @@ fi
 gdb_status=0
 "$gdb" "$kernel" \
 	-ex 'set pagination off' \
+	-ex 'set breakpoint pending on' \
+	-ex 'set disassemble-next-line on' \
+	-ex 'set confirm off' \
 	-ex 'target remote localhost:1234' </dev/tty >/dev/tty 2>/dev/tty || gdb_status=$?
 exit "$gdb_status"

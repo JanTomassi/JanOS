@@ -504,12 +504,13 @@ void ap_main(void)
 {
 	uint8_t apic_id = lapic_get_id();
 
-	__asm__ volatile("mov $0x10, %ax\n"
-			 "mov %ax, %ds\n"
-			 "mov %ax, %es\n"
-			 "mov %ax, %fs\n"
-			 "mov %ax, %gs\n"
-			 "mov %ax, %ss\n");
+	__asm__ volatile("mov $0x10, %%ax\n"
+			 "mov %%ax, %%ds\n"
+			 "mov %%ax, %%es\n"
+			 "mov %%ax, %%fs\n"
+			 "mov %%ax, %%gs\n"
+			 "mov %%ax, %%ss\n"
+			 ::: "eax", "memory");
 
 	size_t idx = MAX_CPUS;
 	for (size_t i = 0; i < cpu_count; i++) {

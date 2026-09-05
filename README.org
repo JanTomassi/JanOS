@@ -26,18 +26,30 @@ cd tools
 Configure and build JanOS with Meson and Ninja:
 
 #+begin_src sh
-meson setup build --cross-file config/i686-elf.ini \
-  --prefix=/usr --libdir=lib32
-meson compile -C build
-meson test -C build --print-errorlogs
-meson compile -C build calc-disk iso
+meson setup build-debug --cross-file config/i686-elf.ini \
+  --buildtype=debug --prefix=/usr --libdir=lib32
+meson compile -C build-debug
+meson test -C build-debug --print-errorlogs
+meson compile -C build-debug calc-disk iso
+
+meson setup build-release --cross-file config/i686-elf.ini \
+  --buildtype=release --prefix=/usr --libdir=lib32
+meson compile -C build-release
+meson test -C build-release --print-errorlogs
+meson compile -C build-release calc-disk iso
 #+end_src
+
+Meson's `buildtype` is the build-mode option. `debug` uses `-O0`, full `-g3`
+symbols, frame pointers, and disabled inlining for GDB. `release` uses the
+standard `-O3` optimization level. Existing build directories can be switched
+with `meson configure build -Dbuildtype=debug` or `-Dbuildtype=release`, but
+separate directories keep debug symbols and artifacts apart.
 
 Run or debug the generated image:
 
 #+begin_src sh
-meson compile -C build run
-meson compile -C build debug
+meson compile -C build-debug run
+meson compile -C build-debug gdb
 #+end_src
 
 The debug target starts QEMU paused with a GDB server on port 1234. Optional
@@ -47,7 +59,7 @@ disk paths are configured with ~qemu_disk~, ~qemu_sata_disk1~, and
 Install the kernel and user SDK into a staging sysroot:
 
 #+begin_src sh
-DESTDIR="$PWD/dist/sysroot" meson install -C build
+DESTDIR="$PWD/dist/sysroot" meson install -C build-release
 #+end_src
 
 See ~docs/structure.md~ for subsystem ownership, ~docs/applications.md~ for

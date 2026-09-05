@@ -40,6 +40,7 @@ struct process_ipc_wait {
 
 void process_system_init(void);
 struct process *process_create(struct process *parent);
+struct process *process_create_child(process_pid_t parent_pid);
 void process_destroy(struct process *process);
 
 /* Return the process currently running on this CPU, if any. */
@@ -65,6 +66,9 @@ uint8_t process_cpu_affinity(const struct process *process);
 bool process_set_state(struct process *process, enum process_state state);
 int process_exit_status(const struct process *process);
 void process_exit(struct process *process, int status);
+/* Reaps an exited direct child; NOHANG returns zero while it is running. */
+int32_t process_wait_child(struct process *parent, process_pid_t pid,
+                           uintptr_t status_address, uint32_t options);
 
 /* Returns the child with pid, or NULL if it is not a direct child. */
 struct process *process_find_child(const struct process *parent,

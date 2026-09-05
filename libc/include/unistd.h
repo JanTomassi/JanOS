@@ -17,6 +17,8 @@ ssize_t janos_framebuffer_read(void *buffer, size_t length);
 int32_t janos_cpu_get(void);
 _Noreturn void _Exit(int status);
 
+int32_t janos_process_wait(uint32_t pid, int32_t *status, uint32_t options);
+
 int32_t janos_ipc_endpoint_create(uint32_t flags);
 int32_t janos_ipc_send(uint32_t endpoint, const struct janos_ipc_message *message,
                        uint32_t timeout);

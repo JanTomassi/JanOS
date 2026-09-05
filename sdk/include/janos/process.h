@@ -9,6 +9,7 @@
 #define JANOS_PROCESS_SPAWN_ARGUMENT_SIZE \
 	(JANOS_IPC_PAYLOAD_SIZE - sizeof(uint32_t))
 #define JANOS_PROCESS_CPU_ANY 0xffffffffu
+#define JANOS_PROCESS_WAIT_NOHANG 1u
 #define JANOS_PROCESS_PROTOCOL_VERSION 1u
 
 enum janos_process_message_type {
@@ -53,6 +54,12 @@ struct janos_process_spawn_request {
 struct janos_process_spawn_reply {
 	int32_t status;
 	struct janos_process_info process;
+	uint32_t input_endpoint;
+};
+
+struct janos_process_spawn_result {
+	struct janos_process_info process;
+	uint32_t input_endpoint;
 };
 
 /* This structure is consumed by the guarded process-manager syscall. */
@@ -72,7 +79,11 @@ _Static_assert(sizeof(struct janos_process_spawn_request) == JANOS_IPC_PAYLOAD_S
 	"process spawn request must fit IPC payload");
 _Static_assert(sizeof(struct janos_process_spawn_reply) <= JANOS_IPC_PAYLOAD_SIZE,
 	"process spawn reply exceeds IPC payload");
+_Static_assert(sizeof(struct janos_process_spawn_result) <= JANOS_IPC_PAYLOAD_SIZE,
+	"process spawn result exceeds IPC payload");
 
 int32_t janos_process_snapshot(uint32_t index, struct janos_process_info *info);
 int32_t janos_process_spawn(const struct janos_process_exec_request *request,
-	                           struct janos_process_info *info);
+	                           struct janos_process_spawn_result *result);
+/* Polls a direct child; NOHANG returns zero while it is still running. */
+int32_t janos_process_wait(uint32_t pid, int32_t *status, uint32_t options);

@@ -50,7 +50,9 @@ Every test is registered with Meson. The current suites contain:
   cleanup.
 - `qemu:pingpong-guest`, `qemu:pingpong-guest-4cpu`,
   `qemu:framebuffer-guest`, and `qemu:shell-guest`: userspace integration
-  scenarios using the real disk and services.
+  scenarios using the real disk and services. The shell scenario also covers
+  foreground calculator input, explicit calculator exit, one-shot execution,
+  and absence of blocked or zombie calculators after reaping.
 
 Run them with:
 

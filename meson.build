@@ -13,6 +13,16 @@ project(
   ],
 )
 
+buildtype = get_option('buildtype')
+if buildtype == 'debug'
+  # Meson's debug buildtype supplies -O0; these flags improve GDB stepping.
+  add_project_arguments(
+    '-g3', '-fno-omit-frame-pointer', '-fno-inline',
+    language: 'c',
+  )
+  add_project_link_arguments('-g3', language: 'c')
+endif
+
 if not meson.is_cross_build()
   error('Configure JanOS with --cross-file config/i686-elf.ini')
 endif
@@ -28,11 +38,13 @@ libgcc = declare_dependency(link_args: [libgcc_result.stdout().strip()])
 nasm = find_program('nasm', native: true)
 sh = find_program('sh', native: true)
 sdk_inc = include_directories('sdk/include')
+nasm_debug_args = buildtype == 'debug' ? ['-g'] : []
 
 nasm_objects = generator(
   nasm,
   output: '@BASENAME@.o',
-  arguments: ['-f', 'elf32', '-g', '@INPUT@', '-o', '@OUTPUT@'],
+  arguments: ['-f', 'elf32'] + nasm_debug_args +
+    ['@INPUT@', '-o', '@OUTPUT@'],
 )
 
 subdir('libc')
@@ -145,7 +157,7 @@ if grub_mkrescue.found()
       depends: [calc_disk],
     )
     gdb = find_program('i686-elf-gdb', 'gdb', native: true, required: false)
-    if gdb.found()
+    if gdb.found() and buildtype == 'debug'
       gdb_script = files('tools/debug-qemu.sh')
       run_target(
         'gdb',

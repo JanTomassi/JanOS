@@ -8,3 +8,4 @@ struct process;
 bool process_service_register_syscalls(void);
 void process_service_configure(struct process *service,
 	                             const struct block_device *device);
+void process_service_process_exiting(struct process *process);

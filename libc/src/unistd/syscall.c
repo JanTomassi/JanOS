@@ -56,10 +56,16 @@ int32_t janos_process_snapshot(uint32_t index, struct janos_process_info *info)
 }
 
 int32_t janos_process_spawn(const struct janos_process_exec_request *request,
-	                           struct janos_process_info *info)
+	                           struct janos_process_spawn_result *result)
 {
 	return syscall4(JANOS_SYS_PROCESS_SPAWN,
-		(uint32_t)(uintptr_t)request, (uint32_t)(uintptr_t)info, 0, 0);
+		(uint32_t)(uintptr_t)request, (uint32_t)(uintptr_t)result, 0, 0);
+}
+
+int32_t janos_process_wait(uint32_t pid, int32_t *status, uint32_t options)
+{
+	return syscall3(JANOS_SYS_PROCESS_WAIT, pid,
+		(uint32_t)(uintptr_t)status, options);
 }
 
 int32_t janos_ipc_endpoint_create(uint32_t flags)

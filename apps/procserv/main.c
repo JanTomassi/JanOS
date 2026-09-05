@@ -87,8 +87,11 @@ static int32_t handle_request(uint32_t endpoint,
 		};
 		memcpy(spawn.name, "calc", sizeof("calc"));
 		memcpy(spawn.argument, operation.argument, operation.argument_length);
+		struct janos_process_spawn_result result = { 0 };
 		struct janos_process_spawn_reply response = { 0 };
-		response.status = janos_process_spawn(&spawn, &response.process);
+		response.status = janos_process_spawn(&spawn, &result);
+		response.process = result.process;
+		response.input_endpoint = result.input_endpoint;
 		reply(endpoint, request, &response, sizeof(response));
 		return 0;
 	}

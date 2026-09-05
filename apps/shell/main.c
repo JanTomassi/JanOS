@@ -16,6 +16,10 @@ struct shell_state {
 	uint32_t framebuffer_endpoint;
 	uint32_t process_endpoint;
 	uint32_t input_endpoint;
+	uint32_t calc_pid;
+	uint32_t calc_endpoint;
+	uint32_t calc_pending_event;
+	bool calc_event_pending;
 	char line[SHELL_LINE_SIZE];
 	size_t line_length;
 	char history[SHELL_HISTORY_SIZE][SHELL_LINE_SIZE];
@@ -170,9 +174,9 @@ static int32_t process_list(const struct shell_state *state, uint32_t index,
 }
 
 static int32_t spawn_calc(const struct shell_state *state, const char *argument,
-	struct janos_process_info *process)
+	struct janos_process_info *process, uint32_t *endpoint)
 {
-	if (state->process_endpoint == 0 || argument == nullptr)
+	if (state->process_endpoint == 0 || argument == nullptr || endpoint == nullptr)
 		return -JANOS_EBADF;
 	size_t length = strlen(argument);
 	if (length >= JANOS_PROCESS_SPAWN_ARGUMENT_SIZE)
@@ -199,6 +203,7 @@ static int32_t spawn_calc(const struct shell_state *state, const char *argument,
 	if (reply.status < 0)
 		return reply.status;
 	*process = reply.process;
+	*endpoint = reply.input_endpoint;
 	return 0;
 }
 
@@ -379,7 +384,8 @@ static bool dispatch(struct shell_state *state)
 	if (command_is(state->line, "calc")) {
 		const char *argument = command_argument(state->line, "calc");
 		struct janos_process_info process;
-		int32_t result = spawn_calc(state, argument, &process);
+		uint32_t endpoint;
+		int32_t result = spawn_calc(state, argument, &process, &endpoint);
 		if (result < 0) {
 			print("calc: spawn failed ");
 			print_uint((uint32_t)-result);
@@ -388,6 +394,9 @@ static bool dispatch(struct shell_state *state)
 			print("calc started via IPC ");
 			print_process(&process);
 			print("\n");
+			state->calc_pid = process.pid;
+			state->calc_endpoint = endpoint;
+			return false;
 		}
 		return true;
 	}
@@ -397,25 +406,55 @@ static bool dispatch(struct shell_state *state)
 	return true;
 }
 
-static void start_calc(struct shell_state *state)
+static bool forward_calc_event(const struct shell_state *state, uint32_t event)
 {
-	struct janos_process_info process;
-	int32_t result = spawn_calc(state, "", &process);
+	for (uint32_t attempt = 0; attempt < JANOS_IPC_QUEUE_SIZE * 2; ++attempt) {
+		int32_t result = janos_ipc_notify(state->calc_endpoint,
+			JANOS_INPUT_MSG_KEY, event);
+		if (result >= 0)
+			return true;
+		if (result != -JANOS_EAGAIN)
+			return false;
+		(void)sched_yield();
+	}
+	return false;
+}
+
+static bool poll_calc(struct shell_state *state)
+{
+	if (state->calc_pid == 0)
+		return false;
+	int32_t status;
+	int32_t result = janos_process_wait(state->calc_pid, &status,
+		JANOS_PROCESS_WAIT_NOHANG);
+	if (result == 0)
+		return false;
 	if (result < 0) {
-		print("shell: calc startup failed ");
+		print("calc: wait failed ");
 		print_uint((uint32_t)-result);
 		print("\n");
-		return;
 	}
-	print("shell: calc started via IPC ");
-	print_process(&process);
-	print("\n");
+	state->calc_pid = 0;
+	state->calc_endpoint = 0;
+	state->calc_event_pending = false;
+	print("jan> ");
+	return true;
 }
 
 static void handle_key(struct shell_state *state, uint32_t event)
 {
 	if (!janos_input_event_pressed(event))
 		return;
+	if (state->calc_pid != 0) {
+		if (!forward_calc_event(state, event)) {
+			if (!state->calc_event_pending)
+				print("\ncalc: input delayed\n");
+			state->calc_pending_event = event;
+			state->calc_event_pending = true;
+			(void)poll_calc(state);
+		}
+		return;
+	}
 	uint32_t key = janos_input_event_key(event);
 	uint32_t character = janos_input_event_character(event);
 	if ((event & JANOS_INPUT_EVENT_CTRL) != 0 &&
@@ -454,11 +493,12 @@ static void handle_key(struct shell_state *state, uint32_t event)
 	if (key == JANOS_INPUT_KEY_ENTER) {
 		print("\n");
 		history_add(state);
-		(void)dispatch(state);
+		bool prompt = dispatch(state);
 		state->line_length = 0;
 		state->line[0] = '\0';
 		state->history_cursor = -1;
-		print("jan> ");
+		if (prompt)
+			print("jan> ");
 	}
 }
 
@@ -478,12 +518,20 @@ static int server(int argc, char **argv)
 	print("SHELL_READY cpu=");
 	print_uint((uint32_t)janos_cpu_get());
 	print("\n");
-	start_calc(&state);
 	print("jan> ");
 	for (;;) {
+		if (poll_calc(&state))
+			continue;
+		if (state.calc_event_pending) {
+			if (!forward_calc_event(&state, state.calc_pending_event)) {
+				(void)sched_yield();
+				continue;
+			}
+			state.calc_event_pending = false;
+		}
 		struct janos_ipc_message message;
 		int32_t result = janos_ipc_receive(state.endpoint, &message,
-			JANOS_IPC_TIMEOUT_INFINITE);
+			state.calc_pid == 0 ? JANOS_IPC_TIMEOUT_INFINITE : 1);
 		if (result < 0) {
 			if (result == -JANOS_EAGAIN || result == -JANOS_ENOMSG)
 				continue;

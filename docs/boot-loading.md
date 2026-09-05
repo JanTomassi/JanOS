@@ -31,15 +31,23 @@ meson compile -C build calc-disk iso
 
 ## GDB Debugging
 
-The `gdb` Meson target starts the disk-backed kernel paused at reset, loads the
-kernel symbols, and connects GDB to QEMU's remote stub on port `1234`:
+Configure a debug build first. Debug mode uses `-O0`, full `-g3` symbols, stable
+frame pointers, and disabled inlining so stepping follows source code closely:
 
 ```sh
-meson compile -C build gdb
+meson setup build-debug --cross-file config/i686-elf.ini --buildtype=debug
+meson compile -C build-debug gdb
 ```
 
-The target prefers `i686-elf-gdb` and falls back to `gdb`. Set breakpoints such
-as `kernel_initialize` or `init_virtual_memory`, then use `continue`.
+The `gdb` Meson target starts the disk-backed kernel paused at reset, loads the
+kernel symbols, enables pending breakpoints and next-line disassembly, and
+connects GDB to QEMU's remote stub on port `1234`. It prefers `i686-elf-gdb`
+and falls back to `gdb`. Set breakpoints such as `kernel_initialize` or
+`init_virtual_memory`, then use `continue`.
+
+Release mode is selected with `--buildtype=release` and uses the standard `-O3`
+optimization level. The GDB target is intentionally available only in debug
+builds.
 
 The ISO and the application disk are separate intentionally. The ISO contains
 the kernel boot artifact; the FAT16 disk contains software loaded after the

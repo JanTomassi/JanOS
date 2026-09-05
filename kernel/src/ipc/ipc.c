@@ -486,7 +486,11 @@ static int32_t ipc_receive(syscall_frame *frame, void *context)
 		if (process_ipc_wait_get_message(sender, &sender_endpoint, &queued) &&
 		    sender_endpoint == frame->ebx) {
 			if (deadline_expired(process_ipc_wait_deadline(sender))) {
-				(void)process_ipc_wait_complete(sender, -IPC_EAGAIN, nullptr);
+				bool detached = process_wait_detach(sender, &endpoint->senders);
+				bool completed = detached &&
+					process_ipc_wait_complete(sender, -IPC_EAGAIN, nullptr);
+				if (completed && process_set_state(sender, PROCESS_READY))
+					scheduler_process_ready(sender);
 				return (int32_t)message.header.request_id;
 			}
 			uint32_t enqueue_flags = spin_lock_irqsave(&ipc_lock);
@@ -751,8 +755,11 @@ void ipc_tick(void)
 			}
 			if (expired == nullptr)
 				break;
-			(void)wait_queue_remove(&endpoint->receivers, expired);
-			(void)process_ipc_wait_complete(expired, -IPC_EAGAIN, nullptr);
+			if (!process_wait_detach(expired, &endpoint->receivers))
+				continue;
+			if (process_ipc_wait_complete(expired, -IPC_EAGAIN, nullptr) &&
+				process_set_state(expired, PROCESS_READY))
+				scheduler_process_ready(expired);
 		}
 		for (;;) {
 			struct process *expired = nullptr;
@@ -768,8 +775,28 @@ void ipc_tick(void)
 			for (size_t p = 0; p < IPC_PENDING_LIMIT; ++p)
 				if (endpoint->pending[p].used && endpoint->pending[p].process == expired)
 					endpoint->pending[p].used = false;
-			(void)wait_queue_remove(&endpoint->replies, expired);
-			(void)process_ipc_wait_complete(expired, -IPC_EAGAIN, nullptr);
+			if (!process_wait_detach(expired, &endpoint->replies))
+				continue;
+			if (process_ipc_wait_complete(expired, -IPC_EAGAIN, nullptr) &&
+				process_set_state(expired, PROCESS_READY))
+				scheduler_process_ready(expired);
+		}
+		for (;;) {
+			struct process *expired = nullptr;
+			list_for_each(&endpoint->senders.waiters) {
+				struct process *candidate = process_from_wait_link(it);
+				if (deadline_expired(process_ipc_wait_deadline(candidate))) {
+					expired = candidate;
+					break;
+				}
+			}
+			if (expired == nullptr)
+				break;
+			if (!process_wait_detach(expired, &endpoint->senders))
+				continue;
+			if (process_ipc_wait_complete(expired, -IPC_EAGAIN, nullptr) &&
+				process_set_state(expired, PROCESS_READY))
+				scheduler_process_ready(expired);
 		}
 	}
 	spin_unlock_irqrestore(&ipc_lock, flags);

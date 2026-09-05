@@ -77,23 +77,71 @@ send_command() {
 	exit 1
 }
 
+start_calc() {
+	send_keys c a l c ret | nc -q 0 -U "$monitor" >/dev/null
+	for _ in $(seq 1 30); do
+		if grep -q 'calc> ' "$log"; then
+			return 0
+		fi
+		sleep 1
+	done
+	cat "$log"
+	exit 1
+}
+
+send_calc_line() {
+	before=$(grep -o 'calc> ' "$log" | wc -l)
+	send_keys "$@" | nc -q 0 -U "$monitor" >/dev/null
+	for _ in $(seq 1 30); do
+		after=$(grep -o 'calc> ' "$log" | wc -l)
+		if [ "$after" -gt "$before" ]; then
+			return 0
+		fi
+		sleep 1
+	done
+	cat "$log"
+	exit 1
+}
+
+leave_calc() {
+	before=$(grep -o 'jan> ' "$log" | wc -l)
+	send_keys e x i t ret | nc -q 0 -U "$monitor" >/dev/null
+	for _ in $(seq 1 30); do
+		after=$(grep -o 'jan> ' "$log" | wc -l)
+		if [ "$after" -gt "$before" ]; then
+			return 0
+		fi
+		sleep 1
+	done
+	cat "$log"
+	exit 1
+}
+
 send_command h e l p ret
 send_command p s ret
 send_command i n f o ret
 send_command f o n t ret
-send_command c a l c ret
+start_calc
+send_calc_line 4 ret
+leave_calc
 send_command c a l c spc 2 ret
+send_command c a l c spc 3 ret
+send_command p s ret
 send_command c l e a r ret
 send_command h e l p ret
 send_command up ret
 
 for _ in $(seq 1 45); do
 	if grep -q 'help ps info font calc clear exit' "$log" && \
-		grep -Eq 'pid=.*name=calc state=blocked' "$log" && \
 		grep -q 'framebuffer=' "$log" && \
 		grep -q 'font size=' "$log" && \
-		grep -q 'calc started via IPC' "$log" && \
+		[ "$(grep -c 'calc started via IPC' "$log")" -ge 3 ] && \
+		grep -q 'calc> ' "$log" && \
+		grep -Eq '^4[[:space:]]*$' "$log" && \
 		grep -Eq '^2[[:space:]]*$' "$log" && \
+		grep -Eq '^3[[:space:]]*$' "$log" && \
+		! grep -Eq 'name=calc state=(blocked|zombie)' "$log" && \
+		! grep -Eq 'name=fbclient state=zombie' "$log" && \
 		! grep -q 'clear: framebuffer service unavailable' "$log" && \
 		[ "$(grep -c 'help ps info font calc clear exit' "$log")" -ge 2 ]; then
 		exit 0

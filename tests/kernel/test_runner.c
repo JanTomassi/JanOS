@@ -347,6 +347,52 @@ fail:
 	return false;
 }
 
+static bool run_process_wait_self_test(void)
+{
+	struct process *parent = process_create(nullptr);
+	struct process *child = parent == nullptr ? nullptr : process_create(parent);
+	void *status_mapping = nullptr;
+	bool child_reaped = false;
+	if (parent == nullptr || child == nullptr)
+		goto fail;
+	if (!address_space_map(process_address_space(parent), PAGE_SIZE,
+		VMM_ENTRY_USER_SUPER_BIT | VMM_ENTRY_READ_WRITE_BIT, &status_mapping))
+		goto fail;
+	process_pid_t pid = process_pid(child);
+	if (process_wait_child(parent, pid, (uintptr_t)status_mapping,
+		JANOS_PROCESS_WAIT_NOHANG) != 0)
+		goto fail;
+	process_exit(child, 17);
+	if (process_get_state(child) != PROCESS_ZOMBIE || process_exit_status(child) != 17)
+		goto fail;
+	if (process_wait_child(parent, pid, (uintptr_t)status_mapping,
+		JANOS_PROCESS_WAIT_NOHANG) != (int32_t)pid)
+		goto fail;
+	child = nullptr;
+	child_reaped = true;
+	int32_t status = 0;
+	if (!address_space_copy_from(process_address_space(parent), &status,
+		(uintptr_t)status_mapping, sizeof(status)) || status != 17)
+		goto fail;
+	if (!address_space_unmap(process_address_space(parent), status_mapping))
+		goto fail;
+	status_mapping = nullptr;
+	if (process_find_child(parent, pid) != nullptr || process_child_count(parent) != 0) {
+		process_destroy(parent);
+		return false;
+	}
+	process_destroy(parent);
+	return true;
+
+fail:
+	if (status_mapping != nullptr)
+		(void)address_space_unmap(process_address_space(parent), status_mapping);
+	if (!child_reaped)
+		process_destroy(child);
+	process_destroy(parent);
+	return false;
+}
+
 static int32_t selftest_syscall_handler(syscall_frame *frame, void *context)
 {
 	uint32_t *calls = context;
@@ -380,7 +426,7 @@ static void run_kernel_self_tests(void)
 	kernel_test_marker("SYSCALL", syscall_ok);
 	if (!syscall_ok)
 		kernel_test_finish(1);
-	bool process_ok = run_process_self_test();
+	bool process_ok = run_process_self_test() && run_process_wait_self_test();
 	kernel_test_marker("PROCESS", process_ok);
 	if (!process_ok)
 		kernel_test_finish(1);

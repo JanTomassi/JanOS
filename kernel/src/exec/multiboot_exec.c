@@ -298,15 +298,11 @@ bool process_exec_block_device_calc(const struct block_device *device,
 	return process_exec_block_device_app(device, "calc", 1, argv, result);
 }
 
-bool process_load_block_device_app_for_parent(const struct block_device *device,
-	                                           const char *name,
-	                                           struct process *parent,
-	                                           struct process_exec_result *result)
+static bool load_block_device_app(const struct block_device *device,
+	                               const char *name, struct process *process,
+	                               struct process_exec_result *result)
 {
-	if (device == nullptr || name == nullptr || result == nullptr)
-		return false;
-	struct process *process = process_create(parent);
-	if (process == nullptr)
+	if (device == nullptr || name == nullptr || process == nullptr || result == nullptr)
 		return false;
 	struct load_context load_context = {
 		.space = process_address_space(process),
@@ -327,6 +323,32 @@ bool process_load_block_device_app_for_parent(const struct block_device *device,
 	result->process = process;
 	result->entry = load_result.entry;
 	return true;
+}
+
+bool process_load_block_device_app_for_parent(const struct block_device *device,
+	                                           const char *name,
+	                                           struct process *parent,
+	                                           struct process_exec_result *result)
+{
+	if (device == nullptr || name == nullptr || result == nullptr)
+		return false;
+	struct process *process = process_create(parent);
+	if (process == nullptr)
+		return false;
+	return load_block_device_app(device, name, process, result);
+}
+
+bool process_load_block_device_app_for_parent_pid(const struct block_device *device,
+	                                               const char *name,
+	                                               uint32_t parent_pid,
+	                                               struct process_exec_result *result)
+{
+	if (device == nullptr || name == nullptr || result == nullptr || parent_pid == 0)
+		return false;
+	struct process *process = process_create_child(parent_pid);
+	if (process == nullptr)
+		return false;
+	return load_block_device_app(device, name, process, result);
 }
 
 bool process_load_block_device_app(const struct block_device *device,

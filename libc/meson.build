@@ -33,7 +33,8 @@ crt0 = custom_target(
   'crt0',
   input: 'crt/i386/crt0.s',
   output: 'crt0.o',
-  command: [nasm, '-f', 'elf32', '-g', '@INPUT@', '-o', '@OUTPUT@'],
+  command: [nasm, '-f', 'elf32'] + nasm_debug_args +
+    ['@INPUT@', '-o', '@OUTPUT@'],
   install: true,
   install_dir: get_option('libdir') / 'janos',
 )

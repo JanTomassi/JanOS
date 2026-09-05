@@ -9,6 +9,7 @@
 _Static_assert(JANOS_SYS_EXIT == 1, "exit syscall number changed");
 _Static_assert(JANOS_SYS_READ == 3, "read syscall number changed");
 _Static_assert(JANOS_SYS_WRITE == 4, "write syscall number changed");
+_Static_assert(JANOS_SYS_PROCESS_WAIT == 18, "process wait syscall number changed");
 
 static unsigned char *read_file(const char *path, size_t *size)
 {

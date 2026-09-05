@@ -4,6 +4,7 @@
 #include <kernel/display.h>
 #include <kernel/process/address_space.h>
 #include <kernel/process/stack.h>
+#include <kernel/process/process_service.h>
 #include <kernel/process/wait_queue.h>
 #include <kernel/framebuffer.h>
 #include <kernel/spinlock.h>
@@ -34,6 +35,8 @@ struct process {
 	struct wait_queue *waiting_on;
 	struct list_head run_link;
 	bool queued;
+	/* Published only after the reaper has stopped using the process. */
+	bool exit_complete;
 	uint8_t owner_cpu;
 	uint8_t cpu_affinity;
 	char name[JANOS_PROCESS_NAME_SIZE];
@@ -46,9 +49,10 @@ static process_pid_t next_pid = 1;
 static bool initialized;
 static allocator_t allocator;
 
-/* This stack is never owned by a process and survives every process exit. */
-static uint8_t reaper_stack[PROCESS_DEFAULT_KERNEL_STACK_SIZE]
-	__attribute__((aligned(16)));
+/* One stack per scheduler CPU prevents concurrent exits from clobbering it. */
+#define PROCESS_REAPER_CPU_LIMIT 16
+static uint8_t reaper_stacks[PROCESS_REAPER_CPU_LIMIT]
+	[PROCESS_DEFAULT_KERNEL_STACK_SIZE] __attribute__((aligned(16)));
 
 static void ensure_initialized(void)
 {
@@ -138,6 +142,27 @@ fail:
 	return nullptr;
 }
 
+struct process *process_create_child(process_pid_t parent_pid)
+{
+	if (parent_pid == 0)
+		return nullptr;
+	struct process *process = process_create(nullptr);
+	if (process == nullptr)
+		return nullptr;
+	spin_lock(&process_lock);
+	struct process *parent = find_pid_locked(parent_pid);
+	if (parent == nullptr || parent->state == PROCESS_ZOMBIE ||
+		parent->state == PROCESS_DEAD) {
+		spin_unlock(&process_lock);
+		process_destroy(process);
+		return nullptr;
+	}
+	process->parent = parent;
+	list_add(&process->sibling, &parent->children);
+	spin_unlock(&process_lock);
+	return process;
+}
+
 bool process_start(struct process *process, uintptr_t entry, int argc,
                    const char *const argv[])
 {
@@ -210,13 +235,28 @@ bool process_initial_context(const struct process *process,
 	return true;
 }
 
+static void process_release(struct process *process)
+{
+	if (process == nullptr)
+		return;
+	process_service_process_exiting(process);
+	framebuffer_capability_revoke_process(process);
+	ipc_process_cleanup(process);
+	process_stack_destroy(process->user_stack);
+	process_stack_destroy(process->kernel_stack);
+	address_space_destroy(process->space);
+	allocator.free((fatptr_t){ .ptr = process, .len = sizeof(*process) });
+}
+
 void process_destroy(struct process *process)
 {
 	if (process == nullptr)
 		return;
 	ensure_initialized();
 	spin_lock(&process_lock);
-	if (process == process_current() || process->state == PROCESS_DEAD ||
+	if (process == process_current() ||
+	    (process->state != PROCESS_NEW &&
+	     (process->state != PROCESS_ZOMBIE || !process->exit_complete)) ||
 	    process->children.next != &process->children ||
 	    process->waiting_on != nullptr) {
 		spin_unlock(&process_lock);
@@ -227,11 +267,7 @@ void process_destroy(struct process *process)
 	if (process->parent != nullptr)
 		list_rm(&process->sibling);
 	spin_unlock(&process_lock);
-	framebuffer_capability_revoke_process(process);
-	process_stack_destroy(process->user_stack);
-	process_stack_destroy(process->kernel_stack);
-	address_space_destroy(process->space);
-	allocator.free((fatptr_t){ .ptr = process, .len = sizeof(*process) });
+	process_release(process);
 }
 
 process_pid_t process_pid(const struct process *process)
@@ -314,20 +350,57 @@ int process_exit_status(const struct process *process)
 
 static void process_reap(struct process *process)
 {
-	process_stack_destroy(process->user_stack);
-	process_stack_destroy(process->kernel_stack);
-	address_space_destroy(process->space);
+	struct process_stack *user_stack;
+	struct process_stack *kernel_stack;
+	struct address_space *space;
+	uint32_t flags = spin_lock_irqsave(&process_lock);
+	user_stack = process->user_stack;
+	kernel_stack = process->kernel_stack;
+	space = process->space;
+	/* Hide teardown targets before destroying them outside the lock. */
 	process->user_stack = nullptr;
 	process->kernel_stack = nullptr;
 	process->space = nullptr;
 	process->user_entry = 0;
 	process->user_stack_pointer = nullptr;
+	spin_unlock_irqrestore(&process_lock, flags);
+	process_stack_destroy(user_stack);
+	process_stack_destroy(kernel_stack);
+	address_space_destroy(space);
+}
+
+static bool process_autoreap(struct process *process)
+{
+	if (process == nullptr)
+		return false;
+	bool autoreaped = false;
+	uint32_t flags = spin_lock_irqsave(&process_lock);
+	if (process->parent == nullptr &&
+		process->state == PROCESS_ZOMBIE &&
+		process->children.next == &process->children) {
+		process->state = PROCESS_DEAD;
+		list_rm(&process->all);
+		autoreaped = true;
+	}
+	spin_unlock_irqrestore(&process_lock, flags);
+	return autoreaped;
+}
+
+static void process_publish_exit_complete(struct process *process)
+{
+	uint32_t flags = spin_lock_irqsave(&process_lock);
+	process->exit_complete = true;
+	spin_unlock_irqrestore(&process_lock, flags);
 }
 
 [[noreturn]] static void process_reaper_cleanup(void *argument)
 {
 	struct process *process = argument;
 	process_reap(process);
+	if (process_autoreap(process))
+		process_release(process);
+	else
+		process_publish_exit_complete(process);
 	/* An exiting process may be the only runnable process on this CPU. */
 	scheduler_yield(nullptr);
 	for (;;)
@@ -343,7 +416,7 @@ void process_exit(struct process *process, int status)
 		return;
 	}
 	spin_lock(&process_lock);
-	if (process->state == PROCESS_DEAD || process->state == PROCESS_ZOMBIE) {
+	if (process->state != PROCESS_NEW) {
 		spin_unlock(&process_lock);
 		return;
 	}
@@ -354,9 +427,14 @@ void process_exit(struct process *process, int status)
 	process->status = status;
 	process->state = PROCESS_ZOMBIE;
 	spin_unlock(&process_lock);
+	process_service_process_exiting(process);
 	framebuffer_capability_revoke_process(process);
 	ipc_process_cleanup(process);
 	process_reap(process);
+	if (process_autoreap(process))
+		process_release(process);
+	else
+		process_publish_exit_complete(process);
 }
 
 [[noreturn]] void process_exit_current(int status)
@@ -385,15 +463,21 @@ void process_exit(struct process *process, int status)
 	}
 	cpu->current_process = nullptr;
 	spin_unlock(&process_lock);
+	process_service_process_exiting(process);
 	framebuffer_capability_revoke_process(process);
 	ipc_process_cleanup(process);
 
 	const fatptr_t *kernel_page_directory = vmm_kernel_page_directory();
+	uint8_t cpu_index = smp_current_cpu_index();
+	if (cpu_index >= PROCESS_REAPER_CPU_LIMIT)
+		cpu_index = 0;
+	uintptr_t reaper_stack_top =
+		(uintptr_t)reaper_stacks[cpu_index] + PROCESS_DEFAULT_KERNEL_STACK_SIZE;
 	if (kernel_page_directory == nullptr ||
 		!vmm_page_directory_activate(kernel_page_directory) ||
-		!i386_tss_set_current_kernel_stack((uintptr_t)reaper_stack + sizeof(reaper_stack)))
+		!i386_tss_set_current_kernel_stack(reaper_stack_top))
 		panic("Unable to enter process reaper\n");
-	i386_reaper_enter((uintptr_t)reaper_stack + sizeof(reaper_stack),
+	i386_reaper_enter(reaper_stack_top,
 	                  process_reaper_cleanup, process);
 }
 
@@ -490,6 +574,48 @@ size_t process_child_count(const struct process *parent)
 		++count;
 	spin_unlock(&process_lock);
 	return count;
+}
+
+int32_t process_wait_child(struct process *parent, process_pid_t pid,
+                           uintptr_t status_address, uint32_t options)
+{
+	if (parent == nullptr || pid == 0 ||
+	    (options & ~JANOS_PROCESS_WAIT_NOHANG) != 0)
+		return -JANOS_EINVAL;
+	ensure_initialized();
+	struct process *child;
+	int32_t status;
+	struct process *reaped = nullptr;
+	uint32_t flags = spin_lock_irqsave(&process_lock);
+	child = find_pid_locked(pid);
+	if (child == nullptr || child->parent != parent) {
+		spin_unlock_irqrestore(&process_lock, flags);
+		return -JANOS_ESRCH;
+	}
+	if (child->state == PROCESS_ZOMBIE && child->exit_complete &&
+	    child->children.next == &child->children) {
+		status = child->status;
+		if (status_address != 0 &&
+		    !address_space_copy_to(parent->space, status_address, &status,
+		                           sizeof(status))) {
+			spin_unlock_irqrestore(&process_lock, flags);
+			return -SYSCALL_EFAULT;
+		}
+		child->state = PROCESS_DEAD;
+		list_rm(&child->all);
+		list_rm(&child->sibling);
+		reaped = child;
+		spin_unlock_irqrestore(&process_lock, flags);
+		process_release(reaped);
+		return (int32_t)pid;
+	}
+	if ((options & JANOS_PROCESS_WAIT_NOHANG) != 0) {
+		spin_unlock_irqrestore(&process_lock, flags);
+		return 0;
+	}
+	spin_unlock_irqrestore(&process_lock, flags);
+	/* The shell polls so it can continue forwarding input events. */
+	return -JANOS_EAGAIN;
 }
 
 bool process_block(struct process *process, struct wait_queue *queue)
